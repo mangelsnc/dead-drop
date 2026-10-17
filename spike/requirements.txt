@@ -1,0 +1,18 @@
+# DeadDrop spike dependencies
+# Python 3.11+ — install with: pip install -r requirements.txt
+
+# libsodium bindings — real E2E crypto (X25519, XSalsa20-Poly1305, Ed25519)
+pynacl>=1.5.0
+
+# QR code generation (emitter side)
+qrcode>=7.4
+
+# Image manipulation (QR frame rendering + a PIL-based decoder fallback)
+pillow>=10.0
+
+# QR decoding from camera frames (receiver side).
+# On desktop Linux: apt install libzbar0  (or use the pure-python fallback)
+# On macOS:         brew install zbar
+# The spike simulator does NOT need pyzbar (it feeds frames in-memory),
+# but the real camera receiver does.
+pyzbar>=0.1.9 ; sys_platform != "win32"
