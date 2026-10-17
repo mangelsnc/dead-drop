@@ -1,0 +1,33 @@
+name: Security vulnerability
+description: Report a security issue (private)
+title: "[Security]: "
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **If you believe this is a critical vulnerability, please also email the maintainer directly.**
+
+        This issue will be visible publicly. Do not include exploit details until a fix is available.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What is the vulnerability? (No exploit code, please.)
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What could an attacker achieve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested mitigation
+      description: If you have ideas for a fix.
