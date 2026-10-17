@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Spike outputs (regenerable)
+# NOTE: benchmark_results.json IS committed — it is a deliverable of the spike
+spike/out_frames/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Flutter / Dart (future phases)
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+*.iml
