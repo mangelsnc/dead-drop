@@ -149,6 +149,9 @@ jobs:
             deaddrop-macos-arm64.tar.gz.sha256
 
   release:
+    # Runs only on version tags (pushed by release.yml). Publishes the GitHub
+    # Release with the changelog (stored in the annotated tag message) as the
+    # body, plus the platform artifacts and SHA256SUMS.txt.
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-22.04
@@ -156,6 +159,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -169,9 +175,22 @@ jobs:
           cd ..
           cat SHA256SUMS.txt
 
+      - name: Extract changelog from tag
+        run: |
+          # release.yml stores the changelog in the annotated tag message.
+          # Fall back to auto-generated notes if the tag has no annotation.
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --tags --force
+          git tag -l --format='%(contents)' "$TAG" > RELEASE_BODY.md
+          if [ ! -s RELEASE_BODY.md ]; then
+            echo "# DeadDrop $TAG" > RELEASE_BODY.md
+          fi
+          cat RELEASE_BODY.md
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_BODY.md
           files: |
             artifacts/deaddrop-linux-x64/deaddrop-linux-x64.tar.gz
             artifacts/deaddrop-linux-x64/deaddrop-linux-x64.tar.gz.sha256
@@ -180,6 +199,6 @@ jobs:
             artifacts/deaddrop-macos-arm64/deaddrop-macos-arm64.tar.gz
             artifacts/deaddrop-macos-arm64/deaddrop-macos-arm64.tar.gz.sha256
             SHA256SUMS.txt
-          generate_release_notes: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
