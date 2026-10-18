@@ -6,9 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-import '../../core/crypto/crypto.dart';
-import '../../core/protocol/constants.dart';
-import '../../core/receiver.dart';
+import '../../src/crypto.dart';
+import '../../src/receiver.dart';
 import '../../main.dart';
 
 /// State for the receive flow.
@@ -97,52 +96,56 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     if (state.receiverKeypair == null) return;
 
     // Check if this is a session bootstrap (179 bytes, magic "DD")
-    if (data.length == sessionHeaderSize &&
-        data[0] == magicByte0 &&
-        data[1] == magicByte1) {
+    if (data.length == SessionHeader.packedSize &&
+        data[0] == magic[0] &&
+        data[1] == magic[1]) {
       await _processBootstrap(data);
       return;
     }
 
     // Otherwise it's a data frame
     if (state.receiver != null) {
-      await _processDataFrame(data);
+      _processDataFrame(data);
     }
   }
 
   Future<void> _processBootstrap(Uint8List data) async {
     try {
-      final receiver = await Receiver.acceptSession(
+      final receiver = Receiver(
         sodium: _sodium,
-        bootstrapPayload: data,
-        receiverKeypair: state.receiverKeypair!,
+        keypair: state.receiverKeypair!,
       );
+      await receiver.startSession(data);
       state = state.copyWith(
         receiver: receiver,
-        totalChunks: receiver.chunkCount,
+        totalChunks: receiver.session!.header.chunkCount,
         error: null,
       );
-    } on DeadDropCryptoException catch (e) {
+    } on DeadDropCryptoError catch (e) {
       state = state.copyWith(error: 'Session rejected: ${e.message}');
     }
   }
 
-  Future<void> _processDataFrame(Uint8List data) async {
+  void _processDataFrame(Uint8List data) {
     final receiver = state.receiver!;
-    final result = await receiver.processFrame(_sodium, data);
-    if (result == null) return; // duplicate or invalid frame
+    final advanced = receiver.feedFrame(data);
+    if (!advanced) return; // duplicate or invalid frame
 
     state = state.copyWith(
       framesReceived: state.framesReceived + 1,
-      chunksDecoded: receiver.decodedChunkCount,
+      chunksDecoded: receiver.decoder?.decoded.length ?? 0,
     );
 
-    if (receiver.isComplete) {
-      final fileBytes = await receiver.assembleAndVerify(_sodium);
-      state = state.copyWith(
-        fileBytes: fileBytes,
-        isScanning: false,
-      );
+    if (receiver.done) {
+      try {
+        final fileBytes = receiver.finish();
+        state = state.copyWith(
+          fileBytes: fileBytes,
+          isScanning: false,
+        );
+      } catch (e) {
+        state = state.copyWith(error: 'Integrity check failed: $e');
+      }
     }
   }
 
@@ -237,7 +240,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                           ),
                           child: QrImageView(
                             data: _bytesToHex(
-                                state.receiverKeypair!.publicKey),
+                                state.receiverKeypair!.publicKey.bytes),
                             version: QrVersions.auto,
                             size: 200,
                             backgroundColor: Colors.white,
