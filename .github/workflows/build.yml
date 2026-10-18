@@ -1,0 +1,185 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  FLUTTER_VERSION: '3.24.5'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: Test
+        working-directory: app
+        run: flutter test
+
+      - name: Build release
+        working-directory: app
+        run: flutter build linux --release
+
+      - name: Package
+        run: |
+          cd app/build/linux/x64/release/bundle
+          tar czf ../../../../../deaddrop-linux-x64.tar.gz .
+          cd ../../../../../
+          sha256sum deaddrop-linux-x64.tar.gz > deaddrop-linux-x64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deaddrop-linux-x64
+          path: |
+            deaddrop-linux-x64.tar.gz
+            deaddrop-linux-x64.tar.gz.sha256
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: Test
+        working-directory: app
+        run: flutter test
+
+      - name: Build release
+        working-directory: app
+        run: flutter build windows --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath deaddrop-windows-x64.zip
+          $hash = (Get-FileHash deaddrop-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  deaddrop-windows-x64.zip" | Out-File -Encoding ascii deaddrop-windows-x64.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deaddrop-windows-x64
+          path: |
+            deaddrop-windows-x64.zip
+            deaddrop-windows-x64.zip.sha256
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: Test
+        working-directory: app
+        run: flutter test
+
+      - name: Build release
+        working-directory: app
+        run: flutter build macos --release
+
+      - name: Package
+        run: |
+          cd app/build/macos/Build/Products/Release
+          tar czf ../../../../../../deaddrop-macos-arm64.tar.gz dead_drop.app
+          cd ../../../../../../
+          shasum -a 256 deaddrop-macos-arm64.tar.gz > deaddrop-macos-arm64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deaddrop-macos-arm64
+          path: |
+            deaddrop-macos-arm64.tar.gz
+            deaddrop-macos-arm64.tar.gz.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create SHA256SUMS
+        run: |
+          cd artifacts
+          find . -name '*.sha256' -exec cat {} \; > ../SHA256SUMS.txt
+          cd ..
+          cat SHA256SUMS.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/deaddrop-linux-x64/deaddrop-linux-x64.tar.gz
+            artifacts/deaddrop-linux-x64/deaddrop-linux-x64.tar.gz.sha256
+            artifacts/deaddrop-windows-x64/deaddrop-windows-x64.zip
+            artifacts/deaddrop-windows-x64/deaddrop-windows-x64.zip.sha256
+            artifacts/deaddrop-macos-arm64/deaddrop-macos-arm64.tar.gz
+            artifacts/deaddrop-macos-arm64/deaddrop-macos-arm64.tar.gz.sha256
+            SHA256SUMS.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
