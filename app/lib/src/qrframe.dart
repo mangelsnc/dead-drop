@@ -1,0 +1,145 @@
+/// qrframe.dart — QR frame packing, rendering and parsing for DeadDrop.
+///
+/// Ported 1:1 from spike/src/qrframe.py.
+///
+/// Frame layout (binary, big-endian):
+///     MAGIC(2)      "DD"
+///     version(1)    protocol version
+///     file_id(8)    random transfer id (lets receiver ignore other sessions)
+///     frame_seq(4)  monotonically increasing frame number
+///     seed(4)       PRNG seed for this frame's chunk selection
+///     degree(2)     number of chunk ids
+///     chunk_ids     degree × 2 bytes each
+///     nonce(24)     XSalsa20-Poly1305 nonce for the payload
+///     payload(N)    encrypted+tagged XOR chunk (chunk_size + 16 bytes)
+library;
+
+import 'dart:typed_data';
+
+import 'crypto.dart';
+
+// QR byte-mode capacity per version at each EC level (versions 1..40).
+// Source: ISO/IEC 18004 tables.
+const qrCapacity = {
+  10: {'L': 346, 'M': 274, 'Q': 216, 'H': 154},
+  15: {'L': 523, 'M': 415, 'Q': 295, 'H': 223},
+  20: {'L': 861, 'M': 669, 'Q': 485, 'H': 367},
+  25: {'L': 1279, 'M': 1003, 'Q': 733, 'H': 559},
+  30: {'L': 1735, 'M': 1371, 'Q': 1007, 'H': 775},
+  35: {'L': 2303, 'M': 1815, 'Q': 1343, 'H': 1039},
+  40: {'L': 2953, 'M': 2331, 'Q': 1663, 'H': 1273},
+};
+
+const frameHeaderSize = 2 + 1 + 8 + 4 + 4 + 2; // magic, ver, file_id, seq, seed, degree
+
+class Frame {
+  final Uint8List fileId;
+  final int seq;
+  final int seed;
+  final List<int> chunkIds;
+  final Uint8List nonce;
+  final Uint8List payload;
+
+  Frame({
+    required this.fileId,
+    required this.seq,
+    required this.seed,
+    required this.chunkIds,
+    required this.nonce,
+    required this.payload,
+  });
+
+  Uint8List pack() {
+    final degree = chunkIds.length;
+    final totalSize = frameHeaderSize + degree * 2 + nonceSize + payload.length;
+    final out = ByteData(totalSize);
+    var offset = 0;
+
+    // MAGIC(2)
+    out.setUint8(offset++, magic[0]);
+    out.setUint8(offset++, magic[1]);
+    // version(1)
+    out.setUint8(offset++, version);
+    // file_id(8)
+    out.buffer.asUint8List().setRange(offset, offset + 8, fileId);
+    offset += 8;
+    // frame_seq(4)
+    out.setUint32(offset, seq, Endian.big);
+    offset += 4;
+    // seed(4)
+    out.setUint32(offset, seed, Endian.big);
+    offset += 4;
+    // degree(2)
+    out.setUint16(offset, degree, Endian.big);
+    offset += 2;
+    // chunk_ids (degree × 2 bytes)
+    for (final cid in chunkIds) {
+      out.setUint16(offset, cid, Endian.big);
+      offset += 2;
+    }
+    // nonce(24)
+    out.buffer.asUint8List().setRange(offset, offset + nonceSize, nonce);
+    offset += nonceSize;
+    // payload(N)
+    out.buffer.asUint8List().setRange(offset, offset + payload.length, payload);
+
+    return out.buffer.asUint8List();
+  }
+
+  static Frame unpack(Uint8List data) {
+    if (data.length < frameHeaderSize) {
+      throw ArgumentError('Frame too short');
+    }
+
+    final input = ByteData.sublistView(data);
+    var offset = 0;
+
+    // MAGIC(2)
+    if (input.getUint8(offset++) != magic[0] ||
+        input.getUint8(offset++) != magic[1]) {
+      throw ArgumentError('Not a DeadDrop frame');
+    }
+    // version(1)
+    if (input.getUint8(offset++) != version) {
+      throw ArgumentError('Unsupported version');
+    }
+    // file_id(8)
+    final fileId = data.sublist(offset, offset + 8);
+    offset += 8;
+    // frame_seq(4)
+    final seq = input.getUint32(offset, Endian.big);
+    offset += 4;
+    // seed(4)
+    final seed = input.getUint32(offset, Endian.big);
+    offset += 4;
+    // degree(2)
+    final degree = input.getUint16(offset, Endian.big);
+    offset += 2;
+    // chunk_ids
+    final chunkIds = <int>[];
+    for (var i = 0; i < degree; i++) {
+      chunkIds.add(input.getUint16(offset, Endian.big));
+      offset += 2;
+    }
+    // nonce(24)
+    final nonce = data.sublist(offset, offset + nonceSize);
+    offset += nonceSize;
+    // payload(N)
+    final payload = data.sublist(offset);
+
+    return Frame(
+      fileId: fileId,
+      seq: seq,
+      seed: seed,
+      chunkIds: chunkIds,
+      nonce: nonce,
+      payload: payload,
+    );
+  }
+}
+
+int qrCapacityAt(int version, String ec) {
+  final versions = qrCapacity.keys.toList()..sort();
+  final v = versions.lastWhere((x) => x <= version, orElse: () => versions.first);
+  return qrCapacity[v]![ec]!;
+}
