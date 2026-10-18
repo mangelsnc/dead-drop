@@ -9,11 +9,14 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
-import 'package:dead_drop/src/crypto.dart';
-import 'package:dead_drop/src/emitter.dart';
-import 'package:dead_drop/src/fountain.dart';
-import 'package:dead_drop/src/qrframe.dart';
-import 'package:dead_drop/src/receiver.dart';
+import 'package:dead_drop/core/crypto/crypto.dart';
+import 'package:dead_drop/core/emitter.dart';
+import 'package:dead_drop/core/fountain/degree_distribution.dart';
+import 'package:dead_drop/core/fountain/lt_decoder.dart';
+import 'package:dead_drop/core/fountain/lt_encoder.dart';
+import 'package:dead_drop/core/protocol/data_frame.dart';
+import 'package:dead_drop/core/protocol/session_header.dart';
+import 'package:dead_drop/core/receiver.dart';
 
 void main() {
   late Sodium sodium;
@@ -40,7 +43,7 @@ void main() {
       final receiverKp = await ReceiverKeypair.generate(sodium);
       final plaintext = Uint8List.fromList(List.generate(1024, (i) => i % 256));
 
-      final (_, header) = await Session.open(
+      final (_, header) = await openSession(
         sodium,
         plaintext,
         512,
@@ -63,7 +66,7 @@ void main() {
       final receiverKp = await ReceiverKeypair.generate(sodium);
       final plaintext = Uint8List.fromList(List.generate(1024, (i) => i % 256));
 
-      final (session, header) = await Session.open(
+      final (session, header) = await openSession(
         sodium,
         plaintext,
         512,
@@ -73,7 +76,7 @@ void main() {
 
       final (nonce, ct) = session.encryptChunk(sodium, 0);
 
-      final receiverSession = await ReceiverSession.accept(
+      final receiverSession = await acceptSession(
         sodium,
         header.pack(),
         receiverKp,
@@ -90,7 +93,7 @@ void main() {
       final wrongKp = await ReceiverKeypair.generate(sodium);
       final plaintext = Uint8List.fromList(List.generate(512, (i) => i % 256));
 
-      final (_, header) = await Session.open(
+      final (_, header) = await openSession(
         sodium,
         plaintext,
         512,
@@ -99,7 +102,7 @@ void main() {
       );
 
       expect(
-        () => ReceiverSession.accept(sodium, header.pack(), wrongKp),
+        () => acceptSession(sodium, header.pack(), wrongKp),
         throwsA(isA<DeadDropCryptoError>()),
       );
     });
@@ -111,8 +114,8 @@ void main() {
         10,
         (i) => Uint8List.fromList(List.generate(64, (j) => (i * 64 + j) % 256)),
       );
-      final encoder = LTEncoder(chunks);
-      final decoder = LTDecoder(k: 10, chunkSize: 64);
+      final encoder = LtEncoder(chunks);
+      final decoder = LtDecoder(k: 10, chunkSize: 64);
 
       var framesNeeded = 0;
       for (var seq = 0; seq < 100 && !decoder.done; seq++) {
@@ -134,7 +137,7 @@ void main() {
 
   group('Frame', () {
     test('Frame pack/unpack roundtrip', () {
-      final frame = Frame(
+      final frame = DataFrame(
         fileId: Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]),
         seq: 42,
         seed: 1337,
@@ -144,7 +147,7 @@ void main() {
       );
 
       final packed = frame.pack();
-      final unpacked = Frame.unpack(packed);
+      final unpacked = DataFrame.unpack(packed);
 
       expect(unpacked.seq, 42);
       expect(unpacked.seed, 1337);
@@ -155,7 +158,7 @@ void main() {
 
     test('Frame rejects bad magic', () {
       final bad = Uint8List.fromList([0x00, 0x00, 0x01, 0x00]);
-      expect(() => Frame.unpack(bad), throwsArgumentError);
+      expect(() => DataFrame.unpack(bad), throwsArgumentError);
     });
   });
 
@@ -175,16 +178,21 @@ void main() {
     test('Transfer tolerates 50% frame loss', () async {
       final plaintext = Uint8List.fromList(List.generate(8192, (i) => i % 256));
       final receiverKp = await ReceiverKeypair.generate(sodium);
-      final emitter = await Emitter.create(sodium, plaintext, receiverKp, chunkSize: 512);
-      final receiver = Receiver(sodium: sodium, keypair: receiverKp);
+      final emitter = await Emitter.create(
+        sodium: sodium,
+        fileBytes: plaintext,
+        receiverPk: receiverKp.publicKey,
+        chunkSize: 512,
+      );
+      final receiver = Receiver(keypair: receiverKp);
 
-      await receiver.startSession(emitter.bootstrapQrPayload());
+      await receiver.startSession(sodium, emitter.bootstrapQrPayload());
 
       // Drop every other frame
       for (var i = 0; i < 200 && !receiver.done; i++) {
-        final frame = emitter.nextFrame();
+        final frame = await emitter.nextFrame(sodium);
         if (i % 2 == 0) {
-          receiver.feedFrame(frame.pack());
+          await receiver.feedFrame(sodium, frame.pack());
         }
       }
 
@@ -198,15 +206,20 @@ void main() {
 Future<void> _testTransfer(Sodium sodium, int size, int chunkSize) async {
   final plaintext = Uint8List.fromList(List.generate(size, (i) => i % 256));
   final receiverKp = await ReceiverKeypair.generate(sodium);
-  final emitter = await Emitter.create(sodium, plaintext, receiverKp, chunkSize: chunkSize);
-  final receiver = Receiver(sodium: sodium, keypair: receiverKp);
+  final emitter = await Emitter.create(
+    sodium: sodium,
+    fileBytes: plaintext,
+    receiverPk: receiverKp.publicKey,
+    chunkSize: chunkSize,
+  );
+  final receiver = Receiver(keypair: receiverKp);
 
-  await receiver.startSession(emitter.bootstrapQrPayload());
+  await receiver.startSession(sodium, emitter.bootstrapQrPayload());
 
   var frames = 0;
   while (!receiver.done && frames < 10000) {
-    final frame = emitter.nextFrame();
-    receiver.feedFrame(frame.pack());
+    final frame = await emitter.nextFrame(sodium);
+    await receiver.feedFrame(sodium, frame.pack());
     frames++;
   }
 
