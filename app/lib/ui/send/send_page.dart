@@ -6,9 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-import '../../core/crypto/crypto.dart';
-import '../../core/emitter.dart';
-import '../../core/protocol/constants.dart';
+import '../../src/crypto.dart';
+import '../../src/emitter.dart';
+import '../../src/qrframe.dart';
 import '../../main.dart';
 
 /// State for the send flow.
@@ -19,9 +19,9 @@ class SendState {
     this.receiverPk,
     this.emitter,
     this.identity,
-    this.chunkSize = defaultChunkSize,
-    this.ecLevel = defaultEcLevel,
-    this.fps = defaultFps,
+    this.chunkSize = 512,
+    this.ecLevel = 'M',
+    this.fps = 12.0,
     this.isEmitting = false,
     this.framesEmitted = 0,
   });
@@ -107,10 +107,13 @@ class SendNotifier extends StateNotifier<SendState> {
   Future<void> startEmitting() async {
     if (state.fileBytes == null || state.receiverPk == null) return;
     final identity = await Identity.generate(_sodium);
+    // Create a temporary ReceiverKeypair from the raw public key
+    // so we can pass it to Emitter.create
+    final receiverKp = _ReceiverKeypairFromPk(state.receiverPk!);
     final emitter = await Emitter.create(
-      sodium: _sodium,
-      fileBytes: state.fileBytes!,
-      receiverPk: state.receiverPk!,
+      _sodium,
+      state.fileBytes!,
+      receiverKp,
       senderIdentity: identity,
       chunkSize: state.chunkSize,
     );
@@ -138,9 +141,9 @@ class SendNotifier extends StateNotifier<SendState> {
     _startTimer();
   }
 
-  Future<void> _emitFrame() async {
+  void _emitFrame() {
     if (state.emitter == null || !state.isEmitting) return;
-    await state.emitter!.nextFrame(_sodium);
+    state.emitter!.nextFrame();
     state = state.copyWith(framesEmitted: state.framesEmitted + 1);
   }
 
@@ -149,6 +152,20 @@ class SendNotifier extends StateNotifier<SendState> {
     _timer?.cancel();
     super.dispose();
   }
+}
+
+/// Adapter: wraps a raw public key into the ReceiverKeypair interface
+/// that Emitter.create expects. We only need the public key for sending.
+class _ReceiverKeypairFromPk implements ReceiverKeypair {
+  _ReceiverKeypairFromPk(this._pkBytes);
+  final Uint8List _pkBytes;
+
+  @override
+  PublicKey get publicKey => PublicKey(_pkBytes);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('Only publicKey is available');
 }
 
 final sendProvider = StateNotifierProvider<SendNotifier, SendState>((ref) {
@@ -429,7 +446,6 @@ class _QrDisplayState extends ConsumerState<_QrDisplay> {
 
   Future<void> _generateNext() async {
     if (!mounted || !widget.state.isEmitting) return;
-    final sodium = ref.read(sodiumProvider);
     final emitter = widget.state.emitter!;
     if (_showBootstrap) {
       setState(() {
@@ -441,7 +457,7 @@ class _QrDisplayState extends ConsumerState<_QrDisplay> {
         setState(() => _showBootstrap = false);
       }
     } else {
-      final frame = await emitter.nextFrame(sodium);
+      final frame = emitter.nextFrame();
       if (mounted) {
         setState(() {
           _currentFrameBytes = frame.pack();
