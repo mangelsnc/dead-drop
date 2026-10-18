@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'screens/home_screen.dart';
+
 void main() {
   runApp(const DeadDropApp());
 }
@@ -15,11 +17,7 @@ class DeadDropApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const Scaffold(
-        body: Center(
-          child: Text('DeadDrop — Air-gapped file transfer'),
-        ),
-      ),
+      home: const HomeScreen(),
     );
   }
 }
