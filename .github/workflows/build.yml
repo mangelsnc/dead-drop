@@ -32,7 +32,7 @@ jobs:
 
       - name: Get packages
         working-directory: app
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get
 
       - name: Analyze
         working-directory: app
