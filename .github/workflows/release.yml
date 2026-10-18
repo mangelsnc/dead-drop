@@ -1,0 +1,180 @@
+name: Release
+
+# Automatic release on every merge to main.
+#
+# Flow:
+#   1. A push lands on main (direct push or merged PR).
+#   2. This workflow computes the next semantic version from conventional
+#      commits since the last tag (and the merged PR's labels, if any):
+#        - "BREAKING CHANGE" in a commit body, or label "breaking"  -> major
+#        - "feat:" commits, or label "enhancement"                  -> minor
+#        - everything else                                          -> patch
+#   3. git-cliff generates the changelog for the new version.
+#   4. CHANGELOG.md and app/pubspec.yaml are updated and committed.
+#   5. An annotated tag vX.Y.Z is created and pushed.
+#   6. The push of the tag triggers build.yml, whose "release" job builds
+#      the Linux/Windows/macOS artifacts and publishes the GitHub Release
+#      with the changelog as body and SHA256SUMS.txt attached.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# Only one release at a time — if several merges land in quick succession,
+# they queue up instead of racing on tags.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+
+    # Skip automated version-bump commits made by this workflow itself,
+    # and allow a manual escape hatch with "[skip release]" in the message.
+    if: >-
+      !contains(github.event.head_commit.message, 'chore(release):') &&
+      !contains(github.event.head_commit.message, '[skip release]')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Get latest tag
+        id: latest
+        run: |
+          LATEST=$(git tag --list 'v*' --sort=-v:refname | head -n1 || true)
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.0.0"
+            RANGE="HEAD"
+          else
+            RANGE="${LATEST}..HEAD"
+          fi
+          echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "range=$RANGE" >> "$GITHUB_OUTPUT"
+          echo "Latest tag: $LATEST (range: $RANGE)"
+
+      - name: Determine bump from commits
+        id: bump
+        run: |
+          RANGE="${{ steps.latest.outputs.range }}"
+          BUMP="patch"
+
+          # feat: -> minor
+          if git log --format='%s' "$RANGE" | grep -qE '^feat(\(.+\))?!?:'; then
+            BUMP="minor"
+          fi
+          # feat!:/fix!:/etc. or BREAKING CHANGE in body -> major
+          if git log --format='%s' "$RANGE" | grep -qE '^[a-z]+(\(.+\))?!:'; then
+            BUMP="major"
+          fi
+          if git log --format='%b' "$RANGE" | grep -qE 'BREAKING[ -]CHANGE'; then
+            BUMP="major"
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Bump from commits: $BUMP"
+
+      - name: Determine bump from merged PR labels
+        id: prlabels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # If this push is a merged PR, its labels can raise the bump level.
+          PR=$(gh pr list --search "${{ github.sha }}" --state merged \
+               --json number,labels --limit 1 || echo '[]')
+          BUMP="${{ steps.bump.outputs.bump }}"
+          if [ "$(echo "$PR" | jq length)" -gt 0 ]; then
+            LABELS=$(echo "$PR" | jq -r '.[0].labels[].name' || true)
+            echo "Merged PR labels: $LABELS"
+            if echo "$LABELS" | grep -qx 'breaking'; then
+              BUMP="major"
+            elif echo "$LABELS" | grep -qx 'enhancement' && [ "$BUMP" = "patch" ]; then
+              BUMP="minor"
+            fi
+          else
+            echo "No merged PR found for this commit (direct push)."
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Final bump: $BUMP"
+
+      - name: Compute next version
+        id: version
+        run: |
+          LATEST="${{ steps.latest.outputs.tag }}"
+          BUMP="${{ steps.prlabels.outputs.bump }}"
+          BASE="${LATEST#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+          esac
+          NEW="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "version_number=${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEW"
+
+      - name: Install git-cliff
+        run: |
+          VERSION="2.8.0"
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${VERSION}/git-cliff-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xz --strip-components=1 --wildcards '*/git-cliff'
+          chmod +x git-cliff
+          ./git-cliff --version
+
+      - name: Generate changelog for new version
+        id: changelog
+        run: |
+          RANGE="${{ steps.latest.outputs.range }}"
+          NEW="${{ steps.version.outputs.version }}"
+          # Changelog body for the release (only the new version's changes).
+          ./git-cliff --config cliff.toml --tag "$NEW" "$RANGE" --strip all \
+            > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Update CHANGELOG.md
+        run: |
+          NEW="${{ steps.version.outputs.version }}"
+          # Regenerate the full changelog (header + all versions, new on top).
+          ./git-cliff --config cliff.toml --tag "$NEW" > CHANGELOG.md
+          head -40 CHANGELOG.md
+
+      - name: Bump version in pubspec.yaml
+        run: |
+          VERSION="${{ steps.version.outputs.version_number }}"
+          sed -i "s/^version: .*/version: ${VERSION}+1/" app/pubspec.yaml
+          grep '^version:' app/pubspec.yaml
+
+      - name: Commit version bump
+        run: |
+          NEW="${{ steps.version.outputs.version }}"
+          git add CHANGELOG.md app/pubspec.yaml
+          git commit -m "chore(release): ${NEW} [skip release]"
+
+      - name: Create and push tag
+        run: |
+          NEW="${{ steps.version.outputs.version }}"
+          git tag -a "$NEW" -F RELEASE_NOTES.md
+          git push origin main
+          git push origin "$NEW"
+          echo "Pushed main + tag $NEW"
+
+      - name: Summary
+        run: |
+          echo "## Release ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Bump: \`${{ steps.prlabels.outputs.bump }}\` (from ${{ steps.latest.outputs.tag }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag pushed: \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- The tag push triggers \`build.yml\`, which builds the platform artifacts and publishes the GitHub Release with these notes as its body." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat RELEASE_NOTES.md >> "$GITHUB_STEP_SUMMARY"
