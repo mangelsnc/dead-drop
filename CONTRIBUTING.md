@@ -7,7 +7,7 @@ Gracias por querer ayudar. DeadDrop es un proyecto de software libre (MIT) const
 ## Formas de contribuir (no todo es programar)
 
 - **Reportar errores o proponer mejoras:** abre una [issue](https://github.com/mangelsnc/dead-drop/issues) describiendo qué pasaba, qué esperabas y en qué sistema.
-- **Documentación:** si algo de la [guía de uso](docs/guia-uso.md) o el [FAQ](docs/faq.md) te ha resultado confuso, mejorarlo es una contribución de primera clase. Este proyecto se evalúa precisamente por ser usable por gente no técnica.
+- **Documentación:** si algo de la [guía de uso](docs/user-guide.md) o el [FAQ](docs/faq.md) te ha resultado confuso, mejorarlo es una contribución de primera clase. Este proyecto se evalúa precisamente por ser usable por gente no técnica.
 - **Traducción:** la documentación base está en español e inglés. Más idiomas son bienvenidos.
 - **Diseño y UX:** mockups, iconos, flujos más claros.
 - **Código:** Dart/Flutter en la app, GitHub Actions en la CI.
@@ -57,7 +57,7 @@ flutter run            # ejecuta en tu plataforma
 flutter test           # tests
 ```
 
-Las builds reproducibles y la firma de binarios están documentadas en cada release y en [docs/seguridad.md](docs/seguridad.md).
+Las builds reproducibles y la firma de binarios están documentadas en cada release y en [docs/security.md](docs/security.md).
 
 ## Estilo de código
 
