@@ -22,6 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ANDROID_SDK_ROOT=/opt/android-sdk \
     ANDROID_HOME=/opt/android-sdk \
     PUB_CACHE=/opt/pub-cache \
+    GRADLE_USER_HOME=/opt/gradle-cache \
     PATH=/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/${ANDROID_BUILD_TOOLS_VERSION}:$PATH
 
 # --- System dependencies -----------------------------------------------------
@@ -29,6 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #   (+ lzma, cpp, stdc++ required by Flutter Linux desktop builds)
 # - Android toolchain: JDK 17, unzip (for SDK packages)
 # - Utilities: git, curl, xz, CA certs
+# Single layer + full cleanup to keep image size down.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -43,18 +45,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgtk-3-dev \
         liblzma-dev \
         libstdc++-12-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
+    && apt-get clean
 
 # --- Flutter SDK -------------------------------------------------------------
-RUN curl -fsSL "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
-        | tar -xJ -C /opt \
+# Clone with --depth 1 (no .git history) and remove VCS metadata after
+# precache to save ~300MB. Precache both Linux and Android artifacts here
+# so the runtime user doesn't need to download them later.
+RUN git clone --depth 1 --branch "${FLUTTER_VERSION}" \
+      https://github.com/flutter/flutter.git /opt/flutter \
     && git config --global --add safe.directory /opt/flutter \
     && flutter config --no-analytics \
     && flutter config --enable-linux-desktop \
-    && flutter precache --linux \
-    && flutter doctor --version
+    && flutter precache --linux --android \
+    && flutter doctor --version \
+    && rm -rf /opt/flutter/.git
 
 # --- Android SDK -------------------------------------------------------------
+# Minimal install: cmdline-tools + platform + build-tools only.
+# Clean .temp and extras directories after sdkmanager to save space.
 RUN mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools" \
     && curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}.zip" -o /tmp/cmdline-tools.zip \
     && unzip -q /tmp/cmdline-tools.zip -d "${ANDROID_SDK_ROOT}/cmdline-tools" \
@@ -65,7 +74,7 @@ RUN mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools" \
         "platform-tools" \
         "platforms;android-${ANDROID_PLATFORM_VERSION}" \
         "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
-    && flutter precache --android
+    && rm -rf "${ANDROID_SDK_ROOT}/.temp" "${ANDROID_SDK_ROOT}/extras"
 
 # --- Non-root user -----------------------------------------------------------
 # The container runs as a non-root user whose UID/GID can be matched to the
@@ -75,8 +84,8 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 RUN groupadd --gid "${USER_GID}" dev \
     && useradd --uid "${USER_UID}" --gid "${USER_GID}" --create-home --shell /bin/bash dev \
-    && mkdir -p "${PUB_CACHE}" \
-    && chown -R dev:dev /opt/flutter "${PUB_CACHE}" "${ANDROID_SDK_ROOT}"
+    && mkdir -p "${PUB_CACHE}" "${GRADLE_USER_HOME}" \
+    && chown -R dev:dev /opt/flutter "${PUB_CACHE}" "${GRADLE_USER_HOME}" "${ANDROID_SDK_ROOT}"
 
 USER dev
 WORKDIR /workspace
