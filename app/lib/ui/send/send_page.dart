@@ -4,11 +4,14 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/crypto.dart';
 import '../../src/emitter.dart';
+import '../../src/handshake.dart';
+import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
 
@@ -25,6 +28,8 @@ class SendState {
     this.fps = 12.0,
     this.isEmitting = false,
     this.framesEmitted = 0,
+    this.currentQrData,
+    this.showingBootstrap = false,
   });
 
   final String? fileName;
@@ -38,6 +43,15 @@ class SendState {
   final bool isEmitting;
   final int framesEmitted;
 
+  /// Current QR content (already enveloped, printable ASCII). Driven by the
+  /// single frame generator in [SendNotifier] — the widget only renders it.
+  final String? currentQrData;
+
+  /// True while the static session-bootstrap QR is on screen.
+  final bool showingBootstrap;
+
+  bool get readyToSend => fileBytes != null && receiverPk != null;
+
   SendState copyWith({
     String? fileName,
     Uint8List? fileBytes,
@@ -49,6 +63,8 @@ class SendState {
     double? fps,
     bool? isEmitting,
     int? framesEmitted,
+    String? currentQrData,
+    bool? showingBootstrap,
   }) {
     return SendState(
       fileName: fileName ?? this.fileName,
@@ -61,6 +77,8 @@ class SendState {
       fps: fps ?? this.fps,
       isEmitting: isEmitting ?? this.isEmitting,
       framesEmitted: framesEmitted ?? this.framesEmitted,
+      currentQrData: currentQrData ?? this.currentQrData,
+      showingBootstrap: showingBootstrap ?? this.showingBootstrap,
     );
   }
 }
@@ -72,17 +90,19 @@ class SendNotifier extends StateNotifier<SendState> {
   Timer? _timer;
 
   Future<void> pickFile() async {
-    final result = await FilePicker.platform.pickFiles();
+    final result = await FilePicker.platform.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    state = state.copyWith(
+    _stopTimer();
+    state = SendState(
       fileName: file.name,
       fileBytes: bytes,
-      emitter: null,
-      isEmitting: false,
-      framesEmitted: 0,
+      receiverPk: state.receiverPk,
+      chunkSize: state.chunkSize,
+      ecLevel: state.ecLevel,
+      fps: state.fps,
     );
   }
 
@@ -91,7 +111,8 @@ class SendNotifier extends StateNotifier<SendState> {
   }
 
   void setChunkSize(int size) {
-    state = state.copyWith(chunkSize: size, emitter: null);
+    if (state.isEmitting) return; // locked during a transfer
+    state = state.copyWith(chunkSize: size);
   }
 
   void setEcLevel(String level) {
@@ -100,16 +121,16 @@ class SendNotifier extends StateNotifier<SendState> {
 
   void setFps(double fps) {
     state = state.copyWith(fps: fps);
-    if (state.isEmitting) {
-      _restartTimer();
+    // The periodic timer picks the new interval up on the next restart;
+    // if we are emitting, restart immediately so the change is live.
+    if (state.isEmitting && !state.showingBootstrap) {
+      _startDataTimer();
     }
   }
 
   Future<void> startEmitting() async {
-    if (state.fileBytes == null || state.receiverPk == null) return;
+    if (!state.readyToSend || state.isEmitting) return;
     final identity = await Identity.generate(_sodium);
-    // Create a temporary ReceiverKeypair from the raw public key
-    // so we can pass it to Emitter.create
     final receiverKp = _ReceiverKeypairFromPk(state.receiverPk!);
     final emitter = await Emitter.create(
       _sodium,
@@ -117,40 +138,61 @@ class SendNotifier extends StateNotifier<SendState> {
       receiverKp,
       senderIdentity: identity,
       chunkSize: state.chunkSize,
+      fileName: state.fileName,
     );
     state = state.copyWith(
       emitter: emitter,
       identity: identity,
       isEmitting: true,
       framesEmitted: 0,
+      showingBootstrap: true,
+      currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
     );
-    _startTimer();
+    // Hold the static bootstrap QR long enough for the receiver to lock on,
+    // then switch to the animated data stream.
+    _timer = Timer(const Duration(seconds: 4), _startDataPhase);
   }
 
   void stopEmitting() {
-    _timer?.cancel();
-    state = state.copyWith(isEmitting: false);
+    _stopTimer();
+    state = state.copyWith(
+      isEmitting: false,
+      showingBootstrap: false,
+      currentQrData: null,
+    );
   }
 
-  void _startTimer() {
+  void _startDataPhase() {
+    if (!state.isEmitting || state.emitter == null) return;
+    state = state.copyWith(showingBootstrap: false);
+    _emitNextFrame(); // render the first data frame immediately
+    _startDataTimer();
+  }
+
+  void _startDataTimer() {
+    _stopTimer();
     final interval = Duration(milliseconds: (1000 / state.fps).round());
-    _timer = Timer.periodic(interval, (_) => _emitFrame());
+    _timer = Timer.periodic(interval, (_) => _emitNextFrame());
   }
 
-  void _restartTimer() {
+  void _stopTimer() {
     _timer?.cancel();
-    _startTimer();
+    _timer = null;
   }
 
-  void _emitFrame() {
-    if (state.emitter == null || !state.isEmitting) return;
-    state.emitter!.nextFrame();
-    state = state.copyWith(framesEmitted: state.framesEmitted + 1);
+  void _emitNextFrame() {
+    final emitter = state.emitter;
+    if (emitter == null || !state.isEmitting) return;
+    final frame = emitter.nextFrame();
+    state = state.copyWith(
+      framesEmitted: state.framesEmitted + 1,
+      currentQrData: encodeQrPayload(frame.pack()),
+    );
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _stopTimer();
     super.dispose();
   }
 }
@@ -208,7 +250,8 @@ class SendPage extends ConsumerWidget {
                     const SizedBox(height: 12),
                   ],
                   FilledButton.tonalIcon(
-                    onPressed: notifier.pickFile,
+                    onPressed:
+                        state.isEmitting ? null : notifier.pickFile,
                     icon: const Icon(Icons.folder_open),
                     label: Text(state.fileName == null
                         ? 'Choose file'
@@ -219,38 +262,48 @@ class SendPage extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
 
-            // Step 2: Receiver key input
+            // Step 2: Receiver key via QR handshake
             _StepCard(
               step: 2,
-              title: 'Receiver public key',
+              title: 'Receiver key',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'The receiver shows their public key as a QR code. '
-                    'Paste it here or scan it.',
+                    'On the receiving device, tap "Receive a file" — it shows '
+                    'a QR with its public key. Scan it here.',
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Public key (hex)',
-                      hintText: 'e.g. a1b2c3...',
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (value) {
-                      try {
-                        final pk = _hexToBytes(value);
-                        if (pk.length == 32) {
-                          notifier.setReceiverPk(pk);
-                        }
-                      } catch (_) {}
-                    },
-                  ),
-                  if (state.receiverPk != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Key loaded: ${_bytesToHex(state.receiverPk!).substring(0, 16)}...',
-                      style: TextStyle(color: Colors.green[400]),
+                  if (state.receiverPk == null)
+                    FilledButton.tonalIcon(
+                      onPressed: state.isEmitting
+                          ? null
+                          : () => _scanReceiverKey(context, notifier),
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan receiver key QR'),
+                    )
+                  else ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle,
+                            color: DeadDropColors.success, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Key loaded: '
+                            '${bytesToHex(state.receiverPk!).substring(0, 16)}…',
+                            style: const TextStyle(
+                                color: DeadDropColors.success),
+                          ),
+                        ),
+                        if (!state.isEmitting)
+                          IconButton(
+                            tooltip: 'Scan a different key',
+                            icon: const Icon(Icons.refresh),
+                            onPressed: () =>
+                                _scanReceiverKey(context, notifier),
+                          ),
+                      ],
                     ),
                   ],
                 ],
@@ -302,7 +355,7 @@ class SendPage extends ConsumerWidget {
             const SizedBox(height: 24),
 
             // Start/Stop button
-            if (state.fileBytes != null && state.receiverPk != null)
+            if (state.readyToSend)
               FilledButton.icon(
                 onPressed: state.isEmitting
                     ? notifier.stopEmitting
@@ -316,8 +369,8 @@ class SendPage extends ConsumerWidget {
                 ),
               ),
 
-            // QR display
-            if (state.isEmitting && state.emitter != null) ...[
+            // QR display — renders whatever the notifier is emitting.
+            if (state.isEmitting && state.currentQrData != null) ...[
               const SizedBox(height: 24),
               _QrDisplay(state: state),
             ],
@@ -327,18 +380,81 @@ class SendPage extends ConsumerWidget {
     );
   }
 
-  static Uint8List _hexToBytes(String hex) {
-    final clean = hex.replaceAll(RegExp(r'[^0-9a-fA-F]'), '');
-    if (clean.length % 2 != 0) throw const FormatException('odd hex length');
-    final out = Uint8List(clean.length ~/ 2);
-    for (var i = 0; i < out.length; i++) {
-      out[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
+  Future<void> _scanReceiverKey(
+      BuildContext context, SendNotifier notifier) async {
+    final pk = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(builder: (_) => const _KeyScanPage()),
+    );
+    if (pk != null) {
+      notifier.setReceiverPk(pk);
     }
-    return out;
+  }
+}
+
+/// Full-screen camera page that scans the receiver's public-key QR and
+/// pops with the decoded key.
+class _KeyScanPage extends StatefulWidget {
+  const _KeyScanPage();
+
+  @override
+  State<_KeyScanPage> createState() => _KeyScanPageState();
+}
+
+class _KeyScanPageState extends State<_KeyScanPage> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+    facing: CameraFacing.back,
+  );
+  bool _found = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
-  static String _bytesToHex(Uint8List bytes) {
-    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scan receiver key')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: (capture) {
+              if (_found) return;
+              for (final barcode in capture.barcodes) {
+                final raw = barcode.rawValue;
+                if (raw == null) continue;
+                final pk = decodeHandshakeQr(raw);
+                if (pk != null) {
+                  _found = true;
+                  Navigator.of(context).pop(pk);
+                  return;
+                }
+              }
+            },
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              margin: const EdgeInsets.all(24),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Point at the QR shown on the receiving device',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -426,57 +542,16 @@ class _ParamSlider extends StatelessWidget {
   }
 }
 
-class _QrDisplay extends ConsumerStatefulWidget {
+/// Dumb QR renderer: displays exactly what the notifier produced. All frame
+/// generation logic lives in [SendNotifier], so there is a single source of
+/// truth for the emitted sequence.
+class _QrDisplay extends StatelessWidget {
   const _QrDisplay({required this.state});
 
   final SendState state;
 
   @override
-  ConsumerState<_QrDisplay> createState() => _QrDisplayState();
-}
-
-class _QrDisplayState extends ConsumerState<_QrDisplay> {
-  Uint8List? _currentFrameBytes;
-  bool _showBootstrap = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _generateNext();
-  }
-
-  Future<void> _generateNext() async {
-    if (!mounted || !widget.state.isEmitting) return;
-    final emitter = widget.state.emitter!;
-    if (_showBootstrap) {
-      setState(() {
-        _currentFrameBytes = emitter.bootstrapQrPayload();
-      });
-      // Show bootstrap for 3 seconds, then start data frames
-      await Future.delayed(const Duration(seconds: 3));
-      if (mounted) {
-        setState(() => _showBootstrap = false);
-      }
-    } else {
-      final frame = emitter.nextFrame();
-      if (mounted) {
-        setState(() {
-          _currentFrameBytes = frame.pack();
-        });
-      }
-    }
-    // Schedule next frame
-    if (mounted && widget.state.isEmitting) {
-      final interval = Duration(milliseconds: (1000 / widget.state.fps).round());
-      Future.delayed(interval, _generateNext);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_currentFrameBytes == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
     return Column(
       children: [
         Container(
@@ -486,20 +561,22 @@ class _QrDisplayState extends ConsumerState<_QrDisplay> {
             borderRadius: BorderRadius.circular(12),
           ),
           child: QrImageView(
-            data: String.fromCharCodes(_currentFrameBytes!),
+            data: state.currentQrData!,
             version: QrVersions.auto,
-            errorCorrectionLevel: _ecLevelToQr(widget.state.ecLevel),
+            errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
             size: 300,
             backgroundColor: Colors.white,
           ),
         ),
         const SizedBox(height: 12),
         Text(
-          _showBootstrap ? 'Session bootstrap' : 'Frame ${widget.state.framesEmitted}',
+          state.showingBootstrap
+              ? 'Session bootstrap — point the receiver camera here'
+              : 'Frame ${state.framesEmitted}',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         Text(
-          '${widget.state.fps.round()} fps · ${widget.state.chunkSize} B/chunk · EC-${widget.state.ecLevel}',
+          '${state.fps.round()} fps · ${state.chunkSize} B/chunk · EC-${state.ecLevel}',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: DeadDropColors.textSecondary,
               ),
