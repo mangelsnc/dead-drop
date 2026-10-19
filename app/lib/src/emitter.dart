@@ -45,6 +45,7 @@ class Emitter {
     ReceiverKeypair receiverKeypair, {
     Identity? senderIdentity,
     int chunkSize = 512,
+    String? fileName,
   }) async {
     final identity = senderIdentity ?? await Identity.generate(sodium);
     final (session, header) = await Session.open(
@@ -53,6 +54,7 @@ class Emitter {
       chunkSize,
       receiverKeypair.publicKey,
       identity,
+      fileName: fileName,
     );
     final fountain = LTEncoder(session.chunks);
     final transferSeed = sodium.randombytes.buf(4).buffer.asByteData().getUint32(0, Endian.big);
@@ -70,9 +72,24 @@ class Emitter {
   /// Bytes for the single static QR that starts the session.
   Uint8List bootstrapQrPayload() => header.pack();
 
-  /// Produce the next encrypted fountain frame.
+  /// Produce the next frame. Sequence 0 is the encrypted metadata frame
+  /// (file name); from sequence 1 on, frames are fountain-coded data.
   Frame nextFrame() {
     final seq = _seq++;
+    if (seq == 0) {
+      final (nonce, ct) = session.encryptPayload(
+        sodium,
+        buildFileMetadataPayload(fileName: session.fileName),
+      );
+      return Frame(
+        fileId: session.fileId,
+        seq: seq,
+        seed: transferSeed,
+        chunkIds: const [],
+        nonce: nonce,
+        payload: ct,
+      );
+    }
     final (chunkIds, xored) = fountain.makeFrame(seq, transferSeed);
     final nonce = sodium.randombytes.buf(nonceSize);
     final ct = session.box.easy(

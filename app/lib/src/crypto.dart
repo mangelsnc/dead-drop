@@ -9,6 +9,7 @@
 /// * Hash         : SHA-256         (chunk ids, file manifest integrity)
 library;
 
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:sodium_libs/sodium_libs.dart';
@@ -208,12 +209,17 @@ class Session {
   final int chunkSize;
   final List<Uint8List> chunks;
 
+  /// Original file name, when provided by the user. Never transmitted in the
+  /// clear — it travels inside the encrypted first frame (see below).
+  final String? fileName;
+
   Session._({
     required this.box,
     required this.fileId,
     required this.chunkCount,
     required this.chunkSize,
     required this.chunks,
+    this.fileName,
   });
 
   static Future<(Session, SessionHeader)> open(
@@ -221,8 +227,9 @@ class Session {
     Uint8List plaintext,
     int chunkSize,
     Uint8List receiverPk,
-    Identity senderIdentity,
-  ) async {
+    Identity senderIdentity, {
+    String? fileName,
+  }) async {
     final ephKp = sodium.crypto.box.keyPair();
     final box = sodium.crypto.box.precalculate(
       publicKey: receiverPk,
@@ -260,6 +267,7 @@ class Session {
       chunkCount: chunkCount,
       chunkSize: chunkSize,
       chunks: chunks,
+      fileName: fileName,
     );
     return (session, header);
   }
@@ -275,6 +283,40 @@ class Session {
       nonce: nonce,
     );
     return (nonce, ct);
+  }
+
+  /// Encrypts an arbitrary payload with the session key.
+  ///
+  /// Used for the encrypted file-metadata frame (seq 0), which carries the
+  /// original file name inside the encrypted channel — per spec §2.5 no
+  /// filename is ever transmitted in the clear.
+  (Uint8List, Uint8List) encryptPayload(Sodium sodium, Uint8List payload) {
+    final nonce = sodium.randombytes.buf(nonceSize);
+    final ct = box.easy(message: payload, nonce: nonce);
+    return (nonce, ct);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Encrypted file metadata (seq-0 frame payload)
+// ---------------------------------------------------------------------------
+
+/// Builds the encrypted metadata payload: a compact JSON document with the
+/// original file name. Kept deliberately small (it occupies one QR frame).
+Uint8List buildFileMetadataPayload({String? fileName}) {
+  return Uint8List.fromList(
+    utf8.encode(jsonEncode({'name': fileName ?? ''})),
+  );
+}
+
+/// Parses the decrypted metadata payload. Returns an empty map on malformed
+/// input — metadata is a convenience, never a reason to fail a transfer.
+Map<String, dynamic> parseFileMetadataPayload(Uint8List payload) {
+  try {
+    final doc = jsonDecode(utf8.decode(payload));
+    return doc is Map<String, dynamic> ? doc : <String, dynamic>{};
+  } catch (_) {
+    return <String, dynamic>{};
   }
 }
 
