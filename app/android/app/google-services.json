@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "699510132202",
+    "project_id": "deaddrop-beta",
+    "storage_bucket": "deaddrop-beta.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:699510132202:android:e4a55e1fceedea55bcf693",
+        "android_client_info": {
+          "package_name": "dev.deaddrop.dead_drop"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBvWtsESYBDViA_5PD0-QOWn4dQzt9C9dY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

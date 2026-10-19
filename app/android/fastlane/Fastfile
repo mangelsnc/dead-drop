@@ -1,0 +1,56 @@
+# Android Fastfile for DeadDrop
+# Firebase App Distribution lanes
+
+default_platform(:android)
+
+platform :android do
+  desc "Build APK for Firebase App Distribution"
+  lane :build_apk do
+    gradle(
+      task: "assembleRelease",
+      project_dir: "."
+    )
+  end
+
+  desc "Build and distribute to Firebase App Distribution"
+  lane :beta do
+    build_apk
+    
+    firebase_app_distribution(
+      app: ENV["FIREBASE_APP_ID_ANDROID"],
+      firebase_cli_token: ENV["FIREBASE_TOKEN"],
+      release_notes: "DeadDrop Android beta build",
+      groups: "testers"
+    )
+  end
+
+  desc "Build and distribute with custom release notes"
+  lane :beta_with_notes do |options|
+    build_apk
+    
+    release_notes = options[:notes] || "DeadDrop Android beta build"
+    
+    firebase_app_distribution(
+      app: ENV["FIREBASE_APP_ID_ANDROID"],
+      firebase_cli_token: ENV["FIREBASE_TOKEN"],
+      release_notes: release_notes,
+      groups: "testers"
+    )
+  end
+
+  desc "Run tests"
+  lane :test do
+    gradle(
+      task: "test",
+      project_dir: "."
+    )
+  end
+
+  desc "Clean build artifacts"
+  lane :clean do
+    gradle(
+      task: "clean",
+      project_dir: "."
+    )
+  end
+end
