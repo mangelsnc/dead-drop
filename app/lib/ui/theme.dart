@@ -92,7 +92,7 @@ ThemeData deadDropTheme() {
     ),
 
     // ── Cards ─────────────────────────────────────────────
-    cardTheme: CardThemeData(
+    cardTheme: CardTheme(
       color: DeadDropColors.bgElevated,
       elevation: 0,
       shape: RoundedRectangleBorder(
