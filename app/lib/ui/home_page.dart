@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'send/send_page.dart';
 import 'receive/receive_page.dart';
+import 'theme.dart';
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
@@ -30,7 +31,7 @@ class HomePage extends ConsumerWidget {
             Text(
               'Air-gapped file transfer',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Colors.grey[400],
+                    color: DeadDropColors.textSecondary,
                   ),
             ),
             const SizedBox(height: 48),
