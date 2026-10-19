@@ -2,7 +2,7 @@
 # https://docs.fastlane.tools/advanced/#appfile
 
 # The bundle identifier of your app
-app_identifier("com.deaddrop.app")
+app_identifier("dev.deaddrop.deadDrop")
 
 # Your Apple ID email (used for TestFlight uploads and signing)
 # Set via environment variable: FASTLANE_USER
