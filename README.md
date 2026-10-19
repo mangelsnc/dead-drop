@@ -62,7 +62,7 @@ Descarga el instalador para tu sistema desde la página de [Releases](../../rele
 2. Dale permisos de ejecución: `chmod +x DeadDrop-*.AppImage`.
 3. Ejecútalo con doble clic.
 
-> **Verificación:** cada release publica los checksums SHA-256 de los binarios y las instrucciones para reproducir la compilación desde el código fuente. Ver [docs/seguridad.md](docs/seguridad.md).
+> **Verificación:** cada release publica los checksums SHA-256 de los binarios y las instrucciones para reproducir la compilación desde el código fuente. Ver [docs/security.md](docs/security.md).
 
 ---
 
@@ -73,7 +73,7 @@ Descarga el instalador para tu sistema desde la página de [Releases](../../rele
 3. En el dispositivo que **recibe**: pulsa **"Recibir un archivo"** y apunta con la cámara a la pantalla del otro.
 4. Verás una barra de progreso en ambos. Al terminar, el receptor pulsa **"Guardar"** y elige dónde.
 
-Eso es todo. La [guía de uso completa](docs/guia-uso.md) explica cada paso con capturas de pantalla, qué hacer si la cámara no lee bien, y cómo configurar el PIN señuelo.
+Eso es todo. La [guía de uso completa](docs/user-guide.md) explica cada paso con capturas de pantalla, qué hacer si la cámara no lee bien, y cómo configurar el PIN señuelo.
 
 ---
 
@@ -101,10 +101,10 @@ DeadDrop está en desarrollo activo para el reto **#cryptograFREE** (RootedCON +
 
 | Documento | Para quién |
 |---|---|
-| [docs/guia-uso.md](docs/guia-uso.md) | Cualquier persona que quiera usar la app, paso a paso y con capturas |
+| [docs/user-guide.md](docs/user-guide.md) | Cualquier persona que quiera usar la app, paso a paso y con capturas |
 | [docs/faq.md](docs/faq.md) | Respuestas a las preguntas que todo el mundo hace |
-| [docs/seguridad.md](docs/seguridad.md) | Qué protege y qué no protege DeadDrop — en llano y en versión técnica |
-| [docs/propuesta-valor.md](docs/propuesta-valor.md) | Por qué existe el proyecto y qué lo hace distinto |
+| [docs/security.md](docs/security.md) | Qué protege y qué no protege DeadDrop — en llano y en versión técnica |
+| [docs/value-proposition.md](docs/value-proposition.md) | Por qué existe el proyecto y qué lo hace distinto |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Cómo colaborar (código, traducciones, documentación) |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Normas de convivencia de la comunidad |
 
