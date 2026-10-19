@@ -15,8 +15,10 @@ import 'package:sodium/sodium.dart' show SodiumInit;
 import 'package:dead_drop/src/crypto.dart';
 import 'package:dead_drop/src/emitter.dart';
 import 'package:dead_drop/src/fountain.dart';
+import 'package:dead_drop/src/handshake.dart';
 import 'package:dead_drop/src/qrframe.dart';
 import 'package:dead_drop/src/receiver.dart';
+import 'package:dead_drop/src/transport.dart';
 
 /// Loads the native libsodium library for the current test platform.
 ///
@@ -250,6 +252,49 @@ void main() {
     });
   });
 
+  group('Transport envelope', () {
+    test('encode/decode roundtrip preserves arbitrary bytes', () {
+      final payload =
+          Uint8List.fromList(List.generate(600, (i) => (i * 37 + 11) % 256));
+      final encoded = encodeQrPayload(payload);
+      expect(encoded.startsWith(transportPrefix), isTrue);
+      // The envelope must be printable ASCII end to end — this is what makes
+      // it survive text-based QR pipelines.
+      for (final unit in encoded.codeUnits) {
+        expect(unit, inInclusiveRange(0x20, 0x7E));
+      }
+      final decoded = decodeQrPayload(encoded);
+      expect(decoded, payload);
+    });
+
+    test('decode rejects foreign QRs and malformed base64', () {
+      expect(decodeQrPayload('https://example.com'), isNull);
+      expect(decodeQrPayload('DD1.!!!not-base64!!!'), isNull);
+      expect(decodeQrPayload(''), isNull);
+    });
+  });
+
+  group('Handshake', () {
+    test('handshake QR roundtrip yields the same public key', () async {
+      final kp = await ReceiverKeypair.generate(sodium);
+      final qr = encodeHandshakeQr(kp.publicKey);
+      final decoded = decodeHandshakeQr(qr);
+      expect(decoded, kp.publicKey);
+    });
+
+    test('handshake decoder rejects non-handshake envelopes', () {
+      // A binary session header inside the envelope must not parse as a key.
+      final fake = encodeQrPayload(Uint8List.fromList([1, 2, 3]));
+      expect(decodeHandshakeQr(fake), isNull);
+      expect(decodeHandshakeQr('random text'), isNull);
+    });
+
+    test('hex helpers roundtrip', () {
+      final bytes = Uint8List.fromList([0x00, 0xab, 0xCD, 0xff]);
+      expect(hexToBytes(bytesToHex(bytes)), bytes);
+    });
+  });
+
   group('End-to-end', () {
     test('Full transfer: 1KB file', () async {
       await _testTransfer(sodium, 1024, 512);
@@ -261,6 +306,38 @@ void main() {
 
     test('Full transfer: 1MB file', () async {
       await _testTransfer(sodium, 1024 * 1024, 512);
+    });
+
+    test('Transfer carries the original file name, encrypted', () async {
+      final plaintext =
+          Uint8List.fromList(List.generate(4096, (i) => (i * 13) % 256));
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final emitter = await Emitter.create(
+        sodium,
+        plaintext,
+        receiverKp,
+        chunkSize: 512,
+        fileName: 'secret-plans.pdf',
+      );
+      final receiver = Receiver(sodium: sodium, keypair: receiverKp);
+
+      await receiver.startSession(emitter.bootstrapQrPayload());
+
+      // The first emitted frame is the encrypted metadata frame (seq 0).
+      final metaFrame = emitter.nextFrame();
+      expect(metaFrame.seq, 0);
+      expect(metaFrame.chunkIds, isEmpty);
+      receiver.feedFrame(metaFrame.pack());
+      expect(receiver.fileName, 'secret-plans.pdf');
+
+      // The metadata frame must NOT count towards fountain decoding.
+      expect(receiver.decoder!.decoded, isEmpty);
+
+      for (var i = 0; i < 500 && !receiver.done; i++) {
+        receiver.feedFrame(emitter.nextFrame().pack());
+      }
+      expect(receiver.done, isTrue);
+      expect(receiver.finish(), plaintext);
     });
 
     test('Transfer tolerates 50% frame loss', () async {
@@ -288,6 +365,40 @@ void main() {
       final recovered = receiver.finish();
       expect(recovered, plaintext);
     });
+
+    test('Full pipeline through the QR envelope (simulated camera)', () async {
+      // Exercises the exact wire format the app uses: binary frame →
+      // base64url envelope (what qr_flutter renders) → decodeQrPayload
+      // (what the receiver does with mobile_scanner's rawValue).
+      final plaintext =
+          Uint8List.fromList(List.generate(20000, (i) => (i * 7 + 3) % 256));
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final emitter = await Emitter.create(
+        sodium,
+        plaintext,
+        receiverKp,
+        chunkSize: 512,
+        fileName: 'photo.jpg',
+      );
+      final receiver = Receiver(sodium: sodium, keypair: receiverKp);
+
+      // Handshake QR → sender gets the key.
+      final handshakeQr = encodeHandshakeQr(receiverKp.publicKey);
+      expect(decodeHandshakeQr(handshakeQr), receiverKp.publicKey);
+
+      // Bootstrap via envelope.
+      final bootstrapQr = encodeQrPayload(emitter.bootstrapQrPayload());
+      await receiver.startSession(decodeQrPayload(bootstrapQr)!);
+
+      for (var i = 0; i < 500 && !receiver.done; i++) {
+        final qrText = encodeQrPayload(emitter.nextFrame().pack());
+        receiver.feedFrame(decodeQrPayload(qrText)!);
+      }
+
+      expect(receiver.done, isTrue);
+      expect(receiver.fileName, 'photo.jpg');
+      expect(receiver.finish(), plaintext);
+    });
   });
 }
 
@@ -302,16 +413,36 @@ Future<void> _testTransfer(Sodium sodium, int size, int chunkSize) async {
   );
   final receiver = Receiver(sodium: sodium, keypair: receiverKp);
 
+  final sw = Stopwatch()..start();
   await receiver.startSession(emitter.bootstrapQrPayload());
 
   var frames = 0;
-  while (!receiver.done && frames < 10000) {
+  // Frame cap: chunk count × 8 is far beyond the ~1.3x overhead the LT code
+  // needs, so hitting the cap means something is genuinely broken.
+  final frameCap = (size / chunkSize).ceil() * 8 + 100;
+  while (!receiver.done && frames < frameCap) {
     final frame = emitter.nextFrame();
     receiver.feedFrame(frame.pack());
     frames++;
   }
+  sw.stop();
 
   expect(receiver.done, isTrue, reason: 'Failed to decode after $frames frames');
   final recovered = receiver.finish();
   expect(recovered, plaintext);
+
+  final chunkCount = (size / chunkSize).ceil();
+  final kbps = size / 1024 / (sw.elapsedMilliseconds / 1000);
+  // ignore: avoid_print
+  print('[benchmark] ${_formatSize(size)}: ${sw.elapsedMilliseconds} ms, '
+      '$frames frames for $chunkCount chunks '
+      '(overhead ${(frames / chunkCount).toStringAsFixed(2)}x), '
+      '${kbps.toStringAsFixed(1)} KB/s pipeline throughput');
+}
+
+String _formatSize(int bytes) {
+  if (bytes >= 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(0)}MB';
+  }
+  return '${(bytes / 1024).toStringAsFixed(0)}KB';
 }

@@ -33,6 +33,10 @@ class Receiver {
   int framesDropped = 0;
   int framesIgnoredOtherSession = 0;
 
+  /// Original file name recovered from the encrypted metadata frame (seq 0),
+  /// when the sender included one.
+  String? fileName;
+
   Receiver({required this.sodium, required this.keypair});
 
   /// Consume the one-time bootstrap QR and arm the decoder.
@@ -75,6 +79,17 @@ class Receiver {
       payload = session!.decryptChunk(sodium, frame.nonce, frame.payload);
     } catch (e) {
       framesDropped++;
+      return false;
+    }
+
+    // Sequence 0 carries the encrypted file metadata (original file name).
+    // It is not a fountain frame: degree is 0 and it never advances decoding.
+    if (frame.seq == 0) {
+      final meta = parseFileMetadataPayload(payload);
+      final name = meta['name'];
+      if (name is String && name.isNotEmpty) {
+        fileName = name;
+      }
       return false;
     }
 
