@@ -10,6 +10,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 import '../../src/crypto.dart';
 import '../../src/emitter.dart';
 import '../../main.dart';
+import '../theme.dart';
 
 /// State for the send flow.
 class SendState {
@@ -500,7 +501,7 @@ class _QrDisplayState extends ConsumerState<_QrDisplay> {
         Text(
           '${widget.state.fps.round()} fps · ${widget.state.chunkSize} B/chunk · EC-${widget.state.ecLevel}',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.grey[500],
+                color: DeadDropColors.textSecondary,
               ),
         ),
       ],

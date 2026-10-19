@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
 import 'ui/home_page.dart';
+import 'ui/theme.dart';
 
 /// Global sodium instance provider.
 final sodiumProvider = Provider<Sodium>((ref) {
@@ -29,13 +30,7 @@ class DeadDropApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'DeadDrop',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: deadDropTheme(),
       home: const HomePage(),
     );
   }

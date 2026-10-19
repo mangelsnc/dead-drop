@@ -11,6 +11,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 import '../../src/crypto.dart';
 import '../../src/receiver.dart';
 import '../../main.dart';
+import '../theme.dart';
 
 /// State for the receive flow.
 class ReceiveState {
@@ -299,7 +300,9 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                         height: 300,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey[700]!),
+                          border: Border.all(
+                            color: DeadDropColors.borderInput,
+                          ),
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
