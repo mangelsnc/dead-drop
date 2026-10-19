@@ -40,7 +40,7 @@ DOCKER_RUN := docker run --rm --platform $(PLATFORM) \
 # but CI / scripted targets are not).
 TTY := $(shell test -t 0 && echo "-it")
 
-.PHONY: help image build-linux build-android build-ios test analyze clean shell doctor
+.PHONY: help image build-linux build-android build-ios build-macos test analyze clean shell doctor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -71,6 +71,15 @@ build-ios: ## iOS build — NOT available in Docker (requires macOS + Xcode)
 	@echo "     1. On a Mac:  cd $(APP_DIR) && flutter build ios --release"
 	@echo "     2. Use CI:    see .github/workflows/build.yml (build-macos job)"
 	@exit 1
+
+build-macos: ## macOS build — runs on HOST, not in Docker (requires macOS + Flutter)
+	@echo "⚠️  macOS builds cannot run in Docker (Apple requires macOS + Xcode)."
+	@echo "   This will run on your Mac using your local Flutter installation."
+	@echo "   Make sure you have Flutter SDK installed and in your PATH."
+	@echo ""
+	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	cd $(APP_DIR) && flutter pub get && flutter build macos --release
+	@echo "✔ Output: $(APP_DIR)/build/macos/Build/Products/Release/dead_drop.app"
 
 test: ## Run the test suite
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
