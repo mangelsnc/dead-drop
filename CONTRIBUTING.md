@@ -1,74 +1,74 @@
-# Cómo contribuir a DeadDrop
+# How to contribute to DeadDrop
 
-Gracias por querer ayudar. DeadDrop es un proyecto de software libre (MIT) construido para el reto **#cryptograFREE** (RootedCON + Criptored), y toda contribución es bienvenida: código, documentación, traducción, diseño, pruebas o difusión.
+Thanks for wanting to help. DeadDrop is a free software project (MIT) built for the **#cryptograFREE** challenge (RootedCON + Criptored), and every contribution is welcome: code, documentation, translation, design, testing or spreading the word.
 
 ---
 
-## Formas de contribuir (no todo es programar)
+## Ways to contribute (not everything is programming)
 
-- **Reportar errores o proponer mejoras:** abre una [issue](https://github.com/mangelsnc/dead-drop/issues) describiendo qué pasaba, qué esperabas y en qué sistema.
-- **Documentación:** si algo de la [guía de uso](docs/user-guide.md) o el [FAQ](docs/faq.md) te ha resultado confuso, mejorarlo es una contribución de primera clase. Este proyecto se evalúa precisamente por ser usable por gente no técnica.
-- **Traducción:** la documentación base está en español e inglés. Más idiomas son bienvenidos.
-- **Diseño y UX:** mockups, iconos, flujos más claros.
-- **Código:** Dart/Flutter en la app, GitHub Actions en la CI.
-- **Revisión de seguridad:** auditar el código es una de las mejores formas de ayudar. Para vulnerabilidades, **no uses issues públicas** — ver `SECURITY.md` cuando esté disponible.
+- **Report bugs or propose improvements:** open an [issue](https://github.com/mangelsnc/dead-drop/issues) describing what happened, what you expected, and on what system.
+- **Documentation:** if anything in the [user guide](docs/user-guide.md) or the [FAQ](docs/faq.md) confused you, improving it is a first-class contribution. This project is judged precisely on being usable by non-technical people.
+- **Translation:** the base documentation is in English and Spanish. More languages are welcome.
+- **Design and UX:** mockups, icons, clearer flows.
+- **Code:** Dart/Flutter in the app, GitHub Actions in the CI.
+- **Security review:** auditing the code is one of the best ways to help. For vulnerabilities, **do not use public issues** — see `SECURITY.md` when available.
 
-## Principios del proyecto (léelos antes de proponer)
+## Project principles (read them before proposing)
 
-1. **La persona no técnica manda en la UX.** Si una funcionalidad no se puede explicar sin jerga criptográfica, no está lista. La pregunta de control es: "¿lo entendería alguien que no sabe qué es una clave pública?"
-2. **Cero criptografía casera.** Todo lo criptográfico se resuelve con libsodium y sus parámetros por defecto.
-3. **Cero red.** Ninguna funcionalidad puede requerir conectividad. Ninguna telemetría, ninguna cuenta, ningún servidor.
-4. **Todo en público.** Decisiones, código y documentación viven en este repo desde el primer día.
+1. **The non-technical person rules the UX.** If a feature can't be explained without cryptographic jargon, it's not ready. The check question is: "would someone who doesn't know what a public key is understand it?"
+2. **Zero home-grown cryptography.** Everything cryptographic is solved with libsodium and its default parameters.
+3. **Zero network.** No feature may require connectivity. No telemetry, no accounts, no servers.
+4. **Everything in public.** Decisions, code and documentation live in this repo from day one.
 
-## Flujo de trabajo
+## Workflow
 
-1. **Abre o comenta una issue** antes de ponerte a trabajar, para no duplicar esfuerzo.
-2. **Haz fork y crea una rama** descriptiva: `fix/lectura-qr-baja-luz`, `docs/faq-legalidad`, etc.
-3. **Commits claros:** formato `tipo: descripción breve` (ej. `feat: reanudar transferencia tras pausa`, `docs: capturas de la guía de uso`). Tipos: `feat`, `fix`, `docs`, `test`, `refactor`, `ci`.
-4. **Abre un Pull Request** contra `main` describiendo qué cambia y por qué. Si toca UX, incluye capturas. Si toca criptografía, espera una revisión extra rigurosa — y prepárate para justificar por qué no basta con libsodium por defecto (pista: casi siempre basta).
-5. La CI debe pasar (tests + build en Windows, macOS y Linux).
+1. **Open or comment on an issue** before starting work, to avoid duplicating effort.
+2. **Fork and create a descriptive branch:** `fix/qr-reading-low-light`, `docs/faq-legality`, etc.
+3. **Clear commits:** format `type: brief description` (e.g. `feat: resume transfer after pause`, `docs: user guide screenshots`). Types: `feat`, `fix`, `docs`, `test`, `refactor`, `ci`.
+4. **Open a Pull Request** against `main` describing what it changes and why. If it touches UX, include screenshots. If it touches cryptography, expect an extra-rigorous review — and be ready to justify why default libsodium is not enough (hint: it almost always is).
+5. CI must pass (tests + build on Windows, macOS and Linux).
 
-## Entorno de desarrollo
+## Development environment
 
-El stack es **Flutter** (Dart) + **libsodium**.
+The stack is **Flutter** (Dart) + **libsodium**.
 
-**Opción A — Docker (recomendada, sin instalar Flutter en tu máquina):**
+**Option A — Docker (recommended, no Flutter install on your machine):**
 
 ```bash
-# Requisito: solo Docker
+# Requirement: Docker only
 git clone https://github.com/mangelsnc/dead-drop.git
 cd dead-drop
-make build-linux   # compila la app de escritorio Linux
+make build-linux   # builds the Linux desktop app
 make test          # tests
-make analyze       # análisis estático
-make shell         # shell interactivo dentro del contenedor
+make analyze       # static analysis
+make shell         # interactive shell inside the container
 ```
 
-Guía completa en [docs/development.md](docs/development.md).
+Full guide in [docs/development.md](docs/development.md).
 
-**Opción B — Flutter nativo:**
+**Option B — Native Flutter:**
 
 ```bash
-# Requisitos: Flutter SDK estable (ver versión fijada en el repo)
+# Requirements: stable Flutter SDK (see pinned version in the repo)
 git clone https://github.com/mangelsnc/dead-drop.git
 cd dead-drop/app
 flutter pub get
-flutter run            # ejecuta en tu plataforma
+flutter run            # runs on your platform
 flutter test           # tests
 ```
 
-Las builds reproducibles y la firma de binarios están documentadas en cada release y en [docs/security.md](docs/security.md).
+Reproducible builds and binary signing are documented in each release and in [docs/security.md](docs/security.md).
 
-## Estilo de código
+## Code style
 
-- Dart: `flutter analyze` sin warnings, formateo con `dart format`.
-- Comenta el *por qué*, no el *qué*.
-- Sin dependencias nuevas sin discusión previa en issue: cada dependencia es superficie de auditoría.
+- Dart: `flutter analyze` with no warnings, formatted with `dart format`.
+- Comment the *why*, not the *what*.
+- No new dependencies without prior discussion in an issue: every dependency is audit surface.
 
-## Código de conducta
+## Code of conduct
 
-Todo el que participa en DeadDrop acepta el [Código de Conducta](CODE_OF_CONDUCT.md). Resumen: respeto, sin excepciones.
+Everyone participating in DeadDrop accepts the [Code of Conduct](CODE_OF_CONDUCT.md). Summary: respect, no exceptions.
 
-## Licencia
+## Licence
 
-Al contribuir aceptas que tu contribución se distribuya bajo la licencia [MIT](LICENSE) del proyecto, para siempre.
+By contributing you accept that your contribution is distributed under the project's [MIT licence](LICENSE), forever.
