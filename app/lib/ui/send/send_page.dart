@@ -285,7 +285,7 @@ class SendPage extends ConsumerWidget {
                   else ...[
                     Row(
                       children: [
-                        Icon(Icons.check_circle,
+                        const Icon(Icons.check_circle,
                             color: DeadDropColors.success, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
