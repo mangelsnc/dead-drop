@@ -1,0 +1,88 @@
+# DeadDrop — development environment Makefile
+#
+# Every target runs inside the Docker dev image (docker/Dockerfile), so the
+# only host requirement is Docker. No Flutter or Android SDK on the host.
+#
+# Quick start:
+#   make image         # build the dev image (first time only, ~10-15 min)
+#   make build-linux   # compile the Linux desktop app
+#   make shell         # interactive shell inside the container
+#
+# See docs/development.md for the full guide.
+
+SHELL := /bin/bash
+
+IMAGE        := deaddrop-dev:3.24.5
+DOCKERFILE   := docker/Dockerfile
+APP_DIR      := app
+
+# Match the container user to the host user so files written to the bind
+# mount (build/, .dart_tool/, pubspec.lock) keep host ownership.
+UID := $(shell id -u)
+GID := $(shell id -g)
+
+# Base docker run command: bind-mount the repo and reuse a named volume for
+# the pub cache so `flutter pub get` stays fast between runs.
+DOCKER_RUN := docker run --rm \
+	-v "$(CURDIR):/workspace" \
+	-v deaddrop-pub-cache:/opt/pub-cache \
+	-w /workspace
+
+# Add -it only when attached to a terminal (so `make shell` is interactive
+# but CI / scripted targets are not).
+TTY := $(shell test -t 0 && echo "-it")
+
+.PHONY: help image build-linux build-android build-ios test analyze clean shell doctor
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+image: ## Build the Docker development image
+	docker build -f $(DOCKERFILE) -t $(IMAGE) \
+		--build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) .
+
+build-linux: image ## Compile the Linux desktop app (release)
+	$(DOCKER_RUN) $(IMAGE) bash -c "\
+		cd $(APP_DIR) && \
+		flutter pub get && \
+		flutter build linux --release"
+	@echo "✔ Output: $(APP_DIR)/build/linux/x64/release/bundle/"
+
+build-android: image ## Compile the Android APK (release)
+	$(DOCKER_RUN) $(IMAGE) bash -c "\
+		cd $(APP_DIR) && \
+		flutter pub get && \
+		flutter build apk --release"
+	@echo "✔ Output: $(APP_DIR)/build/app/outputs/flutter-apk/app-release.apk"
+
+build-ios: ## iOS build — NOT available in Docker (requires macOS + Xcode)
+	@echo "❌ iOS builds cannot run in this Linux container."
+	@echo "   Apple requires macOS + Xcode (license and kernel restrictions)."
+	@echo "   Options:"
+	@echo "     1. On a Mac:  cd $(APP_DIR) && flutter build ios --release"
+	@echo "     2. Use CI:    see .github/workflows/build.yml (build-macos job)"
+	@exit 1
+
+test: image ## Run the test suite
+	$(DOCKER_RUN) $(IMAGE) bash -c "\
+		cd $(APP_DIR) && \
+		flutter pub get && \
+		flutter test"
+
+analyze: image ## Run static analysis (flutter analyze)
+	$(DOCKER_RUN) $(IMAGE) bash -c "\
+		cd $(APP_DIR) && \
+		flutter pub get && \
+		flutter analyze"
+
+clean: ## Remove build artifacts (host-side, no container needed)
+	rm -rf $(APP_DIR)/build
+	rm -rf $(APP_DIR)/.dart_tool
+	@echo "✔ Cleaned $(APP_DIR)/build and $(APP_DIR)/.dart_tool"
+
+shell: image ## Open an interactive shell inside the dev container
+	$(DOCKER_RUN) $(TTY) $(IMAGE) bash
+
+doctor: image ## Run flutter doctor inside the container (diagnostics)
+	$(DOCKER_RUN) $(IMAGE) flutter doctor -v
