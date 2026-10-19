@@ -1,0 +1,158 @@
+# Fastlane configuration for DeadDrop iOS builds
+#
+# Usage:
+#   cd app/ios
+#   fastlane ios build_simulator    — Build for simulator (no signing)
+#   fastlane ios build_release      — Build signed IPA for device
+#   fastlane ios distribute_firebase — Upload to Firebase App Distribution
+#   fastlane ios distribute_testflight — Upload to TestFlight
+#
+# Prerequisites:
+#   - Xcode 15.4+
+#   - CocoaPods installed
+#   - Flutter SDK in PATH
+#   - For distribute_firebase: fastlane add_plugin firebase_app_distribution
+#   - For distribute_testflight: Apple Developer Program membership
+
+default_platform(:ios)
+
+# Constants
+APP_SCHEME = "Runner"
+APP_WORKSPACE = "Runner.xcworkspace"
+APP_PROJECT = "Runner.xcodeproj"
+BUNDLE_ID = "com.deaddrop.app"
+FLUTTER_ROOT = ENV["FLUTTER_ROOT"] || `which flutter`.strip.gsub("/bin/flutter", "")
+
+platform :ios do
+
+  desc "Build for iOS Simulator (no signing required)"
+  lane :build_simulator do
+    UI.message "Building DeadDrop for iOS Simulator..."
+
+    # Ensure Flutter dependencies are resolved
+    sh("cd #{File.expand_path('..', Dir.pwd)} && flutter pub get")
+
+    # Build with Flutter (unsigned, for simulator)
+    sh(
+      "cd #{File.expand_path('..', Dir.pwd)} && " \
+      "flutter build ios --debug --no-codesign"
+    )
+
+    UI.success "Simulator build complete!"
+    UI.message "Output: #{File.expand_path('..', Dir.pwd)}/build/ios/iphonesimulator/Runner.app"
+  end
+
+  desc "Build release IPA for iOS device"
+  lane :build_release do |options|
+    export_method = options[:export_method] || "ad-hoc"
+
+    UI.message "Building DeadDrop release IPA (#{export_method})..."
+
+    # Ensure Flutter dependencies are resolved
+    app_dir = File.expand_path("..", Dir.pwd)
+    sh("cd #{app_dir} && flutter pub get")
+
+    # Build with Flutter
+    sh(
+      "cd #{app_dir} && " \
+      "flutter build ipa --release --export-method #{export_method}"
+    )
+
+    ipa_path = Dir[File.join(app_dir, "build/ios/ipa/*.ipa")].first
+
+    if ipa_path && File.exist?(ipa_path)
+      UI.success "IPA built successfully!"
+      UI.message "IPA: #{ipa_path}"
+      UI.message "Size: #{(File.size(ipa_path) / 1024.0 / 1024.0).round(1)} MB"
+
+      # Store path for distribution lanes
+      lane_context[:IPA_PATH] = ipa_path
+    else
+      UI.error "IPA not found in expected location"
+    end
+  end
+
+  desc "Distribute to Firebase App Distribution"
+  desc ""
+  desc "Requires: fastlane add_plugin firebase_app_distribution"
+  desc "Requires: Firebase project with iOS app configured"
+  desc "Requires: GOOGLE_APPLICATION_CREDENTIALS or firebase login"
+  lane :distribute_firebase do |options|
+    # Build if no IPA path provided
+    ipa_path = options[:ipa] || lane_context[:IPA_PATH]
+    unless ipa_path && File.exist?(ipa_path)
+      UI.message "No IPA provided, building first..."
+      build_release(export_method: "ad-hoc")
+      ipa_path = lane_context[:IPA_PATH]
+    end
+
+    release_notes = options[:notes] || "New beta build of DeadDrop"
+    groups = options[:groups] || "testers"
+
+    UI.message "Distributing to Firebase App Distribution..."
+    UI.message "  IPA: #{ipa_path}"
+    UI.message "  Groups: #{groups}"
+
+    firebase_app_distribution(
+      app: ENV["FIREBASE_APP_ID_IOS"] || "",
+      ipa_path: ipa_path,
+      release_notes: release_notes,
+      groups: groups,
+      debug: false
+    )
+
+    UI.success "Distributed to Firebase App Distribution!"
+    UI.message "Testers in group '#{groups}' will receive an email invitation."
+  end
+
+  desc "Distribute to TestFlight"
+  desc ""
+  desc "Requires: Apple Developer Program membership"
+  desc "Requires: App Store Connect API key or Apple ID credentials"
+  lane :distribute_testflight do |options|
+    # Build if no IPA path provided
+    ipa_path = options[:ipa] || lane_context[:IPA_PATH]
+    unless ipa_path && File.exist?(ipa_path)
+      UI.message "No IPA provided, building first..."
+      build_release(export_method: "app-store")
+      ipa_path = lane_context[:IPA_PATH]
+    end
+
+    changelog = options[:changelog] || "New beta build of DeadDrop"
+
+    UI.message "Uploading to TestFlight..."
+
+    upload_to_testflight(
+      ipa: ipa_path,
+      changelog: changelog,
+      skip_waiting_for_build_processing: true,
+      notify_external_testers: false,
+      distribute_external: false
+    )
+
+    UI.success "Uploaded to TestFlight!"
+    UI.message "The build will appear in App Store Connect after processing (5-15 min)."
+    UI.message "Add it to a test group in App Store Connect → TestFlight."
+  end
+
+  desc "Run Flutter tests"
+  lane :test do
+    app_dir = File.expand_path("..", Dir.pwd)
+    sh("cd #{app_dir} && flutter test")
+  end
+
+  desc "Clean build artifacts"
+  lane :clean do
+    app_dir = File.expand_path("..", Dir.pwd)
+    sh("cd #{app_dir} && flutter clean")
+    sh("rm -rf #{app_dir}/build/ios")
+    sh("rm -rf #{Dir.pwd}/Pods")
+    sh("rm -f #{Dir.pwd}/Podfile.lock")
+    UI.success "Cleaned!"
+  end
+
+  # Error handling
+  error do |lane, exception|
+    UI.error "Lane #{lane} failed: #{exception.message}"
+  end
+end
