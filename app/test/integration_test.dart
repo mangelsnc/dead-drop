@@ -4,7 +4,6 @@
 /// produces identical results to the Python spike.
 library;
 
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
