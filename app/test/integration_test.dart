@@ -109,7 +109,7 @@ void main() {
   late Sodium sodium;
 
   setUpAll(() async {
-    sodium = await SodiumInit.init2(_loadLibsodium);
+    sodium = await SodiumInit.init(_loadLibsodium);
   });
 
   group('Crypto', () {
