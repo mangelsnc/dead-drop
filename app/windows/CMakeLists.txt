@@ -52,6 +52,19 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# Ensure CMAKE_VS_PLATFORM_TOOLSET is set before plugins are loaded.
+# sodium_libs uses this variable to locate the bundled libsodium.dll at
+# lib/<build_type>/<toolset>/libsodium.dll. In multi-config generators
+# (Visual Studio), it may not be set at configure time in the plugin scope.
+if(NOT CMAKE_VS_PLATFORM_TOOLSET)
+  if(MSVC_VERSION GREATER_EQUAL 1930)
+    set(CMAKE_VS_PLATFORM_TOOLSET "v143")
+  elseif(MSVC_VERSION GREATER_EQUAL 1920)
+    set(CMAKE_VS_PLATFORM_TOOLSET "v142")
+  else()
+    set(CMAKE_VS_PLATFORM_TOOLSET "v142")
+  endif()
+endif()
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
