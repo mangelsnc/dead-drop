@@ -75,7 +75,7 @@ class Emitter {
     final seq = _seq++;
     final (chunkIds, xored) = fountain.makeFrame(seq, transferSeed);
     final nonce = sodium.randombytes.buf(nonceSize);
-    final ct = session.box.encrypt(
+    final ct = session.box.easy(
       message: xored,
       nonce: nonce,
     );
