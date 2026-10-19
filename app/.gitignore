@@ -6,6 +6,9 @@
 build/
 *.iml
 
+# IDE
+.idea/
+
 # Android
 android/.gradle/
 android/local.properties
@@ -26,6 +29,7 @@ windows/flutter/ephemeral/
 
 # Linux
 linux/flutter/ephemeral/
+linux/local.properties
 
 # Test coverage
 coverage/
