@@ -48,7 +48,7 @@ En internet: nada, porque no hay internet. En los dispositivos: la app no guarda
 
 ### ¿Qué pasa si me obligan a desbloquear la app?
 
-Para eso existe el **PIN señuelo**. Puedes configurar un segundo PIN que abre la app mostrando un contenido falso y creíble que tú preparas de antemano (fotos anodinas, documentos sin importancia). Quien te obligue ve una app normal con contenido normal. Tus archivos reales no aparecen por ninguna parte y no hay forma de saber que existe otro espacio. Lee la [guía de uso](guia-uso.md#el-pin-señuelo-qué-es-y-cómo-se-configura) para configurarlo bien.
+Para eso existe el **PIN señuelo**. Puedes configurar un segundo PIN que abre la app mostrando un contenido falso y creíble que tú preparas de antemano (fotos anodinas, documentos sin importancia). Quien te obligue ve una app normal con contenido normal. Tus archivos reales no aparecen por ninguna parte y no hay forma de saber que existe otro espacio. Lee la [guía de uso](user-guide.md#the-decoy-pin-what-it-is-and-how-to-set-it-up) para configurarlo bien.
 
 ### ¿Qué pasa si pierdo o me roban el dispositivo?
 
@@ -60,7 +60,7 @@ No hay forma de recuperarlo. No existe una "pregunta de seguridad" ni un correo 
 
 ### ¿Puedo fiarme del cifrado? ¿Quién lo ha revisado?
 
-DeadDrop no inventa su propio cifrado: usa **libsodium**, una librería de criptografía auditada y usada por herramientas tan contrastadas como Signal y WireGuard. Además, todo el código de DeadDrop es público: cualquier experto del mundo puede revisarlo y auditarlo, y los binarios que descargas se pueden regenerar desde el código fuente para comprobar que son exactamente lo que dicen ser. Los detalles técnicos están en [seguridad.md](seguridad.md).
+DeadDrop no inventa su propio cifrado: usa **libsodium**, una librería de criptografía auditada y usada por herramientas tan contrastadas como Signal y WireGuard. Además, todo el código de DeadDrop es público: cualquier experto del mundo puede revisarlo y auditarlo, y los binarios que descargas se pueden regenerar desde el código fuente para comprobar que son exactamente lo que dicen ser. Los detalles técnicos están en [security.md](security.md).
 
 ### ¿DeadDrop me hace anónimo en internet?
 
@@ -112,7 +112,7 @@ Porque una web necesita internet, y DeadDrop existe precisamente para no tocar i
 
 ### ¿Cómo sé que la app que descargué es la buena y no una copia modificada?
 
-Cada versión publica sus **checksums** (una huella digital del archivo) y las instrucciones para verificarla. Además, las compilaciones son **reproducibles**: cualquiera puede generar el binario desde el código fuente público y comprobar que coincide byte a byte con el publicado. Los pasos concretos están en [seguridad.md](seguridad.md).
+Cada versión publica sus **checksums** (una huella digital del archivo) y las instrucciones para verificarla. Además, las compilaciones son **reproducibles**: cualquiera puede generar el binario desde el código fuente público y comprobar que coincide byte a byte con el publicado. Los pasos concretos están en [security.md](security.md).
 
 ### ¿Quién está detrás del proyecto?
 
