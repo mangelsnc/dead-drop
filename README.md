@@ -1,117 +1,117 @@
 # DeadDrop
 
-**Pasa archivos de un dispositivo a otro sin internet, sin cables, sin Bluetooth. Solo la pantalla y la cámara.**
+**Pass files from one device to another with no internet, no cables, no Bluetooth. Just the screen and the camera.**
 
-Y si alguien te obliga a abrir la aplicación, un PIN señuelo muestra un contenido falso y convincente mientras tus archivos reales permanecen invisibles.
-
----
-
-## ¿Por qué existe DeadDrop?
-
-Imagina que tienes en tu portátil unos documentos que necesitas entregar **en mano** a otra persona que está a un metro de ti. Hoy tus opciones son malas:
-
-- **Enviarlos por internet** (correo, WhatsApp, nube): aunque vayan cifrados, dejas un rastro permanente en servidores ajenos: quién envía, quién recibe, cuándo.
-- **Bluetooth o AirDrop**: emiten señales detectables y quedan registrados en el sistema.
-- **Un USB**: es lo primero que se incauta en un control, y un clásico para propagar virus.
-
-DeadDrop resuelve esto: la pantalla de un dispositivo muestra códigos QR animados, la cámara del otro los lee, y el archivo pasa **protegido de extremo a extremo sin que un solo byte toque ninguna red**. Puedes activar el modo avión delante de cualquiera y la transferencia funciona igual.
-
-**¿Para quién es?** Para la periodista que entrega una filtración a su redacción. Para el activista que pasa pruebas a un abogado. Para cualquier persona que quiere entregar sus documentos personales sin que pasen por servidores de terceros. La privacidad es un derecho (artículos 12, 19 y 20 de la Declaración Universal de Derechos Humanos), no un privilegio técnico.
+And if someone forces you to open the app, a decoy PIN shows a fake, convincing environment while your real files remain invisible.
 
 ---
 
-## Cómo funciona en 30 segundos
+## Why does DeadDrop exist?
+
+Imagine you have documents on your laptop that you need to hand over **in person** to someone standing one metre away. Today your options are bad:
+
+- **Sending them over the internet** (email, WhatsApp, cloud): even encrypted, you leave a permanent trail on third-party servers: who sends, who receives, when.
+- **Bluetooth or AirDrop**: they emit detectable signals and get logged by the system.
+- **A USB drive**: the first thing seized at a checkpoint, and a classic malware vector.
+
+DeadDrop solves this: one device's screen shows animated QR codes, the other device's camera reads them, and the file crosses **end-to-end protected without a single byte touching any network**. You can turn on airplane mode in front of anyone and the transfer works just the same.
+
+**Who is it for?** For the journalist handing a leak to her newsroom. For the activist passing evidence to a lawyer. For anyone who wants to hand over personal documents without them passing through third-party servers. Privacy is a right (Articles 12, 19 and 20 of the Universal Declaration of Human Rights), not a technical privilege.
+
+---
+
+## How it works in 30 seconds
 
 ```
-  Dispositivo A (envía)                    Dispositivo B (recibe)
+  Device A (sends)                       Device B (receives)
 ┌─────────────────────┐                  ┌─────────────────────┐
 │                     │                  │                     │
-│   ▓▓▓▓▓  ▓▓▓▓▓     │   solo luz,     │                     │
-│   ▓ QR ▓→▓ QR ▓→   │ ═══════════════► │      📷 cámara      │
-│   ▓▓▓▓▓  ▓▓▓▓▓     │   sin radio,     │                     │
-│                     │   sin red        │                     │
+│   ▓▓▓▓▓  ▓▓▓▓▓     │   light only,   │                     │
+│   ▓ QR ▓→▓ QR ▓→   │ ═══════════════► │      📷 camera      │
+│   ▓▓▓▓▓  ▓▓▓▓▓     │   no radio,     │                     │
+│                     │   no network    │                     │
 └─────────────────────┘                  └─────────────────────┘
-   Elige archivo → la pantalla              Apunta con la cámara
-   muestra códigos animados                 → recibe el archivo
+   Pick a file → the screen               Point the camera
+   shows animated codes                  → receive the file
 ```
 
-1. **Eliges el archivo** en el dispositivo que envía.
-2. **Aparecen códigos QR animados** en su pantalla (el archivo viaja dentro de ellos, protegido para que solo el destinatario pueda abrirlo).
-3. **El otro dispositivo apunta con su cámara** y recibe el archivo. Listo.
+1. **You pick the file** on the sending device.
+2. **Animated QR codes appear** on its screen (the file travels inside them, protected so only the recipient can open it).
+3. **The other device points its camera** and receives the file. Done.
 
-Sin cuentas, sin configuración, sin servidores, sin registros.
+No accounts, no configuration, no servers, no logs.
 
 ---
 
-## Instalación
+## Installation
 
-Descarga el instalador para tu sistema desde la página de [Releases](../../releases) (o compila desde el código fuente — ver [CONTRIBUTING.md](CONTRIBUTING.md)):
+Download the installer for your system from the [Releases](../../releases) page (or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md)):
 
 ### Windows
-1. Descarga `DeadDrop-x.y.z-windows.exe`.
-2. Ejecútalo (si Windows SmartScreen avisa, pulsa "Más información" → "Ejecutar de todas formas").
-3. Abre DeadDrop desde el menú Inicio.
+1. Download `DeadDrop-x.y.z-windows.exe`.
+2. Run it (if Windows SmartScreen warns you, click "More info" → "Run anyway").
+3. Open DeadDrop from the Start menu.
 
 ### macOS
-1. Descarga `DeadDrop-x.y.z-macos.dmg`.
-2. Arrastra DeadDrop a la carpeta Aplicaciones.
-3. La primera vez, ábrelo con clic derecho → "Abrir" (Gatekeeper lo exige en apps sin notarizar).
+1. Download `DeadDrop-x.y.z-macos.dmg`.
+2. Drag DeadDrop to the Applications folder.
+3. The first time, open it with right-click → "Open" (Gatekeeper requires this for non-notarized apps).
 
 ### Linux
-1. Descarga `DeadDrop-x.y.z-linux.AppImage` (o `.deb`).
-2. Dale permisos de ejecución: `chmod +x DeadDrop-*.AppImage`.
-3. Ejecútalo con doble clic.
+1. Download `DeadDrop-x.y.z-linux.AppImage` (or `.deb`).
+2. Make it executable: `chmod +x DeadDrop-*.AppImage`.
+3. Run it with a double click.
 
-> **Verificación:** cada release publica los checksums SHA-256 de los binarios y las instrucciones para reproducir la compilación desde el código fuente. Ver [docs/security.md](docs/security.md).
-
----
-
-## Primer uso en 2 minutos
-
-1. **Abre DeadDrop en ambos dispositivos.** No necesitas crear ninguna cuenta.
-2. En el dispositivo que **envía**: pulsa **"Enviar un archivo"** y elige el archivo.
-3. En el dispositivo que **recibe**: pulsa **"Recibir un archivo"** y apunta con la cámara a la pantalla del otro.
-4. Verás una barra de progreso en ambos. Al terminar, el receptor pulsa **"Guardar"** y elige dónde.
-
-Eso es todo. La [guía de uso completa](docs/user-guide.md) explica cada paso con capturas de pantalla, qué hacer si la cámara no lee bien, y cómo configurar el PIN señuelo.
+> **Verification:** each release publishes the SHA-256 checksums of the binaries and instructions to reproduce the build from source. See [docs/security.md](docs/security.md).
 
 ---
 
-## Preguntas rápidas
+## First use in 2 minutes
 
-**¿Necesito internet?** No. Nunca. Ni para instalar la app (si la copias por USB), ni para usarla, ni para activarla.
+1. **Open DeadDrop on both devices.** No account needed.
+2. On the **sending** device: tap **"Send a file"** and pick the file.
+3. On the **receiving** device: tap **"Receive a file"** and point the camera at the other screen.
+4. You'll see a progress bar on both. When finished, the receiver taps **"Save"** and chooses where.
 
-**¿Qué pasa si me obligan a desbloquearla?** Puedes configurar un **PIN señuelo**: si lo introduces, la app se abre con normalidad pero muestra un contenido falso y creíble que tú eliges de antemano. Tus archivos reales no aparecen por ninguna parte. Más detalles en el [FAQ](docs/faq.md).
-
-**¿Es legal?** Sí. DeadDrop es software libre (licencia MIT), auditable por cualquiera, y no oculta su propia existencia. Protege el mismo derecho que protege el correo postal sellado: la privacidad de la correspondencia. Ver el análisis completo en el [FAQ](docs/faq.md#es-legal).
-
-Más respuestas en [docs/faq.md](docs/faq.md).
+That's it. The [full user guide](docs/user-guide.md) walks through every step with screenshots, what to do if the camera struggles to read, and how to set up the decoy PIN.
 
 ---
 
-## Estado del proyecto
+## Quick questions
 
-DeadDrop está en desarrollo activo para el reto **#cryptograFREE** (RootedCON + Criptored). Este repositorio es público desde el primer día y lo seguirá siendo para siempre.
+**Do I need internet?** No. Never. Not to install the app (if you copy it via USB), not to use it, not to activate it.
 
-- ✅ Documentación y propuesta de valor
-- 🚧 MVP en desarrollo (entrega: febrero 2027)
-- 📋 Roadmap: apps móviles Android/iOS tras el MVP
+**What if someone forces me to unlock it?** You can set up a **decoy PIN**: if entered, the app opens normally but shows fake, credible content you chose in advance. Your real files are nowhere to be found. More details in the [FAQ](docs/faq.md).
 
-## Documentación
+**Is it legal?** Yes. DeadDrop is free software (MIT licence), auditable by anyone, and does not hide its own existence. It protects the same right as a sealed letter: the privacy of correspondence. Full analysis in the [FAQ](docs/faq.md#is-it-legal).
 
-| Documento | Para quién |
+More answers in [docs/faq.md](docs/faq.md).
+
+---
+
+## Project status
+
+DeadDrop is in active development for the **#cryptograFREE** challenge (RootedCON + Criptored). This repository has been public since day one and will remain so forever.
+
+- ✅ Documentation and value proposition
+- 🚧 MVP in development (delivery: February 2027)
+- 📋 Roadmap: Android/iOS mobile apps after the MVP
+
+## Documentation
+
+| Document | Who it's for |
 |---|---|
-| [docs/user-guide.md](docs/user-guide.md) | Cualquier persona que quiera usar la app, paso a paso y con capturas |
-| [docs/faq.md](docs/faq.md) | Respuestas a las preguntas que todo el mundo hace |
-| [docs/security.md](docs/security.md) | Qué protege y qué no protege DeadDrop — en llano y en versión técnica |
-| [docs/value-proposition.md](docs/value-proposition.md) | Por qué existe el proyecto y qué lo hace distinto |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Cómo colaborar (código, traducciones, documentación) |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Normas de convivencia de la comunidad |
+| [docs/user-guide.md](docs/user-guide.md) | Anyone who wants to use the app, step by step with screenshots |
+| [docs/faq.md](docs/faq.md) | Answers to the questions everyone asks |
+| [docs/security.md](docs/security.md) | What DeadDrop protects and what it doesn't — in plain language and in a technical version |
+| [docs/value-proposition.md](docs/value-proposition.md) | Why the project exists and what makes it different |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute (code, translations, documentation) |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community rules |
 
-## Licencia
+## Licence
 
-[MIT](LICENSE) — software libre, para siempre.
+[MIT](LICENSE) — free software, forever.
 
 ---
 
-*DeadDrop no te hace invisible. Te devuelve algo que nunca debiste perder: la posibilidad de entregar información en mano sin que medio mundo lo sepa.*
+*DeadDrop doesn't make you invisible. It gives you back something you should never have lost: the ability to hand information over in person without half the world knowing about it.*
