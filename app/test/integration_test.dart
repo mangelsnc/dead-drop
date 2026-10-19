@@ -8,8 +8,8 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sodium_libs/sodium_libs.dart' hide SodiumInit;
-import 'package:sodium/sodium.dart' as sodium_pkg show SodiumInit;
+import 'package:sodium_libs/sodium_libs.dart' show Sodium;
+import 'package:sodium/sodium.dart' show SodiumInit;
 
 import 'package:dead_drop/src/crypto.dart';
 import 'package:dead_drop/src/emitter.dart';
@@ -81,7 +81,7 @@ void main() {
   late Sodium sodium;
 
   setUpAll(() async {
-    sodium = await sodium_pkg.SodiumInit.init2(_loadLibsodium);
+    sodium = await SodiumInit.init2(_loadLibsodium);
   });
 
   group('Crypto', () {
