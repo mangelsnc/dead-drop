@@ -17,6 +17,12 @@ ios/.symlinks/
 ios/Flutter/Flutter.framework
 ios/Flutter/Flutter.podspec
 ios/Flutter/ephemeral/
+ios/build/
+ios/fastlane/report.xml
+ios/fastlane/Preview.html
+ios/fastlane/screenshots/
+ios/fastlane/test_output/
+ios/GoogleService-Info.plist
 
 # macOS
 macos/Flutter/ephemeral/
