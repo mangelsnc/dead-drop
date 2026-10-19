@@ -4,9 +4,11 @@
 /// produces identical results to the Python spike.
 library;
 
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sodium_libs/sodium_libs.dart' show Sodium;
 import 'package:sodium/sodium.dart' show SodiumInit;
