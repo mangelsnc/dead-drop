@@ -1,0 +1,39 @@
+# DeadDrop development environment (optional convenience wrapper).
+#
+# The Makefile is the primary interface and works with plain `docker`.
+# This compose file is for users who prefer `docker compose`:
+#
+#   docker compose build dev
+#   docker compose run --rm dev bash
+#
+# The source tree is bind-mounted at /workspace (the container WORKDIR).
+# A named volume caches pub packages across runs so `flutter pub get` is fast.
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        # Match the container user to the host user so generated files
+        # (build/, .dart_tool/, pubspec.lock) are owned by you, not root.
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+    image: deaddrop-dev:3.24.5
+    container_name: deaddrop-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - pub-cache:/opt/pub-cache
+    environment:
+      # Flutter web / hot-reload dev server (optional).
+      - FLUTTER_WEB_PORT=5000
+    ports:
+      # Hot-reload / flutter run -d web-server
+      - "5000:5000"
+    stdin_open: true
+    tty: true
+    command: bash
+
+volumes:
+  pub-cache:
