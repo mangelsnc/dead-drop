@@ -9,7 +9,7 @@ echo "🔥 DeadDrop — Firebase App Distribution Setup"
 echo "============================================="
 echo ""
 
-# Check if GoogleService-Info.plist exists
+# Check if GoogleService-Info.plist exists (iOS)
 if [ ! -f "app/ios/Runner/GoogleService-Info.plist" ]; then
     echo "❌ GoogleService-Info.plist not found!"
     echo ""
@@ -25,36 +25,69 @@ fi
 
 echo "✅ GoogleService-Info.plist found"
 
-# Extract Firebase App ID
-FIREBASE_APP_ID=$(grep -o '"GOOGLE_APP_ID": "[^"]*"' app/ios/Runner/GoogleService-Info.plist | cut -d'"' -f4)
-
-if [ -z "$FIREBASE_APP_ID" ]; then
-    echo "⚠️  Could not extract Firebase App ID from plist"
-    echo "   You'll need to set FIREBASE_APP_ID_IOS manually"
-else
-    echo "✅ Firebase App ID: $FIREBASE_APP_ID"
+# Check if google-services.json exists (Android)
+if [ ! -f "app/android/app/google-services.json" ]; then
+    echo "❌ google-services.json not found!"
     echo ""
-    echo "Add this to your shell profile (~/.zshrc or ~/.bashrc):"
+    echo "Please:"
+    echo "  1. Go to https://console.firebase.google.com"
+    echo "  2. Select your project → Project settings → Your apps"
+    echo "  3. Click the Android app (dev.deaddrop.dead_drop)"
+    echo "  4. Download google-services.json"
+    echo "  5. Save it to: app/android/app/google-services.json"
     echo ""
-    echo "  export FIREBASE_APP_ID_IOS=\"$FIREBASE_APP_ID\""
-    echo ""
+    exit 1
 fi
 
-# Check if fastlane firebase plugin is installed
+echo "✅ google-services.json found"
+
+# Extract Firebase App IDs
+FIREBASE_APP_ID_IOS=$(grep -o '"GOOGLE_APP_ID": "[^"]*"' app/ios/Runner/GoogleService-Info.plist | cut -d'"' -f4)
+FIREBASE_APP_ID_ANDROID=$(grep -o '"mobilesdk_app_id": "[^"]*"' app/android/app/google-services.json | cut -d'"' -f4)
+
+echo ""
+echo "Firebase App IDs:"
+echo "  iOS:     $FIREBASE_APP_ID_IOS"
+echo "  Android: $FIREBASE_APP_ID_ANDROID"
+echo ""
+echo "Add these to your shell profile (~/.zshrc or ~/.bashrc):"
+echo ""
+echo "  export FIREBASE_APP_ID_IOS=\"$FIREBASE_APP_ID_IOS\""
+echo "  export FIREBASE_APP_ID_ANDROID=\"$FIREBASE_APP_ID_ANDROID\""
+echo ""
+
+# Check if fastlane firebase plugin is installed (iOS)
 if [ ! -f "app/ios/Gemfile" ]; then
-    echo "📦 Creating Gemfile for fastlane..."
+    echo "📦 Creating Gemfile for iOS fastlane..."
     cat > app/ios/Gemfile << 'EOF'
 source "https://rubygems.org"
 
 gem "fastlane"
 gem "fastlane-plugin-firebase_app_distribution"
 EOF
-    echo "✅ Gemfile created"
+    echo "✅ iOS Gemfile created"
+fi
+
+# Check if fastlane firebase plugin is installed (Android)
+if [ ! -f "app/android/Gemfile" ]; then
+    echo "📦 Creating Gemfile for Android fastlane..."
+    cat > app/android/Gemfile << 'EOF'
+source "https://rubygems.org"
+
+gem "fastlane"
+gem "fastlane-plugin-firebase_app_distribution"
+EOF
+    echo "✅ Android Gemfile created"
 fi
 
 echo ""
-echo "📦 Installing fastlane dependencies..."
+echo "📦 Installing iOS fastlane dependencies..."
 cd app/ios
+bundle install
+
+echo ""
+echo "📦 Installing Android fastlane dependencies..."
+cd ../android
 bundle install
 
 echo ""
@@ -62,9 +95,11 @@ echo "✅ Setup complete!"
 echo ""
 echo "Next steps:"
 echo "  1. Add testers in Firebase Console → App Distribution → Testers & Groups"
-echo "  2. Run: cd app/ios && fastlane beta"
-echo "  3. Testers will receive email with install link"
+echo "  2. iOS:     cd app/ios && fastlane beta"
+echo "  3. Android: cd app/android && fastlane beta"
+echo "  4. Testers will receive email with install link"
 echo ""
 echo "For CI/CD, set these secrets in GitHub:"
 echo "  - FIREBASE_APP_ID_IOS"
+echo "  - FIREBASE_APP_ID_ANDROID"
 echo "  - GOOGLE_APPLICATION_CREDENTIALS (service account JSON)"
