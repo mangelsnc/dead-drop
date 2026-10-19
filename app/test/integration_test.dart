@@ -4,10 +4,12 @@
 /// produces identical results to the Python spike.
 library;
 
-import 'dart:typed_data';
+import 'dart:ffi';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sodium_libs/sodium_libs.dart';
+import 'package:sodium_libs/sodium_libs.dart' hide SodiumInit;
+import 'package:sodium/sodium.dart' as sodium_pkg show SodiumInit;
 
 import 'package:dead_drop/src/crypto.dart';
 import 'package:dead_drop/src/emitter.dart';
@@ -15,11 +17,71 @@ import 'package:dead_drop/src/fountain.dart';
 import 'package:dead_drop/src/qrframe.dart';
 import 'package:dead_drop/src/receiver.dart';
 
+/// Loads the native libsodium library for the current test platform.
+///
+/// `flutter test` runs in the flutter_tester VM, which does NOT link the
+/// libsodium binaries bundled by sodium_libs (that only happens in real app
+/// builds). So in tests we must load the library manually. We prefer the
+/// binaries bundled in the sodium_libs package (pub cache) and fall back to
+/// system-wide installations. See:
+/// https://github.com/Skycoder42/libsodium_dart_bindings/issues/23
+DynamicLibrary _loadLibsodium() {
+  for (final candidate in _libsodiumCandidates()) {
+    try {
+      return DynamicLibrary.open(candidate);
+    } on ArgumentError {
+      // Not found / not loadable — try next candidate.
+    }
+  }
+  throw StateError(
+    'Could not load libsodium on ${Platform.operatingSystem}. '
+    'Tried: ${_libsodiumCandidates().join(', ')}',
+  );
+}
+
+/// Candidate paths/names for the native libsodium library, in order.
+List<String> _libsodiumCandidates() {
+  final pubCache = Platform.environment['PUB_CACHE'];
+  final sodiumLibsPkg = pubCache == null
+      ? null
+      : '$pubCache/hosted/pub.dev/sodium_libs-2.2.1+6';
+
+  if (Platform.isLinux) {
+    return [
+      // Bundled with the sodium_libs plugin (pub cache).
+      if (sodiumLibsPkg != null) '$sodiumLibsPkg/linux/lib/x86_64/libsodium.so',
+      // System package (libsodium23 on Debian/Ubuntu).
+      'libsodium.so.23',
+      'libsodium.so',
+    ];
+  }
+  if (Platform.isWindows) {
+    return [
+      // Bundled with the sodium_libs plugin (pub cache).
+      if (sodiumLibsPkg != null)
+        '$sodiumLibsPkg/windows/lib/Release/v143/libsodium.dll',
+      'libsodium.dll',
+    ];
+  }
+  if (Platform.isMacOS) {
+    return [
+      // Bundled with the sodium_libs plugin (pub cache).
+      if (sodiumLibsPkg != null) '$sodiumLibsPkg/macos/Libraries/libsodium.dylib',
+      // Homebrew on Apple Silicon (macos-14 CI runner).
+      '/opt/homebrew/lib/libsodium.dylib',
+      // Homebrew on Intel.
+      '/usr/local/lib/libsodium.dylib',
+      'libsodium.dylib',
+    ];
+  }
+  throw UnsupportedError('Unsupported test platform: ${Platform.operatingSystem}');
+}
+
 void main() {
   late Sodium sodium;
 
   setUpAll(() async {
-    sodium = await SodiumInit.init();
+    sodium = await sodium_pkg.SodiumInit.init2(_loadLibsodium);
   });
 
   group('Crypto', () {

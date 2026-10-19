@@ -26,6 +26,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  # Direct import in tests: SodiumInit.init2() loads the native libsodium
+  # binary manually (flutter_tester does not link the plugin's binaries).
+  sodium: ^2.3.1
 
 flutter:
   uses-material-design: true
