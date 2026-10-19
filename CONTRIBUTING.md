@@ -30,12 +30,28 @@ Gracias por querer ayudar. DeadDrop es un proyecto de software libre (MIT) const
 
 ## Entorno de desarrollo
 
-El stack es **Flutter** (Dart) + **libsodium**:
+El stack es **Flutter** (Dart) + **libsodium**.
+
+**Opción A — Docker (recomendada, sin instalar Flutter en tu máquina):**
+
+```bash
+# Requisito: solo Docker
+git clone https://github.com/mangelsnc/dead-drop.git
+cd dead-drop
+make build-linux   # compila la app de escritorio Linux
+make test          # tests
+make analyze       # análisis estático
+make shell         # shell interactivo dentro del contenedor
+```
+
+Guía completa en [docs/development.md](docs/development.md).
+
+**Opción B — Flutter nativo:**
 
 ```bash
 # Requisitos: Flutter SDK estable (ver versión fijada en el repo)
 git clone https://github.com/mangelsnc/dead-drop.git
-cd dead-drop
+cd dead-drop/app
 flutter pub get
 flutter run            # ejecuta en tu plataforma
 flutter test           # tests
