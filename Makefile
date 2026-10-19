@@ -64,13 +64,14 @@ build-android: ## Compile the Android APK (release)
 		flutter build apk --release"
 	@echo "✔ Output: $(APP_DIR)/build/app/outputs/flutter-apk/app-release.apk"
 
-build-ios: ## iOS build — NOT available in Docker (requires macOS + Xcode)
-	@echo "❌ iOS builds cannot run in this Linux container."
-	@echo "   Apple requires macOS + Xcode (license and kernel restrictions)."
-	@echo "   Options:"
-	@echo "     1. On a Mac:  cd $(APP_DIR) && flutter build ios --release"
-	@echo "     2. Use CI:    see .github/workflows/build.yml (build-macos job)"
-	@exit 1
+build-ios: ## iOS build — runs on HOST, not in Docker (requires macOS + Xcode + Flutter)
+	@echo "⚠️  iOS builds cannot run in Docker (Apple requires macOS + Xcode)."
+	@echo "   This will run on your Mac using your local Flutter installation."
+	@echo "   Make sure you have Flutter SDK installed and in your PATH."
+	@echo ""
+	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	cd $(APP_DIR) && flutter pub get && flutter build ios --release
+	@echo "✔ Output: $(APP_DIR)/build/ios/iphoneos/Runner.app"
 
 build-macos: ## macOS build — runs on HOST, not in Docker (requires macOS + Flutter)
 	@echo "⚠️  macOS builds cannot run in Docker (Apple requires macOS + Xcode)."
