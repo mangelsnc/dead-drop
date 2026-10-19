@@ -20,7 +20,7 @@ default_platform(:ios)
 APP_SCHEME = "Runner"
 APP_WORKSPACE = "Runner.xcworkspace"
 APP_PROJECT = "Runner.xcodeproj"
-BUNDLE_ID = "com.deaddrop.app"
+BUNDLE_ID = "dev.deaddrop.deadDrop"
 FLUTTER_ROOT = ENV["FLUTTER_ROOT"] || `which flutter`.strip.gsub("/bin/flutter", "")
 
 platform :ios do
