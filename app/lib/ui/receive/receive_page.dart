@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/crypto.dart';
 import '../../src/receiver.dart';
@@ -219,7 +220,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                   children: [
                     Row(
                       children: [
-                        CircleAvatar(
+                        const CircleAvatar(
                           radius: 14,
                           child: Text('1'),
                         ),
@@ -241,7 +242,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                           ),
                           child: QrImageView(
                             data: _bytesToHex(
-                                state.receiverKeypair!.publicKey.bytes),
+                                state.receiverKeypair!.publicKey),
                             version: QrVersions.auto,
                             size: 200,
                             backgroundColor: Colors.white,
@@ -272,7 +273,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                   children: [
                     Row(
                       children: [
-                        CircleAvatar(
+                        const CircleAvatar(
                           radius: 14,
                           child: Text('2'),
                         ),
@@ -342,7 +343,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                     children: [
                       Row(
                         children: [
-                          CircleAvatar(
+                          const CircleAvatar(
                             radius: 14,
                             child: Text('3'),
                           ),
