@@ -1,0 +1,11 @@
+# Fastlane Pluginfile — DeadDrop iOS
+# Manages Fastlane plugins for this project.
+#
+# Install all plugins:
+#   cd app/ios
+#   fastlane install_plugins
+
+# Firebase App Distribution plugin
+# Enables: firebase_app_distribution action
+# Docs: https://firebase.google.com/docs/app-distribution/ios/distribute-fastlane
+gem 'fastlane-plugin-firebase_app_distribution'
