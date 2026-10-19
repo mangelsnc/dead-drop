@@ -59,7 +59,7 @@ RUN git clone --depth 1 --branch "${FLUTTER_VERSION}" \
     && flutter config --enable-linux-desktop \
     && flutter precache --linux --android \
     && flutter doctor --version \
-    && rm -rf /opt/flutter/.git
+    && rm -rf /opt/flutter/.git/objects/pack/*
 
 # --- Android SDK -------------------------------------------------------------
 # Minimal install: cmdline-tools + platform + build-tools only.
@@ -82,7 +82,7 @@ RUN mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools" \
 # the mounted source tree keep the host user's ownership.
 ARG USER_UID=1000
 ARG USER_GID=1000
-RUN groupadd --gid "${USER_GID}" dev \
+RUN groupadd --force --gid "${USER_GID}" dev \
     && useradd --uid "${USER_UID}" --gid "${USER_GID}" --create-home --shell /bin/bash dev \
     && mkdir -p "${PUB_CACHE}" "${GRADLE_USER_HOME}" \
     && chown -R dev:dev /opt/flutter "${PUB_CACHE}" "${GRADLE_USER_HOME}" "${ANDROID_SDK_ROOT}"
