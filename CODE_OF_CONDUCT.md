@@ -1,45 +1,45 @@
-# Código de Conducta
+# Code of Conduct
 
-## Nuestro compromiso
+## Our Pledge
 
-Nosotros, como miembros, contribuidores y administradores de DeadDrop, nos comprometemos a hacer de la participación en este proyecto una experiencia libre de acoso para todo el mundo, independientemente de la edad, tamaño corporal, discapacidad visible o invisible, etnia, características sexuales, identidad y expresión de género, nivel de experiencia, educación, nivel socioeconómico, nacionalidad, apariencia personal, raza, religión, o identidad u orientación sexual.
+We, as members, contributors and administrators of DeadDrop, pledge to make participation in this project a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, religion, or sexual identity and orientation.
 
-Nos comprometemos a actuar e interactuar de maneras que contribuyan a una comunidad abierta, acogedora, diversa, inclusiva y sana.
+We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy community.
 
-## Nuestros estándares
+## Our Standards
 
-Ejemplos de comportamiento que contribuyen a un ambiente positivo:
+Examples of behavior that contributes to a positive environment:
 
-- Demostrar empatía y amabilidad ante otras personas
-- Respeto a diferentes opiniones, puntos de vista y experiencias
-- Dar y aceptar adecuadamente retroalimentación constructiva
-- Aceptar la responsabilidad y disculparse ante quienes se vean afectados por nuestros errores, aprendiendo de la experiencia
-- Centrarse en lo que sea mejor no solo para nosotros como individuos, sino para la comunidad en general
+- Demonstrating empathy and kindness toward other people
+- Being respectful of differing opinions, viewpoints, and experiences
+- Giving and gracefully accepting constructive feedback
+- Accepting responsibility and apologizing to those affected by our mistakes, and learning from the experience
+- Focusing on what is best not just for us as individuals, but for the overall community
 
-Ejemplos de comportamiento inaceptable:
+Examples of unacceptable behavior:
 
-- El uso de lenguaje o imágenes sexualizadas, y aproximaciones o atenciones sexuales de cualquier tipo
-- Comentarios despectivos (*trolling*), insultantes o derogatorios, y ataques personales o políticos
-- El acoso en público o privado
-- Publicar información privada de otras personas, tales como direcciones físicas o de correo electrónico, sin su permiso explícito
-- Otras conductas que puedan ser razonablemente consideradas como inapropiadas en un entorno profesional
+- The use of sexualized language or imagery, and sexual attention or advances of any kind
+- Trolling, insulting or derogatory comments, and personal or political attacks
+- Public or private harassment
+- Publishing others' private information, such as a physical or email address, without their explicit permission
+- Other conduct which could reasonably be considered inappropriate in a professional setting
 
-## Aplicación de las responsabilidades
+## Enforcement Responsibilities
 
-Los administradores del proyecto son responsables de aclarar y hacer cumplir nuestros estándares de comportamiento aceptable y tomarán acciones correctivas apropiadas y justas en respuesta a cualquier comportamiento que consideren inapropiado, amenazante, ofensivo o dañino.
+Project administrators are responsible for clarifying and enforcing our standards of acceptable behavior and will take appropriate and fair corrective action in response to any behavior that they deem inappropriate, threatening, offensive, or harmful.
 
-Los administradores del proyecto tienen el derecho y la responsabilidad de eliminar, editar o rechazar comentarios, *commits*, código, ediciones de páginas wiki, *issues* y otras contribuciones que no se alineen con este Código de Conducta, y comunicarán las razones para sus decisiones de moderación cuando sea apropiado.
+Project administrators have the right and responsibility to remove, edit, or reject comments, commits, code, wiki edits, issues, and other contributions that are not aligned with this Code of Conduct, and will communicate reasons for moderation decisions when appropriate.
 
-## Alcance
+## Scope
 
-Este código de conducta aplica tanto a espacios del proyecto (issues, pull requests, discusiones) como a espacios públicos donde un individuo esté representando al proyecto o su comunidad.
+This Code of Conduct applies within all project spaces (issues, pull requests, discussions), and also applies when an individual is officially representing the project or its community in public spaces.
 
-## Aplicación
+## Enforcement
 
-Los casos de comportamiento abusivo, acosador o inaceptable pueden reportarse a los administradores del proyecto a través de las issues del repositorio (marcando a los mantenedores) o por los canales de contacto publicados en el perfil del proyecto. Todas las quejas serán revisadas e investigadas de una manera puntual y justa.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project administrators through the repository's issues (tagging the maintainers) or via the contact channels published on the project profile. All complaints will be reviewed and investigated promptly and fairly.
 
-Todos los administradores del proyecto están obligados a respetar la privacidad y la seguridad de quienes reporten incidentes.
+All project administrators are obligated to respect the privacy and security of the reporter of any incident.
 
-## Atribución
+## Attribution
 
-Este Código de Conducta es una adaptación del [Contributor Covenant](https://www.contributor-covenant.org), versión 2.1, disponible en https://www.contributor-covenant.org/version/2/1/code_of_conduct.html.
+This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 2.1, available at https://www.contributor-covenant.org/version/2/1/code_of_conduct.html.
