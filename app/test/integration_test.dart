@@ -41,15 +41,12 @@ DynamicLibrary _loadLibsodium() {
 
 /// Candidate paths/names for the native libsodium library, in order.
 List<String> _libsodiumCandidates() {
-  final pubCache = Platform.environment['PUB_CACHE'];
-  final sodiumLibsPkg = pubCache == null
-      ? null
-      : '$pubCache/hosted/pub.dev/sodium_libs-2.2.1+6';
+  final bundled = _bundledSodiumLibsBinary();
 
   if (Platform.isLinux) {
     return [
       // Bundled with the sodium_libs plugin (pub cache).
-      if (sodiumLibsPkg != null) '$sodiumLibsPkg/linux/lib/x86_64/libsodium.so',
+      if (bundled != null) bundled,
       // System package (libsodium23 on Debian/Ubuntu).
       'libsodium.so.23',
       'libsodium.so',
@@ -58,15 +55,14 @@ List<String> _libsodiumCandidates() {
   if (Platform.isWindows) {
     return [
       // Bundled with the sodium_libs plugin (pub cache).
-      if (sodiumLibsPkg != null)
-        '$sodiumLibsPkg/windows/lib/Release/v143/libsodium.dll',
+      if (bundled != null) bundled,
       'libsodium.dll',
     ];
   }
   if (Platform.isMacOS) {
     return [
       // Bundled with the sodium_libs plugin (pub cache).
-      if (sodiumLibsPkg != null) '$sodiumLibsPkg/macos/Libraries/libsodium.dylib',
+      if (bundled != null) bundled,
       // Homebrew on Apple Silicon (macos-14 CI runner).
       '/opt/homebrew/lib/libsodium.dylib',
       // Homebrew on Intel.
@@ -75,6 +71,38 @@ List<String> _libsodiumCandidates() {
     ];
   }
   throw UnsupportedError('Unsupported test platform: ${Platform.operatingSystem}');
+}
+
+/// Locates the libsodium binary bundled inside the sodium_libs package in
+/// the pub cache, without hardcoding the package version.
+String? _bundledSodiumLibsBinary() {
+  final pubCache = Platform.environment['PUB_CACHE'];
+  if (pubCache == null) return null;
+
+  final hostedDir = Directory('$pubCache/hosted/pub.dev');
+  if (!hostedDir.existsSync()) return null;
+
+  // Find the sodium_libs package directory (version-agnostic).
+  Directory? pkgDir;
+  for (final entry in hostedDir.listSync()) {
+    if (entry is Directory && entry.path.contains('sodium_libs-')) {
+      pkgDir = entry;
+      break;
+    }
+  }
+  if (pkgDir == null) return null;
+
+  final relPath = Platform.isLinux
+      ? 'linux/lib/x86_64/libsodium.so'
+      : Platform.isWindows
+          ? 'windows/lib/Release/v143/libsodium.dll'
+          : Platform.isMacOS
+              ? 'macos/Libraries/libsodium.dylib'
+              : null;
+  if (relPath == null) return null;
+
+  final binary = File('${pkgDir.path}/$relPath');
+  return binary.existsSync() ? binary.path : null;
 }
 
 void main() {
