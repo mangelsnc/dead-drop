@@ -15,17 +15,25 @@ SHELL := /bin/bash
 IMAGE        := deaddrop-dev:3.24.5
 DOCKERFILE   := docker/Dockerfile
 APP_DIR      := app
+PLATFORM     := linux/amd64
 
 # Match the container user to the host user so files written to the bind
 # mount (build/, .dart_tool/, pubspec.lock) keep host ownership.
 UID := $(shell id -u)
 GID := $(shell id -g)
 
-# Base docker run command: bind-mount the repo and reuse a named volume for
-# the pub cache so `flutter pub get` stays fast between runs.
-DOCKER_RUN := docker run --rm \
+# Named volumes for caches: persist between runs, never baked into the image.
+PUB_CACHE_VOL    := deaddrop-pub-cache
+GRADLE_CACHE_VOL := deaddrop-gradle-cache
+
+# Base docker run command: bind-mount the repo and reuse named volumes for
+# the pub and Gradle caches so builds stay fast between runs.
+# --platform is forced on every invocation (Apple Silicon Macs need it).
+DOCKER_RUN := docker run --rm --platform $(PLATFORM) \
+	--user $(UID):$(GID) \
 	-v "$(CURDIR):/workspace" \
-	-v deaddrop-pub-cache:/opt/pub-cache \
+	-v $(PUB_CACHE_VOL):/opt/pub-cache \
+	-v $(GRADLE_CACHE_VOL):/opt/gradle-cache \
 	-w /workspace
 
 # Add -it only when attached to a terminal (so `make shell` is interactive
@@ -39,17 +47,17 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 image: ## Build the Docker development image
-	docker build -f $(DOCKERFILE) -t $(IMAGE) \
+	docker build --platform $(PLATFORM) -f $(DOCKERFILE) -t $(IMAGE) \
 		--build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) .
 
-build-linux: image ## Compile the Linux desktop app (release)
+build-linux: ## Compile the Linux desktop app (release)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
 		flutter build linux --release"
 	@echo "✔ Output: $(APP_DIR)/build/linux/x64/release/bundle/"
 
-build-android: image ## Compile the Android APK (release)
+build-android: ## Compile the Android APK (release)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
@@ -64,13 +72,13 @@ build-ios: ## iOS build — NOT available in Docker (requires macOS + Xcode)
 	@echo "     2. Use CI:    see .github/workflows/build.yml (build-macos job)"
 	@exit 1
 
-test: image ## Run the test suite
+test: ## Run the test suite
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
 		flutter test"
 
-analyze: image ## Run static analysis (flutter analyze)
+analyze: ## Run static analysis (flutter analyze)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
@@ -81,8 +89,8 @@ clean: ## Remove build artifacts (host-side, no container needed)
 	rm -rf $(APP_DIR)/.dart_tool
 	@echo "✔ Cleaned $(APP_DIR)/build and $(APP_DIR)/.dart_tool"
 
-shell: image ## Open an interactive shell inside the dev container
+shell: ## Open an interactive shell inside the dev container
 	$(DOCKER_RUN) $(TTY) $(IMAGE) bash
 
-doctor: image ## Run flutter doctor inside the container (diagnostics)
+doctor: ## Run flutter doctor inside the container (diagnostics)
 	$(DOCKER_RUN) $(IMAGE) flutter doctor -v
