@@ -78,11 +78,29 @@ Output: `build/app/outputs/flutter-apk/app-release.apk`
 
 ### iOS
 
+**Requires macOS with Xcode 15.4+ and CocoaPods.**
+
 ```bash
-# Requires macOS + Xcode
-flutter build ios
-flutter build ipa  # for distribution
+# First time: generate the iOS runner
+cd app
+flutter create --platforms=ios .
+
+# Build for simulator (no signing needed)
+flutter build ios --debug --no-codesign
+
+# Build for device (unsigned)
+flutter build ios --release --no-codesign
+
+# Build signed IPA for distribution
+flutter build ipa --release
 ```
+
+Output:
+- Simulator: `build/ios/iphonesimulator/Runner.app`
+- Device (unsigned): `build/ios/iphoneos/Runner.app`
+- IPA (signed): `build/ios/ipa/dead_drop.ipa`
+
+For detailed iOS build and distribution instructions, see [ios-build.md](ios-build.md).
 
 ## Running tests
 
