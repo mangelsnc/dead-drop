@@ -433,8 +433,7 @@ Future<void> _testTransfer(Sodium sodium, int size, int chunkSize) async {
 
   final chunkCount = (size / chunkSize).ceil();
   final kbps = size / 1024 / (sw.elapsedMilliseconds / 1000);
-  // ignore: avoid_print
-  print('[benchmark] ${_formatSize(size)}: ${sw.elapsedMilliseconds} ms, '
+  debugPrint('[benchmark] ${_formatSize(size)}: ${sw.elapsedMilliseconds} ms, '
       '$frames frames for $chunkCount chunks '
       '(overhead ${(frames / chunkCount).toStringAsFixed(2)}x), '
       '${kbps.toStringAsFixed(1)} KB/s pipeline throughput');
