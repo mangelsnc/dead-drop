@@ -25,7 +25,6 @@ ios/fastlane/report.xml
 ios/fastlane/Preview.html
 ios/fastlane/screenshots/
 ios/fastlane/test_output/
-ios/GoogleService-Info.plist
 
 # macOS
 macos/Flutter/ephemeral/
@@ -39,3 +38,7 @@ linux/local.properties
 
 # Test coverage
 coverage/
+
+# Firebase config (contains API keys — do NOT commit)
+ios/Runner/GoogleService-Info.plist
+android/app/google-services.json
