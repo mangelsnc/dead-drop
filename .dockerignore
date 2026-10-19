@@ -1,0 +1,24 @@
+# Keep the Docker build context small and avoid copying host build artifacts
+# into the image. The source tree is bind-mounted at runtime anyway.
+
+.git
+.github
+
+# Flutter / Dart build outputs
+app/build/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins.dependencies
+app/.packages
+app/pubspec.lock  # regenerated inside the container; kept out of the image
+
+# Spike / tooling virtualenvs and caches
+spike/.venv/
+**/__pycache__/
+**/*.pyc
+
+# OS / editor noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
