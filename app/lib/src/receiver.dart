@@ -38,7 +38,7 @@ class Receiver {
   /// Consume the one-time bootstrap QR and arm the decoder.
   Future<void> startSession(
     Uint8List bootstrapPayload, {
-    VerifyKey? senderVerifyKey,
+    Uint8List? senderVerifyKey,
   }) async {
     session = await ReceiverSession.accept(
       sodium,

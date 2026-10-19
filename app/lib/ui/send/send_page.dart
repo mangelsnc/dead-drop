@@ -5,10 +5,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/crypto.dart';
 import '../../src/emitter.dart';
-import '../../src/qrframe.dart';
 import '../../main.dart';
 
 /// State for the send flow.
@@ -161,7 +161,7 @@ class _ReceiverKeypairFromPk implements ReceiverKeypair {
   final Uint8List _pkBytes;
 
   @override
-  PublicKey get publicKey => PublicKey(_pkBytes);
+  Uint8List get publicKey => _pkBytes;
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>

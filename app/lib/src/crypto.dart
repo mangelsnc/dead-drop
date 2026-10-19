@@ -39,21 +39,21 @@ class DeadDropCryptoError implements Exception {
 
 /// Long-term-ish Ed25519 signing identity (per install, per user).
 class Identity {
-  final SigningKey signingKey;
+  final KeyPair keyPair;
 
-  Identity._(this.signingKey);
+  Identity._(this.keyPair);
 
   static Future<Identity> generate(Sodium sodium) async {
-    final key = await sodium.crypto.sign.generateKeyPair();
+    final key = sodium.crypto.sign.keyPair();
     return Identity._(key);
   }
 
-  VerifyKey get verifyKey => signingKey.verifyKey;
+  Uint8List get verifyKey => keyPair.publicKey;
 
   Uint8List sign(Sodium sodium, Uint8List data) {
     return sodium.crypto.sign.detached(
       message: data,
-      secretKey: signingKey.secretKey,
+      secretKey: keyPair.secretKey,
     );
   }
 }
@@ -65,12 +65,12 @@ class ReceiverKeypair {
   ReceiverKeypair._(this.keyPair);
 
   static Future<ReceiverKeypair> generate(Sodium sodium) async {
-    final kp = await sodium.crypto.box.generateKeyPair();
+    final kp = sodium.crypto.box.keyPair();
     return ReceiverKeypair._(kp);
   }
 
-  PublicKey get publicKey => keyPair.publicKey;
-  SecretKey get privateKey => keyPair.secretKey;
+  Uint8List get publicKey => keyPair.publicKey;
+  SecureKey get privateKey => keyPair.secretKey;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ class SessionHeader {
 // ---------------------------------------------------------------------------
 
 class Session {
-  final Box box;
+  final PrecalculatedBox box;
   final Uint8List fileId;
   final int chunkCount;
   final int chunkSize;
@@ -220,17 +220,17 @@ class Session {
     Sodium sodium,
     Uint8List plaintext,
     int chunkSize,
-    PublicKey receiverPk,
+    Uint8List receiverPk,
     Identity senderIdentity,
   ) async {
-    final ephKp = await sodium.crypto.box.generateKeyPair();
-    final box = await sodium.crypto.box(
+    final ephKp = sodium.crypto.box.keyPair();
+    final box = sodium.crypto.box.precalculate(
       publicKey: receiverPk,
       secretKey: ephKp.secretKey,
     );
 
     final fileId = sodium.randombytes.buf(fileIdSize);
-    final manifestHash = sodium.crypto.hash.sha256(message: plaintext);
+    final manifestHash = sodium.crypto.genericHash(message: plaintext);
     final chunkCount = (plaintext.length + chunkSize - 1) ~/ chunkSize;
 
     // Pre-split into source chunks (padded last chunk)
@@ -243,8 +243,8 @@ class Session {
     });
 
     final header = SessionHeader(
-      senderEphPk: ephKp.publicKey.bytes,
-      receiverPk: receiverPk.bytes,
+      senderEphPk: ephKp.publicKey,
+      receiverPk: receiverPk,
       fileId: fileId,
       totalSize: plaintext.length,
       chunkCount: chunkCount,
@@ -270,7 +270,7 @@ class Session {
       throw ArgumentError('chunk_id out of range');
     }
     final nonce = sodium.randombytes.buf(nonceSize);
-    final ct = box.encrypt(
+    final ct = box.easy(
       message: chunks[chunkId],
       nonce: nonce,
     );
@@ -283,7 +283,7 @@ class Session {
 // ---------------------------------------------------------------------------
 
 class ReceiverSession {
-  final Box box;
+  final PrecalculatedBox box;
   final SessionHeader header;
 
   ReceiverSession._({required this.box, required this.header});
@@ -292,11 +292,11 @@ class ReceiverSession {
     Sodium sodium,
     Uint8List headerBytes,
     ReceiverKeypair receiverKeypair, {
-    VerifyKey? senderVerifyKey,
+    Uint8List? senderVerifyKey,
   }) async {
     final header = SessionHeader.unpack(headerBytes);
 
-    if (!_constantTimeEquals(header.receiverPk, receiverKeypair.publicKey.bytes)) {
+    if (!_constantTimeEquals(header.receiverPk, receiverKeypair.publicKey)) {
       throw DeadDropCryptoError('Session not addressed to this receiver');
     }
 
@@ -311,8 +311,8 @@ class ReceiverSession {
       }
     }
 
-    final box = await sodium.crypto.box(
-      publicKey: PublicKey(header.senderEphPk),
+    final box = sodium.crypto.box.precalculate(
+      publicKey: header.senderEphPk,
       secretKey: receiverKeypair.privateKey,
     );
     return ReceiverSession._(box: box, header: header);
@@ -320,7 +320,7 @@ class ReceiverSession {
 
   Uint8List decryptChunk(Sodium sodium, Uint8List nonce, Uint8List ciphertext) {
     try {
-      return box.decrypt(
+      return box.openEasy(
         cipherText: ciphertext,
         nonce: nonce,
       );
@@ -330,7 +330,7 @@ class ReceiverSession {
   }
 
   bool verifyFile(Sodium sodium, Uint8List plaintext) {
-    final digest = sodium.crypto.hash.sha256(message: plaintext);
+    final digest = sodium.crypto.genericHash(message: plaintext);
     return _constantTimeEquals(digest, header.manifestHash);
   }
 }
