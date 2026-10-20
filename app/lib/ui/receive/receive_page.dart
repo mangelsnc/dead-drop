@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -609,18 +610,18 @@ class _PublicKeyTextView extends StatelessWidget {
 
   void _copyToClipboard(BuildContext context, String hexKey) {
     // Capture the messenger before the async gap so no BuildContext is used
-    // after an await (keeps use_build_context_synchronously happy).
+    // after an await.
     final messenger = ScaffoldMessenger.of(context);
-    // ignore: discarded_futures
-    Clipboard.setData(ClipboardData(text: hexKey)).then((_) {
-      // ignore: use_build_context_synchronously
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Public key copied to clipboard'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    });
+    unawaited(
+      Clipboard.setData(ClipboardData(text: hexKey)).then((_) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Public key copied to clipboard'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }),
+    );
   }
 
   @override
