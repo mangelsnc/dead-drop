@@ -607,16 +607,18 @@ class _PublicKeyTextView extends StatelessWidget {
     return buffer.toString();
   }
 
-  Future<void> _copyToClipboard(BuildContext context, String hexKey) async {
-    await Clipboard.setData(ClipboardData(text: hexKey));
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+  void _copyToClipboard(BuildContext context, String hexKey) {
+    // Capture the messenger before the async gap so no BuildContext is used
+    // after an await (keeps use_build_context_synchronously happy).
+    final messenger = ScaffoldMessenger.of(context);
+    Clipboard.setData(ClipboardData(text: hexKey)).then((_) {
+      messenger.showSnackBar(
         const SnackBar(
           content: Text('Public key copied to clipboard'),
           duration: Duration(seconds: 2),
         ),
       );
-    }
+    });
   }
 
   @override
