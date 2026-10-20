@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -51,6 +52,16 @@ class SendState {
   final bool showingBootstrap;
 
   bool get readyToSend => fileBytes != null && receiverPk != null;
+
+  /// Human-readable hint about what's missing before starting.
+  String? get missingHint {
+    if (fileBytes == null && receiverPk == null) {
+      return 'Select a file and scan the receiver\'s QR code';
+    }
+    if (fileBytes == null) return 'Select a file first';
+    if (receiverPk == null) return 'Scan the receiver\'s QR code';
+    return null;
+  }
 
   SendState copyWith({
     String? fileName,
@@ -216,6 +227,10 @@ final sendProvider = StateNotifierProvider<SendNotifier, SendState>((ref) {
   return SendNotifier(sodium);
 });
 
+// ---------------------------------------------------------------------------
+// Send Page (step-by-step guided flow)
+// ---------------------------------------------------------------------------
+
 class SendPage extends ConsumerWidget {
   const SendPage({super.key});
 
@@ -224,6 +239,11 @@ class SendPage extends ConsumerWidget {
     final state = ref.watch(sendProvider);
     final notifier = ref.read(sendProvider.notifier);
 
+    // If actively emitting, show the full-screen QR transfer view.
+    if (state.isEmitting && state.currentQrData != null) {
+      return _SendingScreen(state: state, notifier: notifier);
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Send a file')),
       body: SingleChildScrollView(
@@ -231,157 +251,249 @@ class SendPage extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Step 1: File selection
+            // ── Step 1: Select file ──────────────────────────────
             _StepCard(
               step: 1,
-              title: 'Select file',
+              title: 'Choose a file',
+              isComplete: state.fileBytes != null,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (state.fileName != null) ...[
-                    Text(
-                      state.fileName!,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    Text(
-                      '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB',
-                      style: Theme.of(context).textTheme.bodySmall,
+                    _FileInfoTile(
+                      fileName: state.fileName!,
+                      fileSize: state.fileBytes!.length,
                     ),
                     const SizedBox(height: 12),
                   ],
                   FilledButton.tonalIcon(
-                    onPressed:
-                        state.isEmitting ? null : notifier.pickFile,
+                    onPressed: notifier.pickFile,
                     icon: const Icon(Icons.folder_open),
-                    label: Text(state.fileName == null
-                        ? 'Choose file'
-                        : 'Change file'),
+                    label: Text(
+                      state.fileName == null ? 'Choose file' : 'Change file',
+                    ),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 52),
+                    ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
 
-            // Step 2: Receiver key via QR handshake
+            // ── Step 2: Scan receiver key ────────────────────────
             _StepCard(
               step: 2,
-              title: 'Receiver key',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'On the receiving device, tap "Receive a file" — it shows '
-                    'a QR with its public key. Scan it here.',
-                  ),
-                  const SizedBox(height: 12),
-                  if (state.receiverPk == null)
-                    FilledButton.tonalIcon(
-                      onPressed: state.isEmitting
-                          ? null
-                          : () => _scanReceiverKey(context, notifier),
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Scan receiver key QR'),
-                    )
-                  else ...[
-                    Row(
-                      children: [
-                        const Icon(Icons.check_circle,
-                            color: DeadDropColors.success, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Key loaded: '
-                            '${bytesToHex(state.receiverPk!).substring(0, 16)}…',
-                            style: const TextStyle(
-                                color: DeadDropColors.success),
-                          ),
-                        ),
-                        if (!state.isEmitting)
-                          IconButton(
-                            tooltip: 'Scan a different key',
-                            icon: const Icon(Icons.refresh),
-                            onPressed: () =>
-                                _scanReceiverKey(context, notifier),
-                          ),
-                      ],
-                    ),
-                  ],
-                ],
+              title: 'Scan receiver\'s QR',
+              isComplete: state.receiverPk != null,
+              child: _ReceiverKeySection(
+                state: state,
+                notifier: notifier,
               ),
             ),
             const SizedBox(height: 16),
 
-            // Step 3: Parameters
-            _StepCard(
-              step: 3,
-              title: 'Transfer parameters',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _ParamSlider(
-                    label: 'Chunk size',
-                    value: state.chunkSize.toDouble(),
-                    min: 256,
-                    max: 1024,
-                    divisions: 3,
-                    unit: ' bytes',
-                    onChanged: (v) => notifier.setChunkSize(v.round()),
-                  ),
-                  _ParamSlider(
-                    label: 'Frame rate',
-                    value: state.fps,
-                    min: 4,
-                    max: 24,
-                    divisions: 20,
-                    unit: ' fps',
-                    onChanged: notifier.setFps,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('Error correction'),
-                  const SizedBox(height: 8),
-                  SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'L', label: Text('L (7%)')),
-                      ButtonSegment(value: 'M', label: Text('M (15%)')),
-                      ButtonSegment(value: 'Q', label: Text('Q (25%)')),
-                      ButtonSegment(value: 'H', label: Text('H (30%)')),
-                    ],
-                    selected: {state.ecLevel},
-                    onSelectionChanged: (s) => notifier.setEcLevel(s.first),
-                  ),
-                ],
-              ),
-            ),
+            // ── Step 3: Configure (collapsible) ──────────────────
+            _ConfigSection(state: state, notifier: notifier),
             const SizedBox(height: 24),
 
-            // Start/Stop button
-            if (state.readyToSend)
-              FilledButton.icon(
-                onPressed: state.isEmitting
-                    ? notifier.stopEmitting
-                    : notifier.startEmitting,
-                icon: Icon(state.isEmitting ? Icons.stop : Icons.play_arrow),
-                label: Text(state.isEmitting ? 'Stop' : 'Start transfer'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 56),
-                  backgroundColor:
-                      state.isEmitting ? Colors.red[700] : null,
-                ),
-              ),
-
-            // QR display — renders whatever the notifier is emitting.
-            if (state.isEmitting && state.currentQrData != null) ...[
-              const SizedBox(height: 24),
-              _QrDisplay(state: state),
-            ],
+            // ── Step 4: Start ────────────────────────────────────
+            _StartSection(state: state, notifier: notifier),
           ],
         ),
       ),
     );
   }
+}
 
-  Future<void> _scanReceiverKey(
-      BuildContext context, SendNotifier notifier) async {
+// ---------------------------------------------------------------------------
+// Step card with completion indicator
+// ---------------------------------------------------------------------------
+
+class _StepCard extends StatelessWidget {
+  const _StepCard({
+    required this.step,
+    required this.title,
+    required this.isComplete,
+    required this.child,
+  });
+
+  final int step;
+  final String title;
+  final bool isComplete;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 14,
+                  backgroundColor: isComplete
+                      ? DeadDropColors.success
+                      : DeadDropColors.bgElevated,
+                  child: isComplete
+                      ? const Icon(Icons.check, size: 16, color: Colors.white)
+                      : Text('$step'),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// File info tile
+// ---------------------------------------------------------------------------
+
+class _FileInfoTile extends StatelessWidget {
+  const _FileInfoTile({required this.fileName, required this.fileSize});
+
+  final String fileName;
+  final int fileSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: DeadDropColors.bgSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: DeadDropColors.borderInput),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.insert_drive_file, color: DeadDropColors.accent),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  fileName,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  _formatSize(fileSize),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.check_circle,
+              color: DeadDropColors.success, size: 20),
+        ],
+      ),
+    );
+  }
+
+  static String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Receiver key section (scan QR + manual fallback)
+// ---------------------------------------------------------------------------
+
+class _ReceiverKeySection extends StatelessWidget {
+  const _ReceiverKeySection({
+    required this.state,
+    required this.notifier,
+  });
+
+  final SendState state;
+  final SendNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (state.receiverPk != null) ...[
+          // Key loaded — show confirmation
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: DeadDropColors.success.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: DeadDropColors.success),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle,
+                    color: DeadDropColors.success),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Receiver key loaded',
+                        style: TextStyle(
+                          color: DeadDropColors.success,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        '${bytesToHex(state.receiverPk!).substring(0, 16)}…',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _scanReceiverKey(context),
+                  child: const Text('Rescan'),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          // Scan button
+          const Text(
+            'Ask the receiver to show their QR code, then scan it.',
+            style: TextStyle(color: DeadDropColors.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () => _scanReceiverKey(context),
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('Scan receiver\'s QR'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, 52),
+            ),
+          ),
+          // Advanced: manual hex input
+          const SizedBox(height: 8),
+          _ManualKeyInput(onKeyLoaded: notifier.setReceiverPk),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _scanReceiverKey(BuildContext context) async {
     final pk = await Navigator.of(context).push<Uint8List>(
       MaterialPageRoute(builder: (_) => const _KeyScanPage()),
     );
@@ -391,8 +503,10 @@ class SendPage extends ConsumerWidget {
   }
 }
 
-/// Full-screen camera page that scans the receiver's public-key QR and
-/// pops with the decoded key.
+// ---------------------------------------------------------------------------
+// Full-screen key scanner page with desktop camera support + error handling
+// ---------------------------------------------------------------------------
+
 class _KeyScanPage extends StatefulWidget {
   const _KeyScanPage();
 
@@ -401,11 +515,20 @@ class _KeyScanPage extends StatefulWidget {
 }
 
 class _KeyScanPageState extends State<_KeyScanPage> {
-  final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-    facing: CameraFacing.back,
-  );
+  late final MobileScannerController _controller;
   bool _found = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // On desktop, use the default camera (no "back" facing concept).
+    final isDesktop =
+        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    _controller = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
+    );
+  }
 
   @override
   void dispose() {
@@ -435,12 +558,38 @@ class _KeyScanPageState extends State<_KeyScanPage> {
                 }
               }
             },
+            errorBuilder: (context, error, child) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.videocam_off,
+                          color: DeadDropColors.error, size: 48),
+                      const SizedBox(height: 16),
+                      Text(
+                        _mapScannerError(error),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: DeadDropColors.error),
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Go back'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
               margin: const EdgeInsets.all(24),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.6),
                 borderRadius: BorderRadius.circular(8),
@@ -456,48 +605,298 @@ class _KeyScanPageState extends State<_KeyScanPage> {
       ),
     );
   }
+
+  static String _mapScannerError(MobileScannerException error) {
+    return switch (error.errorCode) {
+      MobileScannerErrorCode.controllerUninitialized =>
+        'Camera is not ready yet. Please wait.',
+      MobileScannerErrorCode.permissionDenied =>
+        'Camera permission denied. Check your system settings and allow '
+            'camera access for DeadDrop.',
+      MobileScannerErrorCode.unsupported =>
+        'No camera detected on this device.',
+      MobileScannerErrorCode.controllerAlreadyInitialized =>
+        'Camera is already in use by another application. '
+            'Close it and try again.',
+      _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
+          'Try closing other apps that use the camera.',
+    };
+  }
 }
 
-class _StepCard extends StatelessWidget {
-  const _StepCard({
-    required this.step,
-    required this.title,
-    required this.child,
-  });
+// ---------------------------------------------------------------------------
+// Manual key input (advanced fallback)
+// ---------------------------------------------------------------------------
 
-  final int step;
-  final String title;
-  final Widget child;
+class _ManualKeyInput extends StatefulWidget {
+  const _ManualKeyInput({required this.onKeyLoaded});
+
+  final ValueChanged<Uint8List> onKeyLoaded;
+
+  @override
+  State<_ManualKeyInput> createState() => _ManualKeyInputState();
+}
+
+class _ManualKeyInputState extends State<_ManualKeyInput> {
+  bool _expanded = false;
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_expanded) {
+      return TextButton.icon(
+        onPressed: () => setState(() => _expanded = true),
+        icon: const Icon(Icons.keyboard, size: 18),
+        label: const Text('Enter key manually'),
+        style: TextButton.styleFrom(
+          foregroundColor: DeadDropColors.textSecondary,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(),
+        const SizedBox(height: 8),
+        Text(
+          'Manual entry (advanced)',
+          style: Theme.of(context).textTheme.labelMedium,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          decoration: InputDecoration(
+            labelText: 'Public key (hex)',
+            hintText: '64 hex characters',
+            border: const OutlineInputBorder(),
+            errorText: _error,
+          ),
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          maxLength: 64,
+          onChanged: _validate,
+        ),
+      ],
+    );
+  }
+
+  void _validate(String value) {
+    setState(() {
+      if (value.isEmpty) {
+        _error = null;
+        return;
+      }
+      try {
+        final pk = hexToBytes(value);
+        if (pk.length != 32) {
+          _error =
+              'Expected 64 hex characters (32 bytes), got ${pk.length * 2}';
+        } else {
+          _error = null;
+          widget.onKeyLoaded(pk);
+        }
+      } catch (_) {
+        _error = 'Invalid hex format';
+      }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Configuration section (collapsible)
+// ---------------------------------------------------------------------------
+
+class _ConfigSection extends StatelessWidget {
+  const _ConfigSection({required this.state, required this.notifier});
+
+  final SendState state;
+  final SendNotifier notifier;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: const CircleAvatar(
+            radius: 14,
+            child: Text('3'),
+          ),
+          title: Text(
+            'Options',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          subtitle: Text(
+            'Transfer parameters',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          initiallyExpanded: false,
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 14,
-                  child: Text('$step'),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
+            _ParamSlider(
+              label: 'Chunk size',
+              value: state.chunkSize.toDouble(),
+              min: 256,
+              max: 1024,
+              divisions: 3,
+              unit: ' bytes',
+              onChanged: (v) => notifier.setChunkSize(v.round()),
             ),
-            const SizedBox(height: 16),
-            child,
+            _ParamSlider(
+              label: 'Frame rate',
+              value: state.fps,
+              min: 4,
+              max: 24,
+              divisions: 20,
+              unit: ' fps',
+              onChanged: notifier.setFps,
+            ),
+            const SizedBox(height: 12),
+            const Text('Error correction'),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'L', label: Text('L (7%)')),
+                ButtonSegment(value: 'M', label: Text('M (15%)')),
+                ButtonSegment(value: 'Q', label: Text('Q (25%)')),
+                ButtonSegment(value: 'H', label: Text('H (30%)')),
+              ],
+              selected: {state.ecLevel},
+              onSelectionChanged: (s) => notifier.setEcLevel(s.first),
+            ),
           ],
         ),
       ),
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Start section (always visible, with hints)
+// ---------------------------------------------------------------------------
+
+class _StartSection extends StatelessWidget {
+  const _StartSection({required this.state, required this.notifier});
+
+  final SendState state;
+  final SendNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.icon(
+          onPressed: state.readyToSend ? notifier.startEmitting : null,
+          icon: const Icon(Icons.play_arrow),
+          label: const Text('Start transfer'),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(double.infinity, 56),
+          ),
+        ),
+        if (!state.readyToSend) ...[
+          const SizedBox(height: 8),
+          Text(
+            state.missingHint!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: DeadDropColors.warning,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Active sending screen (full-screen QR)
+// ---------------------------------------------------------------------------
+
+class _SendingScreen extends StatelessWidget {
+  const _SendingScreen({required this.state, required this.notifier});
+
+  final SendState state;
+  final SendNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Sending'),
+        automaticallyImplyLeading: false,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              // File info
+              Text(
+                state.fileName ?? 'file',
+                style: Theme.of(context).textTheme.titleMedium,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                _formatSize(state.fileBytes?.length ?? 0),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 24),
+
+              // QR display — takes remaining space
+              Expanded(
+                child: Center(
+                  child: _QrDisplay(state: state),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Progress info
+              Text(
+                state.showingBootstrap
+                    ? 'Session bootstrap'
+                    : 'Frame ${state.framesEmitted}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${state.fps.round()} fps · ${state.chunkSize} B/chunk · '
+                'EC-${state.ecLevel}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: DeadDropColors.textSecondary,
+                    ),
+              ),
+              const SizedBox(height: 24),
+
+              // Stop button
+              FilledButton.icon(
+                onPressed: notifier.stopEmitting,
+                icon: const Icon(Icons.stop),
+                label: const Text('Stop transfer'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 56),
+                  backgroundColor: DeadDropColors.error,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Parameter slider
+// ---------------------------------------------------------------------------
 
 class _ParamSlider extends StatelessWidget {
   const _ParamSlider({
@@ -553,6 +952,7 @@ class _QrDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           padding: const EdgeInsets.all(16),
@@ -574,12 +974,6 @@ class _QrDisplay extends StatelessWidget {
               ? 'Session bootstrap — point the receiver camera here'
               : 'Frame ${state.framesEmitted}',
           style: Theme.of(context).textTheme.bodySmall,
-        ),
-        Text(
-          '${state.fps.round()} fps · ${state.chunkSize} B/chunk · EC-${state.ecLevel}',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: DeadDropColors.textSecondary,
-              ),
         ),
       ],
     );

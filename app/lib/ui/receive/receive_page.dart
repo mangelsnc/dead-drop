@@ -308,6 +308,28 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               }
                             }
                           },
+                          errorBuilder: (context, error, child) {
+                            return Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.videocam_off,
+                                        color: DeadDropColors.error,
+                                        size: 48),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      _mapScannerError(error),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          color: DeadDropColors.error),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
@@ -452,15 +474,35 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   }
 
   void _startScanner() {
-    _scannerController ??= MobileScannerController(
+    // On desktop, use the default camera (no "back" facing concept).
+    final isDesktop =
+        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    _scannerController = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: CameraFacing.back,
+      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
     );
   }
 
   void _stopScanner() {
     _scannerController?.dispose();
     _scannerController = null;
+  }
+
+  static String _mapScannerError(MobileScannerException error) {
+    return switch (error.errorCode) {
+      MobileScannerErrorCode.controllerUninitialized =>
+        'Camera is not ready yet. Please wait.',
+      MobileScannerErrorCode.permissionDenied =>
+        'Camera permission denied. Check your system settings and allow '
+            'camera access for DeadDrop.',
+      MobileScannerErrorCode.unsupported =>
+        'No camera detected on this device.',
+      MobileScannerErrorCode.controllerAlreadyInitialized =>
+        'Camera is already in use by another application. '
+            'Close it and try again.',
+      _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
+          'Try closing other apps that use the camera.',
+    };
   }
 }
 
