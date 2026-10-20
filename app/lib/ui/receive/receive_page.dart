@@ -611,7 +611,9 @@ class _PublicKeyTextView extends StatelessWidget {
     // Capture the messenger before the async gap so no BuildContext is used
     // after an await (keeps use_build_context_synchronously happy).
     final messenger = ScaffoldMessenger.of(context);
+    // ignore: discarded_futures
     Clipboard.setData(ClipboardData(text: hexKey)).then((_) {
+      // ignore: use_build_context_synchronously
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Public key copied to clipboard'),
