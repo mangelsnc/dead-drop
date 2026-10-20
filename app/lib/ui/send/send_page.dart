@@ -11,6 +11,8 @@ import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/crypto.dart';
 import '../../src/emitter.dart';
+import '../../src/handshake.dart';
+import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
 
@@ -27,8 +29,8 @@ class SendState {
     this.fps = 12.0,
     this.isEmitting = false,
     this.framesEmitted = 0,
-    this.pinEnabled = true,
-    this.selfDestructEnabled = false,
+    this.currentQrData,
+    this.showingBootstrap = false,
     this.isScanning = false,
     this.cameraError,
   });
@@ -43,13 +45,21 @@ class SendState {
   final double fps;
   final bool isEmitting;
   final int framesEmitted;
-  final bool pinEnabled;
-  final bool selfDestructEnabled;
+
+  /// Current QR content (already enveloped, printable ASCII). Driven by the
+  /// single frame generator in [SendNotifier] — the widget only renders it.
+  final String? currentQrData;
+
+  /// True while the static session-bootstrap QR is on screen.
+  final bool showingBootstrap;
+
+  /// True while the camera scanner is active (key scanning).
   final bool isScanning;
+
+  /// Camera error message, if any.
   final String? cameraError;
 
-  /// Whether the user can start the transfer.
-  bool get canStart => fileBytes != null && receiverPk != null;
+  bool get readyToSend => fileBytes != null && receiverPk != null;
 
   /// Human-readable hint about what's missing before starting.
   String? get missingHint {
@@ -72,8 +82,8 @@ class SendState {
     double? fps,
     bool? isEmitting,
     int? framesEmitted,
-    bool? pinEnabled,
-    bool? selfDestructEnabled,
+    String? currentQrData,
+    bool? showingBootstrap,
     bool? isScanning,
     String? cameraError,
     bool clearCameraError = false,
@@ -89,8 +99,8 @@ class SendState {
       fps: fps ?? this.fps,
       isEmitting: isEmitting ?? this.isEmitting,
       framesEmitted: framesEmitted ?? this.framesEmitted,
-      pinEnabled: pinEnabled ?? this.pinEnabled,
-      selfDestructEnabled: selfDestructEnabled ?? this.selfDestructEnabled,
+      currentQrData: currentQrData ?? this.currentQrData,
+      showingBootstrap: showingBootstrap ?? this.showingBootstrap,
       isScanning: isScanning ?? this.isScanning,
       cameraError: clearCameraError ? null : (cameraError ?? this.cameraError),
     );
@@ -104,26 +114,29 @@ class SendNotifier extends StateNotifier<SendState> {
   Timer? _timer;
 
   Future<void> pickFile() async {
-    final result = await FilePicker.platform.pickFiles();
+    final result = await FilePicker.platform.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    state = state.copyWith(
+    _stopTimer();
+    state = SendState(
       fileName: file.name,
       fileBytes: bytes,
-      emitter: null,
-      isEmitting: false,
-      framesEmitted: 0,
+      receiverPk: state.receiverPk,
+      chunkSize: state.chunkSize,
+      ecLevel: state.ecLevel,
+      fps: state.fps,
     );
   }
 
   void setReceiverPk(Uint8List pk) {
-    state = state.copyWith(receiverPk: pk);
+    state = state.copyWith(receiverPk: pk, isScanning: false);
   }
 
   void setChunkSize(int size) {
-    state = state.copyWith(chunkSize: size, emitter: null);
+    if (state.isEmitting) return; // locked during a transfer
+    state = state.copyWith(chunkSize: size);
   }
 
   void setEcLevel(String level) {
@@ -132,17 +145,11 @@ class SendNotifier extends StateNotifier<SendState> {
 
   void setFps(double fps) {
     state = state.copyWith(fps: fps);
-    if (state.isEmitting) {
-      _restartTimer();
+    // The periodic timer picks the new interval up on the next restart;
+    // if we are emitting, restart immediately so the change is live.
+    if (state.isEmitting && !state.showingBootstrap) {
+      _startDataTimer();
     }
-  }
-
-  void setPinEnabled(bool enabled) {
-    state = state.copyWith(pinEnabled: enabled);
-  }
-
-  void setSelfDestructEnabled(bool enabled) {
-    state = state.copyWith(selfDestructEnabled: enabled);
   }
 
   void startScanning() {
@@ -158,7 +165,7 @@ class SendNotifier extends StateNotifier<SendState> {
   }
 
   Future<void> startEmitting() async {
-    if (!state.canStart) return;
+    if (!state.readyToSend || state.isEmitting) return;
     final identity = await Identity.generate(_sodium);
     final receiverKp = _ReceiverKeypairFromPk(state.receiverPk!);
     final emitter = await Emitter.create(
@@ -167,40 +174,61 @@ class SendNotifier extends StateNotifier<SendState> {
       receiverKp,
       senderIdentity: identity,
       chunkSize: state.chunkSize,
+      fileName: state.fileName,
     );
     state = state.copyWith(
       emitter: emitter,
       identity: identity,
       isEmitting: true,
       framesEmitted: 0,
+      showingBootstrap: true,
+      currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
     );
-    _startTimer();
+    // Hold the static bootstrap QR long enough for the receiver to lock on,
+    // then switch to the animated data stream.
+    _timer = Timer(const Duration(seconds: 4), _startDataPhase);
   }
 
   void stopEmitting() {
-    _timer?.cancel();
-    state = state.copyWith(isEmitting: false);
+    _stopTimer();
+    state = state.copyWith(
+      isEmitting: false,
+      showingBootstrap: false,
+      currentQrData: null,
+    );
   }
 
-  void _startTimer() {
+  void _startDataPhase() {
+    if (!state.isEmitting || state.emitter == null) return;
+    state = state.copyWith(showingBootstrap: false);
+    _emitNextFrame(); // render the first data frame immediately
+    _startDataTimer();
+  }
+
+  void _startDataTimer() {
+    _stopTimer();
     final interval = Duration(milliseconds: (1000 / state.fps).round());
-    _timer = Timer.periodic(interval, (_) => _emitFrame());
+    _timer = Timer.periodic(interval, (_) => _emitNextFrame());
   }
 
-  void _restartTimer() {
+  void _stopTimer() {
     _timer?.cancel();
-    _startTimer();
+    _timer = null;
   }
 
-  void _emitFrame() {
-    if (state.emitter == null || !state.isEmitting) return;
-    state.emitter!.nextFrame();
-    state = state.copyWith(framesEmitted: state.framesEmitted + 1);
+  void _emitNextFrame() {
+    final emitter = state.emitter;
+    if (emitter == null || !state.isEmitting) return;
+    final frame = emitter.nextFrame();
+    state = state.copyWith(
+      framesEmitted: state.framesEmitted + 1,
+      currentQrData: encodeQrPayload(frame.pack()),
+    );
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _stopTimer();
     super.dispose();
   }
 }
@@ -225,7 +253,7 @@ final sendProvider = StateNotifierProvider<SendNotifier, SendState>((ref) {
 });
 
 // ---------------------------------------------------------------------------
-// Send Page
+// Send Page (step-by-step guided flow)
 // ---------------------------------------------------------------------------
 
 class SendPage extends ConsumerStatefulWidget {
@@ -236,26 +264,13 @@ class SendPage extends ConsumerStatefulWidget {
 }
 
 class _SendPageState extends ConsumerState<SendPage> {
-  MobileScannerController? _scannerController;
-
-  @override
-  void dispose() {
-    _disposeScanner();
-    super.dispose();
-  }
-
-  void _disposeScanner() {
-    _scannerController?.dispose();
-    _scannerController = null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(sendProvider);
     final notifier = ref.read(sendProvider.notifier);
 
-    // If actively emitting, show the QR transfer screen.
-    if (state.isEmitting && state.emitter != null) {
+    // If actively emitting, show the full-screen QR transfer view.
+    if (state.isEmitting && state.currentQrData != null) {
       return _SendingScreen(state: state, notifier: notifier);
     }
 
@@ -304,9 +319,6 @@ class _SendPageState extends ConsumerState<SendPage> {
               child: _ReceiverKeySection(
                 state: state,
                 notifier: notifier,
-                scannerController: _scannerController,
-                onStartScanner: _startScanner,
-                onStopScanner: _stopScanner,
               ),
             ),
             const SizedBox(height: 16),
@@ -321,19 +333,6 @@ class _SendPageState extends ConsumerState<SendPage> {
         ),
       ),
     );
-  }
-
-  void _startScanner() {
-    // On desktop, use the default camera (no "back" facing concept).
-    final isDesktop = Platform.isLinux || Platform.isMacOS || Platform.isWindows;
-    _scannerController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
-    );
-  }
-
-  void _stopScanner() {
-    _disposeScanner();
   }
 }
 
@@ -410,7 +409,7 @@ class _FileInfoTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.insert_drive_file, color: DeadDropColors.accent),
+          const Icon(Icons.insert_drive_file, color: DeadDropColors.accent),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -428,7 +427,7 @@ class _FileInfoTile extends StatelessWidget {
               ],
             ),
           ),
-          Icon(Icons.check_circle, color: DeadDropColors.success, size: 20),
+          const Icon(Icons.check_circle, color: DeadDropColors.success, size: 20),
         ],
       ),
     );
@@ -442,23 +441,17 @@ class _FileInfoTile extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Receiver key section (scan QR + advanced manual input)
+// Receiver key section (scan QR + manual fallback)
 // ---------------------------------------------------------------------------
 
 class _ReceiverKeySection extends StatelessWidget {
   const _ReceiverKeySection({
     required this.state,
     required this.notifier,
-    required this.scannerController,
-    required this.onStartScanner,
-    required this.onStopScanner,
   });
 
   final SendState state;
   final SendNotifier notifier;
-  final MobileScannerController? scannerController;
-  final VoidCallback onStartScanner;
-  final VoidCallback onStopScanner;
 
   @override
   Widget build(BuildContext context) {
@@ -476,13 +469,13 @@ class _ReceiverKeySection extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.check_circle, color: DeadDropColors.success),
+                const Icon(Icons.check_circle, color: DeadDropColors.success),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      const Text(
                         'Receiver key loaded',
                         style: TextStyle(
                           color: DeadDropColors.success,
@@ -490,44 +483,18 @@ class _ReceiverKeySection extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '${_bytesToHex(state.receiverPk!).substring(0, 16)}…',
+                        '${bytesToHex(state.receiverPk!).substring(0, 16)}…',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
                   ),
                 ),
                 TextButton(
-                  onPressed: () {
-                    notifier.startScanning();
-                    onStartScanner();
-                  },
+                  onPressed: () => _scanReceiverKey(context),
                   child: const Text('Rescan'),
                 ),
               ],
             ),
-          ),
-        ] else if (state.isScanning) ...[
-          // Camera view
-          _ScannerView(
-            scannerController: scannerController,
-            onDetect: (data) {
-              notifier.setReceiverPk(data);
-              notifier.stopScanning();
-              onStopScanner();
-            },
-            onError: (error) {
-              notifier.setCameraError(error);
-              onStopScanner();
-            },
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () {
-              notifier.stopScanning();
-              onStopScanner();
-            },
-            icon: const Icon(Icons.close),
-            label: const Text('Cancel'),
           ),
         ] else ...[
           // Scan button
@@ -537,10 +504,7 @@ class _ReceiverKeySection extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: () {
-              notifier.startScanning();
-              onStartScanner();
-            },
+            onPressed: () => _scanReceiverKey(context),
             icon: const Icon(Icons.qr_code_scanner),
             label: const Text('Scan receiver\'s QR'),
             style: FilledButton.styleFrom(
@@ -561,12 +525,12 @@ class _ReceiverKeySection extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.error_outline, color: DeadDropColors.error),
+                const Icon(Icons.error_outline, color: DeadDropColors.error),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     state.cameraError!,
-                    style: TextStyle(color: DeadDropColors.error),
+                    style: const TextStyle(color: DeadDropColors.error),
                   ),
                 ),
               ],
@@ -575,7 +539,7 @@ class _ReceiverKeySection extends StatelessWidget {
         ],
 
         // Advanced: manual hex input
-        if (!state.isScanning && state.receiverPk == null) ...[
+        if (state.receiverPk == null) ...[
           const SizedBox(height: 8),
           _ManualKeyInput(onKeyLoaded: notifier.setReceiverPk),
         ],
@@ -583,130 +547,119 @@ class _ReceiverKeySection extends StatelessWidget {
     );
   }
 
-  static String _bytesToHex(Uint8List bytes) {
-    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  Future<void> _scanReceiverKey(BuildContext context) async {
+    final pk = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(builder: (_) => const _KeyScanPage()),
+    );
+    if (pk != null) {
+      notifier.setReceiverPk(pk);
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Scanner view with error handling
+// Full-screen key scanner page with desktop camera support + error handling
 // ---------------------------------------------------------------------------
 
-class _ScannerView extends StatefulWidget {
-  const _ScannerView({
-    required this.scannerController,
-    required this.onDetect,
-    required this.onError,
-  });
-
-  final MobileScannerController? scannerController;
-  final ValueChanged<Uint8List> onDetect;
-  final ValueChanged<String> onError;
+class _KeyScanPage extends StatefulWidget {
+  const _KeyScanPage();
 
   @override
-  State<_ScannerView> createState() => _ScannerViewState();
+  State<_KeyScanPage> createState() => _KeyScanPageState();
 }
 
-class _ScannerViewState extends State<_ScannerView> {
-  String? _error;
+class _KeyScanPageState extends State<_KeyScanPage> {
+  late final MobileScannerController _controller;
+  bool _found = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // On desktop, use the default camera (no "back" facing concept).
+    final isDesktop =
+        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    _controller = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) {
-      return Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: DeadDropColors.bgElevated,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: DeadDropColors.error),
-        ),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.videocam_off, color: DeadDropColors.error, size: 48),
-                const SizedBox(height: 12),
-                Text(
-                  _error!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: DeadDropColors.error),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scan receiver key')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: (capture) {
+              if (_found) return;
+              for (final barcode in capture.barcodes) {
+                final raw = barcode.rawValue;
+                if (raw == null) continue;
+                final pk = decodeHandshakeQr(raw);
+                if (pk != null) {
+                  _found = true;
+                  Navigator.of(context).pop(pk);
+                  return;
+                }
+              }
+            },
+            errorBuilder: (context, error, child) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.videocam_off,
+                          color: DeadDropColors.error, size: 48),
+                      const SizedBox(height: 16),
+                      Text(
+                        _mapScannerError(error),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: DeadDropColors.error),
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Go back'),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              );
+            },
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              margin: const EdgeInsets.all(24),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Point at the QR shown on the receiving device',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white),
+              ),
             ),
           ),
-        ),
-      );
-    }
-
-    if (widget.scannerController == null) {
-      return Container(
-        height: 300,
-        decoration: BoxDecoration(
-          color: DeadDropColors.bgElevated,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Container(
-      height: 300,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: DeadDropColors.borderInput),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: MobileScanner(
-          controller: widget.scannerController,
-          onDetect: (capture) {
-            final barcodes = capture.barcodes;
-            if (barcodes.isEmpty) return;
-            final raw = barcodes.first.rawValue;
-            if (raw == null) return;
-            // The receiver shows their public key as hex-encoded QR.
-            try {
-              final pk = _hexToBytes(raw);
-              if (pk.length == 32) {
-                widget.onDetect(pk);
-              }
-            } catch (_) {
-              // Not a valid hex key — ignore this frame.
-            }
-          },
-          errorBuilder: (context, error, child) {
-            final message = _mapScannerError(error);
-            // Schedule error callback after build.
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              widget.onError(message);
-            });
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.videocam_off,
-                        color: DeadDropColors.error, size: 48),
-                    const SizedBox(height: 12),
-                    Text(
-                      message,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: DeadDropColors.error),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
+        ],
       ),
     );
   }
 
-  String _mapScannerError(MobileScannerException error) {
+  static String _mapScannerError(MobileScannerException error) {
     return switch (error.errorCode) {
       MobileScannerErrorCode.controllerUninitialized =>
         'Camera is not ready yet. Please wait.',
@@ -715,20 +668,10 @@ class _ScannerViewState extends State<_ScannerView> {
       MobileScannerErrorCode.unsupported =>
         'No camera detected on this device.',
       MobileScannerErrorCode.controllerAlreadyInitialized =>
-        'Camera is already in use.',
+        'Camera is already in use by another application. Close it and try again.',
       _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
           'Try closing other apps that use the camera.',
     };
-  }
-
-  static Uint8List _hexToBytes(String hex) {
-    final clean = hex.replaceAll(RegExp(r'[^0-9a-fA-F]'), '');
-    if (clean.length % 2 != 0) throw const FormatException('odd hex length');
-    final out = Uint8List(clean.length ~/ 2);
-    for (var i = 0; i < out.length; i++) {
-      out[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
-    }
-    return out;
   }
 }
 
@@ -778,9 +721,6 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
             hintText: '64 hex characters',
             border: const OutlineInputBorder(),
             errorText: _error,
-            suffixIcon: _error == null && _lastValidKey != null
-                ? Icon(Icons.check_circle, color: DeadDropColors.success)
-                : null,
           ),
           style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
           maxLength: 64,
@@ -790,40 +730,25 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
     );
   }
 
-  Uint8List? _lastValidKey;
-
   void _validate(String value) {
     setState(() {
       if (value.isEmpty) {
         _error = null;
-        _lastValidKey = null;
         return;
       }
       try {
-        final pk = _hexToBytes(value);
+        final pk = hexToBytes(value);
         if (pk.length != 32) {
-          _error = 'Expected 64 hex characters (32 bytes), got ${pk.length * 2}';
-          _lastValidKey = null;
+          _error =
+              'Expected 64 hex characters (32 bytes), got ${pk.length * 2}';
         } else {
           _error = null;
-          _lastValidKey = pk;
           widget.onKeyLoaded(pk);
         }
       } catch (_) {
         _error = 'Invalid hex format';
-        _lastValidKey = null;
       }
     });
-  }
-
-  static Uint8List _hexToBytes(String hex) {
-    final clean = hex.replaceAll(RegExp(r'[^0-9a-fA-F]'), '');
-    if (clean.length % 2 != 0) throw const FormatException('odd hex length');
-    final out = Uint8List(clean.length ~/ 2);
-    for (var i = 0; i < out.length; i++) {
-      out[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
-    }
-    return out;
   }
 }
 
@@ -852,36 +777,12 @@ class _ConfigSection extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           subtitle: Text(
-            'PIN protection, self-destruct, advanced',
+            'Transfer parameters',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           initiallyExpanded: false,
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
-            // PIN toggle
-            SwitchListTile(
-              title: const Text('Protect with PIN'),
-              subtitle: const Text('The receiver needs a PIN to decrypt'),
-              value: state.pinEnabled,
-              onChanged: notifier.setPinEnabled,
-              contentPadding: EdgeInsets.zero,
-            ),
-            // Self-destruct toggle
-            SwitchListTile(
-              title: const Text('Self-destruct after read'),
-              subtitle: const Text('File is deleted after first decryption'),
-              value: state.selfDestructEnabled,
-              onChanged: notifier.setSelfDestructEnabled,
-              contentPadding: EdgeInsets.zero,
-            ),
-            const Divider(),
-            const SizedBox(height: 8),
-            // Advanced parameters
-            Text(
-              'Advanced',
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-            const SizedBox(height: 8),
             _ParamSlider(
               label: 'Chunk size',
               value: state.chunkSize.toDouble(),
@@ -936,19 +837,19 @@ class _StartSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FilledButton.icon(
-          onPressed: state.canStart ? notifier.startEmitting : null,
+          onPressed: state.readyToSend ? notifier.startEmitting : null,
           icon: const Icon(Icons.play_arrow),
           label: const Text('Start transfer'),
           style: FilledButton.styleFrom(
             minimumSize: const Size(double.infinity, 56),
           ),
         ),
-        if (!state.canStart) ...[
+        if (!state.readyToSend) ...[
           const SizedBox(height: 8),
           Text(
             state.missingHint!,
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               color: DeadDropColors.warning,
               fontSize: 13,
             ),
@@ -1003,7 +904,9 @@ class _SendingScreen extends StatelessWidget {
 
               // Progress info
               Text(
-                'Frame ${state.framesEmitted}',
+                state.showingBootstrap
+                    ? 'Session bootstrap'
+                    : 'Frame ${state.framesEmitted}',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 4),
@@ -1086,61 +989,16 @@ class _ParamSlider extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// QR display (animated frames)
-// ---------------------------------------------------------------------------
-
-class _QrDisplay extends ConsumerStatefulWidget {
+/// Dumb QR renderer: displays exactly what the notifier produced. All frame
+/// generation logic lives in [SendNotifier], so there is a single source of
+/// truth for the emitted sequence.
+class _QrDisplay extends StatelessWidget {
   const _QrDisplay({required this.state});
 
   final SendState state;
 
   @override
-  ConsumerState<_QrDisplay> createState() => _QrDisplayState();
-}
-
-class _QrDisplayState extends ConsumerState<_QrDisplay> {
-  Uint8List? _currentFrameBytes;
-  bool _showBootstrap = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _generateNext();
-  }
-
-  Future<void> _generateNext() async {
-    if (!mounted || !widget.state.isEmitting) return;
-    final emitter = widget.state.emitter!;
-    if (_showBootstrap) {
-      setState(() {
-        _currentFrameBytes = emitter.bootstrapQrPayload();
-      });
-      // Show bootstrap for 3 seconds, then start data frames
-      await Future.delayed(const Duration(seconds: 3));
-      if (mounted) {
-        setState(() => _showBootstrap = false);
-      }
-    } else {
-      final frame = emitter.nextFrame();
-      if (mounted) {
-        setState(() {
-          _currentFrameBytes = frame.pack();
-        });
-      }
-    }
-    // Schedule next frame
-    if (mounted && widget.state.isEmitting) {
-      final interval = Duration(milliseconds: (1000 / widget.state.fps).round());
-      Future.delayed(interval, _generateNext);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_currentFrameBytes == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1151,16 +1009,18 @@ class _QrDisplayState extends ConsumerState<_QrDisplay> {
             borderRadius: BorderRadius.circular(12),
           ),
           child: QrImageView(
-            data: String.fromCharCodes(_currentFrameBytes!),
+            data: state.currentQrData!,
             version: QrVersions.auto,
-            errorCorrectionLevel: _ecLevelToQr(widget.state.ecLevel),
+            errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
             size: 300,
             backgroundColor: Colors.white,
           ),
         ),
         const SizedBox(height: 12),
         Text(
-          _showBootstrap ? 'Session bootstrap' : 'Frame ${widget.state.framesEmitted}',
+          state.showingBootstrap
+              ? 'Session bootstrap — point the receiver camera here'
+              : 'Frame ${state.framesEmitted}',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],

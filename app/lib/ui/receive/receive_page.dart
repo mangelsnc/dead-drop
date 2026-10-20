@@ -9,7 +9,9 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/crypto.dart';
+import '../../src/handshake.dart';
 import '../../src/receiver.dart';
+import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
 
@@ -18,7 +20,6 @@ class ReceiveState {
   ReceiveState({
     this.receiverKeypair,
     this.receiver,
-    this.showHandshake = false,
     this.isScanning = false,
     this.framesReceived = 0,
     this.chunksDecoded = 0,
@@ -31,7 +32,6 @@ class ReceiveState {
 
   final ReceiverKeypair? receiverKeypair;
   final Receiver? receiver;
-  final bool showHandshake;
   final bool isScanning;
   final int framesReceived;
   final int chunksDecoded;
@@ -44,10 +44,11 @@ class ReceiveState {
   double get progress =>
       totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
 
+  bool get sessionActive => receiver != null;
+
   ReceiveState copyWith({
     ReceiverKeypair? receiverKeypair,
     Receiver? receiver,
-    bool? showHandshake,
     bool? isScanning,
     int? framesReceived,
     int? chunksDecoded,
@@ -60,7 +61,6 @@ class ReceiveState {
     return ReceiveState(
       receiverKeypair: receiverKeypair ?? this.receiverKeypair,
       receiver: receiver ?? this.receiver,
-      showHandshake: showHandshake ?? this.showHandshake,
       isScanning: isScanning ?? this.isScanning,
       framesReceived: framesReceived ?? this.framesReceived,
       chunksDecoded: chunksDecoded ?? this.chunksDecoded,
@@ -68,7 +68,7 @@ class ReceiveState {
       fileBytes: fileBytes ?? this.fileBytes,
       fileName: fileName ?? this.fileName,
       savedPath: savedPath ?? this.savedPath,
-      error: error ?? this.error,
+      error: error,
     );
   }
 }
@@ -79,12 +79,9 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   final Sodium _sodium;
 
   Future<void> initKeypair() async {
+    if (state.receiverKeypair != null) return;
     final kp = await ReceiverKeypair.generate(_sodium);
     state = state.copyWith(receiverKeypair: kp);
-  }
-
-  void toggleHandshake() {
-    state = state.copyWith(showHandshake: !state.showHandshake);
   }
 
   void startScanning() {
@@ -95,10 +92,14 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     state = state.copyWith(isScanning: false);
   }
 
-  Future<void> processQrData(Uint8List data) async {
+  /// Entry point for every QR string the camera picks up. Foreign QRs are
+  /// silently ignored; DeadDrop payloads are routed by type.
+  Future<void> processRawQr(String raw) async {
     if (state.receiverKeypair == null) return;
+    final data = decodeQrPayload(raw);
+    if (data == null) return; // not a DeadDrop QR — keep scanning
 
-    // Check if this is a session bootstrap (179 bytes, magic "DD")
+    // Session bootstrap: fixed-size binary header with "DD" magic.
     if (data.length == SessionHeader.packedSize &&
         data[0] == magic[0] &&
         data[1] == magic[1]) {
@@ -106,13 +107,15 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
       return;
     }
 
-    // Otherwise it's a data frame
-    if (state.receiver != null) {
+    // Anything else is treated as a data frame once a session is active.
+    if (state.receiver != null && !state.receiver!.done) {
       _processDataFrame(data);
     }
   }
 
   Future<void> _processBootstrap(Uint8List data) async {
+    // Ignore a second identical bootstrap once the session is armed.
+    if (state.receiver != null) return;
     try {
       final receiver = Receiver(
         sodium: _sodium,
@@ -131,19 +134,27 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
 
   void _processDataFrame(Uint8List data) {
     final receiver = state.receiver!;
-    final advanced = receiver.feedFrame(data);
-    if (!advanced) return; // duplicate or invalid frame
+    final decodedBefore = receiver.decoder?.decoded.length ?? 0;
+    receiver.feedFrame(data);
+    final decodedAfter = receiver.decoder?.decoded.length ?? 0;
 
     state = state.copyWith(
       framesReceived: state.framesReceived + 1,
-      chunksDecoded: receiver.decoder?.decoded.length ?? 0,
+      chunksDecoded: decodedAfter,
+      fileName: receiver.fileName ?? state.fileName,
     );
+
+    if (decodedAfter == decodedBefore && !receiver.done) {
+      // Duplicate / redundant / metadata frame — nothing else to do.
+      return;
+    }
 
     if (receiver.done) {
       try {
         final fileBytes = receiver.finish();
         state = state.copyWith(
           fileBytes: fileBytes,
+          fileName: receiver.fileName ?? state.fileName,
           isScanning: false,
         );
       } catch (e) {
@@ -156,10 +167,10 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     if (state.fileBytes == null) return;
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Save received file',
-      fileName: 'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}',
+      fileName: state.fileName ??
+          'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}',
     );
     if (path == null) return;
-    // Write file
     final file = File(path);
     await file.writeAsBytes(state.fileBytes!);
     state = state.copyWith(savedPath: path);
@@ -196,7 +207,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
 
   @override
   void dispose() {
-    _scannerController?.dispose();
+    _stopScanner();
     super.dispose();
   }
 
@@ -205,6 +216,13 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     final state = ref.watch(receiveProvider);
     final notifier = ref.read(receiveProvider.notifier);
 
+    // Stop the camera as soon as the transfer completes.
+    ref.listen(receiveProvider, (prev, next) {
+      if (next.fileBytes != null && (prev?.fileBytes == null)) {
+        _stopScanner();
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(title: const Text('Receive a file')),
       body: SingleChildScrollView(
@@ -212,248 +230,193 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Handshake section
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const CircleAvatar(
-                          radius: 14,
-                          child: Text('1'),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Your public key',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    if (state.receiverKeypair != null) ...[
-                      Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: QrImageView(
-                            data: _bytesToHex(
-                                state.receiverKeypair!.publicKey),
-                            version: QrVersions.auto,
-                            size: 200,
-                            backgroundColor: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Show this QR to the sender. They will scan it to '
-                        'get your public key.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                        textAlign: TextAlign.center,
-                      ),
-                    ] else
-                      const Center(child: CircularProgressIndicator()),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Scanner section
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const CircleAvatar(
-                          radius: 14,
-                          child: Text('2'),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Scan sender QR codes',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    if (!state.isScanning && state.fileBytes == null)
-                      FilledButton.icon(
-                        onPressed: () {
-                          notifier.startScanning();
-                          _startScanner();
-                        },
-                        icon: const Icon(Icons.camera_alt),
-                        label: const Text('Start scanning'),
-                      ),
-                    if (state.isScanning) ...[
-                      Container(
-                        height: 300,
+            // Step 1: show our public key so the sender can address the file
+            // to us (handshake).
+            _StepCard(
+              step: 1,
+              title: 'Your public key',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (state.receiverKeypair != null) ...[
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
+                          color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: DeadDropColors.borderInput,
-                          ),
                         ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: MobileScanner(
-                            controller: _scannerController,
-                            onDetect: (capture) {
-                              final barcodes = capture.barcodes;
-                              if (barcodes.isEmpty) return;
-                              final raw = barcodes.first.rawValue;
-                              if (raw == null) return;
-                              notifier.processQrData(
-                                Uint8List.fromList(raw.codeUnits),
-                              );
-                            },
-                            errorBuilder: (context, error, child) {
-                              return Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.videocam_off,
-                                          color: DeadDropColors.error,
-                                          size: 48),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        _mapScannerError(error),
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                            color: DeadDropColors.error),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
+                        child: QrImageView(
+                          data: encodeHandshakeQr(
+                              state.receiverKeypair!.publicKey),
+                          version: QrVersions.auto,
+                          size: 200,
+                          backgroundColor: Colors.white,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          notifier.stopScanning();
-                          _stopScanner();
-                        },
-                        icon: const Icon(Icons.stop),
-                        label: const Text('Stop scanning'),
-                      ),
-                    ],
-                  ],
-                ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Show this QR to the sender. It contains only your '
+                      'public key — the file itself is encrypted end-to-end.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ] else
+                    const Center(child: CircularProgressIndicator()),
+                ],
               ),
             ),
             const SizedBox(height: 16),
 
-            // Progress section
-            if (state.totalChunks > 0 || state.fileBytes != null) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const CircleAvatar(
-                            radius: 14,
-                            child: Text('3'),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Progress',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ],
+            // Step 2: scan the sender's bootstrap + data frames.
+            _StepCard(
+              step: 2,
+              title: 'Scan sender QR codes',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!state.isScanning && state.fileBytes == null)
+                    FilledButton.icon(
+                      onPressed: () {
+                        notifier.startScanning();
+                        _startScanner();
+                      },
+                      icon: const Icon(Icons.camera_alt),
+                      label: Text(state.sessionActive
+                          ? 'Resume scanning'
+                          : 'Start scanning'),
+                    ),
+                  if (state.isScanning) ...[
+                    Container(
+                      height: 300,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: DeadDropColors.borderInput,
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      LinearProgressIndicator(
-                        value: state.progress,
-                        minHeight: 8,
-                        borderRadius: BorderRadius.circular(4),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: MobileScanner(
+                          controller: _scannerController,
+                          onDetect: (capture) {
+                            for (final barcode in capture.barcodes) {
+                              final raw = barcode.rawValue;
+                              if (raw != null) {
+                                notifier.processRawQr(raw);
+                              }
+                            }
+                          },
+                        ),
                       ),
-                      const SizedBox(height: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        notifier.stopScanning();
+                        _stopScanner();
+                      },
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop scanning'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Step 3: live progress / result.
+            if (state.sessionActive) ...[
+              _StepCard(
+                step: 3,
+                title: 'Progress',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (state.fileName != null) ...[
                       Text(
-                        '${state.chunksDecoded} / ${state.totalChunks} chunks '
-                        '(${state.framesReceived} frames)',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        state.fileName!,
+                        style: Theme.of(context).textTheme.titleSmall,
                       ),
-                      if (state.fileBytes != null) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green[900]!.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[700]!),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.check_circle,
-                                      color: Colors.green[400]),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Transfer complete!',
-                                    style: TextStyle(
-                                      color: Colors.green[400],
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB received',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                              if (state.savedPath != null) ...[
-                                const SizedBox(height: 4),
+                      const SizedBox(height: 8),
+                    ],
+                    LinearProgressIndicator(
+                      value: state.progress,
+                      minHeight: 8,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '${state.chunksDecoded} / ${state.totalChunks} chunks '
+                      '(${state.framesReceived} frames scanned)',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    if (state.fileBytes != null) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.green[900]!.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green[700]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.check_circle,
+                                    color: Colors.green[400]),
+                                const SizedBox(width: 8),
                                 Text(
-                                  'Saved to: ${state.savedPath}',
-                                  style: Theme.of(context).textTheme.bodySmall,
+                                  'Transfer complete!',
+                                  style: TextStyle(
+                                    color: Colors.green[400],
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ],
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  FilledButton.icon(
-                                    onPressed: notifier.saveFile,
-                                    icon: const Icon(Icons.save),
-                                    label: const Text('Save file'),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  OutlinedButton.icon(
-                                    onPressed: () {
-                                      notifier.reset();
-                                      _stopScanner();
-                                    },
-                                    icon: const Icon(Icons.refresh),
-                                    label: const Text('New transfer'),
-                                  ),
-                                ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB received'
+                              '${state.fileName != null ? ' · ${state.fileName}' : ''}',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            if (state.savedPath != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Saved to: ${state.savedPath}',
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
-                          ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                FilledButton.icon(
+                                  onPressed: state.savedPath == null
+                                      ? notifier.saveFile
+                                      : null,
+                                  icon: const Icon(Icons.save),
+                                  label: const Text('Save file'),
+                                ),
+                                const SizedBox(width: 12),
+                                OutlinedButton.icon(
+                                  onPressed: () {
+                                    notifier.reset();
+                                    _stopScanner();
+                                  },
+                                  icon: const Icon(Icons.refresh),
+                                  label: const Text('New transfer'),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ],
-                  ),
+                  ],
                 ),
               ),
             ],
@@ -490,7 +453,8 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
 
   void _startScanner() {
     // On desktop, use the default camera (no "back" facing concept).
-    final isDesktop = Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    final isDesktop =
+        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
     _scannerController = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
       facing: isDesktop ? CameraFacing.front : CameraFacing.back,
@@ -501,23 +465,45 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     _scannerController?.dispose();
     _scannerController = null;
   }
+}
 
-  static String _mapScannerError(MobileScannerException error) {
-    return switch (error.errorCode) {
-      MobileScannerErrorCode.controllerUninitialized =>
-        'Camera is not ready yet. Please wait.',
-      MobileScannerErrorCode.permissionDenied =>
-        'Camera permission denied. Check your system settings and allow camera access for DeadDrop.',
-      MobileScannerErrorCode.unsupported =>
-        'No camera detected on this device.',
-      MobileScannerErrorCode.controllerAlreadyInitialized =>
-        'Camera is already in use.',
-      _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
-          'Try closing other apps that use the camera.',
-    };
-  }
+class _StepCard extends StatelessWidget {
+  const _StepCard({
+    required this.step,
+    required this.title,
+    required this.child,
+  });
 
-  static String _bytesToHex(Uint8List bytes) {
-    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  final int step;
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 14,
+                  child: Text('$step'),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            child,
+          ],
+        ),
+      ),
+    );
   }
 }
