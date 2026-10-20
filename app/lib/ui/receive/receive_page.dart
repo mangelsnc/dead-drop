@@ -274,9 +274,10 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       Center(
                         child: Container(
                           padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius:
+                                BorderRadius.all(Radius.circular(12)),
                           ),
                           child: QrImageView(
                             data: encodeHandshakeQr(
@@ -625,10 +626,12 @@ class _PublicKeyTextView extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: DeadDropColors.bgSurface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: DeadDropColors.borderInput),
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        border: Border.fromBorderSide(
+          BorderSide(color: DeadDropColors.borderInput),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
