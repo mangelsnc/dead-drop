@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -608,7 +609,7 @@ class _PublicKeyTextView extends StatelessWidget {
   }
 
   void _copyToClipboard(String hexKey) {
-    Clipboard.setData(ClipboardData(text: hexKey));
+    unawaited(Clipboard.setData(ClipboardData(text: hexKey)));
   }
 
   @override
