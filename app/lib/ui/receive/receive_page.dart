@@ -628,9 +628,7 @@ class _PublicKeyTextView extends StatelessWidget {
       decoration: const BoxDecoration(
         color: DeadDropColors.bgSurface,
         borderRadius: BorderRadius.all(Radius.circular(12)),
-        border: Border.fromBorderSide(
-          BorderSide(color: DeadDropColors.borderInput),
-        ),
+        border: Border.all(color: DeadDropColors.borderInput),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
