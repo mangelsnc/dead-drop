@@ -5,7 +5,6 @@ import 'dart:typed_data';
 /// All functions are fast (< 1 ms) and allocation-light. They operate on
 /// the first N bytes of a file, so they work even for very large files
 /// as long as the header is available.
-library;
 
 // ---------------------------------------------------------------------------
 // Human-readable file sizes
