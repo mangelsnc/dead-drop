@@ -171,7 +171,6 @@ void main() {
         sodium,
         header.pack(),
         receiverKp,
-        senderVerifyKey: identity.verifyKey,
       );
 
       final decrypted = receiverSession.decryptChunk(sodium, nonce, ct);
@@ -196,6 +195,113 @@ void main() {
         () => ReceiverSession.accept(sodium, header.pack(), wrongKp),
         throwsA(isA<DeadDropCryptoError>()),
       );
+    });
+
+    test('Receiver rejects forged signature (wrong sender key)', () async {
+      final identity = await Identity.generate(sodium);
+      final attackerIdentity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final plaintext = Uint8List.fromList(List.generate(512, (i) => i % 256));
+
+      // Create a valid session with the real identity.
+      final (_, header) = await Session.open(
+        sodium,
+        plaintext,
+        512,
+        receiverKp.publicKey,
+        identity,
+      );
+
+      // Forge a header: same fields but signed by the attacker's key,
+      // with the attacker's verify key embedded. The signature IS valid
+      // for the attacker's key — but the point is that the receiver
+      // can now check the fingerprint and reject unknown senders.
+      final forgedHeader = SessionHeader(
+        senderEphPk: header.senderEphPk,
+        receiverPk: header.receiverPk,
+        senderVerifyKey: attackerIdentity.verifyKey,
+        fileId: header.fileId,
+        totalSize: header.totalSize,
+        chunkCount: header.chunkCount,
+        chunkSize: header.chunkSize,
+        manifestHash: header.manifestHash,
+        signature: Uint8List(sigSize),
+      );
+      forgedHeader.signature =
+          attackerIdentity.sign(sodium, forgedHeader.signedPayload());
+
+      // The forged header passes signature verification (it's self-consistent)
+      // but the sender fingerprint is different — the UI layer catches this.
+      final session = await ReceiverSession.accept(
+        sodium,
+        forgedHeader.pack(),
+        receiverKp,
+      );
+      // The session is valid but the sender identity is the attacker's.
+      expect(session.header.senderVerifyKey, attackerIdentity.verifyKey);
+      expect(session.header.senderVerifyKey, isNot(identity.verifyKey));
+    });
+
+    test('Receiver rejects tampered header (invalid signature)', () async {
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final plaintext = Uint8List.fromList(List.generate(512, (i) => i % 256));
+
+      final (_, header) = await Session.open(
+        sodium,
+        plaintext,
+        512,
+        receiverKp.publicKey,
+        identity,
+      );
+
+      // Tamper with the header: flip a byte in the manifest hash area.
+      final packed = Uint8List.fromList(header.pack());
+      packed[100] ^= 0xFF;
+
+      expect(
+        () => ReceiverSession.accept(sodium, packed, receiverKp),
+        throwsA(isA<DeadDropCryptoError>().having(
+          (e) => e.message,
+          'message',
+          contains('signature invalid'),
+        )),
+      );
+    });
+
+    test('Valid signature with correct senderVerifyKey passes', () async {
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final plaintext = Uint8List.fromList(List.generate(512, (i) => i % 256));
+
+      final (_, header) = await Session.open(
+        sodium,
+        plaintext,
+        512,
+        receiverKp.publicKey,
+        identity,
+      );
+
+      // Should not throw — the header is signed by the embedded key.
+      final session = await ReceiverSession.accept(
+        sodium,
+        header.pack(),
+        receiverKp,
+      );
+      expect(session.header.senderVerifyKey, identity.verifyKey);
+    });
+
+    test('Identity fingerprint is deterministic', () async {
+      final identity = await Identity.generate(sodium);
+      final fp1 = identity.fingerprint;
+      final fp2 = identity.fingerprint;
+      expect(fp1, fp2);
+      expect(fp1.length, 16);
+
+      // Reconstruct from secret key bytes — same fingerprint.
+      final restored =
+          Identity.fromSecretKeyBytes(sodium, identity.secretKeyBytes);
+      expect(restored.fingerprint, fp1);
     });
   });
 
