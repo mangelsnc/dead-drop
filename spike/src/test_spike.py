@@ -77,6 +77,36 @@ def test_tampered_chunk_rejected():
         pass
 
 
+def test_manifest_hash_matches_dart_blake2b():
+    """Cross-platform known-answer test for the manifest hash.
+
+    The manifest hash is BLAKE2b-256 (libsodium crypto_generichash in the
+    Dart app, hashlib.blake2b(digest_size=32) here). These vectors are also
+    asserted in app/test/integration_test.dart — matching values on both
+    sides prove the spike and the app produce identical manifest hashes.
+    """
+    import hashlib
+
+    vectors = {
+        b"": "0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8",
+        b"hello air gap": "0c8708c306b81c0af1073ef22378f781d3ecdd9acb0404da866dc1891cd6d858",
+        bytes(range(256)): "39a7eb9fedc19aabc83425c6755dd90e6f9d0c804964a1f4aaeea3b9fb599835",
+    }
+    for data, expected_hex in vectors.items():
+        assert hashlib.blake2b(data, digest_size=32).hexdigest() == expected_hex, data
+
+    # End-to-end: open_session must embed the BLAKE2b manifest hash.
+    pt = b"verify me end to end"
+    rk = ReceiverKeypair.generate()
+    sess, header = open_session(pt, 256, rk.public_key, Identity.generate())
+    assert header.manifest_hash == hashlib.blake2b(pt, digest_size=32).digest()
+
+    rs = accept_session(header.pack(), rk)
+    assert rs.verify_file(pt) is True
+    tampered = bytearray(pt); tampered[0] ^= 1
+    assert rs.verify_file(bytes(tampered)) is False
+
+
 # ---------------------------------------------------------------------------
 # fountain
 # ---------------------------------------------------------------------------

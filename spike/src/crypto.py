@@ -19,7 +19,7 @@ Primitives (libsodium)
 * Key exchange : X25519          (crypto_box / crypto_kx)
 * Cipher       : XSalsa20-Poly1305 (crypto_secretbox / crypto_box)
 * Signatures   : Ed25519         (crypto_sign) — sender authenticity
-* Hash         : SHA-256         (chunk ids, file manifest integrity)
+* Hash         : BLAKE2b         (file manifest integrity)
 
 Wire format
 -----------
@@ -28,7 +28,7 @@ The transfer is split in two layers:
 1. **Session bootstrap** (one small static QR or typed code):
        MAGIC(2) || version(1) || sender_eph_pk(32) || receiver_pk(32)
        || file_id(8) || total_size(4) || chunk_count(2) || chunk_size(2)
-       || sha256(manifest)(32) || Ed25519_signature(64)
+       || blake2b(manifest)(32) || Ed25519_signature(64)
 
 2. **Data frames** (the animated QR sequence):
        MAGIC(2) || version(1) || file_id(8) || frame_seq(4)
@@ -62,7 +62,7 @@ NONCE_SIZE = 24              # XSalsa20-Poly1305 nonce
 TAG_SIZE = 16                # Poly1305 tag (appended to ciphertext)
 PK_SIZE = 32                 # X25519 public key
 SIG_SIZE = 64                # Ed25519 signature
-HASH_SIZE = 32               # SHA-256
+HASH_SIZE = 32               # BLAKE2b-256 (libsodium crypto_generichash)
 FILE_ID_SIZE = 8
 
 
@@ -123,7 +123,7 @@ class SessionHeader:
     total_size: int            # 4   plaintext file size in bytes
     chunk_count: int           # 2   number of source chunks (K)
     chunk_size: int            # 2   plaintext bytes per chunk
-    manifest_hash: bytes       # 32  sha256 of the plaintext file
+    manifest_hash: bytes       # 32  BLAKE2b-256 of the plaintext file
     signature: bytes           # 64  Ed25519 sig over all previous fields
 
     STRUCT = struct.Struct(">2sB32s32s8sIHH32s64s")
@@ -167,7 +167,7 @@ def open_session(
     box = Box(eph_sk, receiver_pk)
 
     file_id = nacl_random(FILE_ID_SIZE)
-    manifest_hash = hashlib.sha256(plaintext).digest()
+    manifest_hash = hashlib.blake2b(plaintext, digest_size=32).digest()
     chunk_count = (len(plaintext) + chunk_size - 1) // chunk_size
 
     header = SessionHeader(
@@ -252,5 +252,5 @@ class ReceiverSession:
 
     def verify_file(self, plaintext: bytes) -> bool:
         """Final integrity check against the signed manifest hash."""
-        digest = hashlib.sha256(plaintext).digest()
+        digest = hashlib.blake2b(plaintext, digest_size=32).digest()
         return hmac.compare_digest(digest, self.header.manifest_hash)

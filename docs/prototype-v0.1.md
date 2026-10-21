@@ -25,7 +25,7 @@ app (or two windows on one machine for development):
    sequence 1 on, frames carry file data.
 5. **Reception.** The receiver scans frames, shows live progress
    (chunks decoded / total, frames scanned), reassembles the file via
-   belief propagation, verifies the SHA-256 manifest hash, and offers to
+   belief propagation, verifies the BLAKE2b manifest hash, and offers to
    save it under its original name.
 
 ## Transport envelope
