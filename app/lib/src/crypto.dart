@@ -14,6 +14,8 @@ import 'dart:typed_data';
 
 import 'package:sodium_libs/sodium_libs.dart';
 
+import 'utils.dart';
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -382,7 +384,7 @@ class ReceiverSession {
   ) async {
     final header = SessionHeader.unpack(headerBytes);
 
-    if (!_constantTimeEquals(header.receiverPk, receiverKeypair.publicKey)) {
+    if (!constantTimeEquals(header.receiverPk, receiverKeypair.publicKey)) {
       throw DeadDropCryptoError('Session not addressed to this receiver');
     }
 
@@ -424,19 +426,6 @@ class ReceiverSession {
 
   bool verifyFile(Sodium sodium, Uint8List plaintext) {
     final digest = sodium.crypto.genericHash(message: plaintext);
-    return _constantTimeEquals(digest, header.manifestHash);
+    return constantTimeEquals(digest, header.manifestHash);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-bool _constantTimeEquals(Uint8List a, Uint8List b) {
-  if (a.length != b.length) return false;
-  var result = 0;
-  for (var i = 0; i < a.length; i++) {
-    result |= a[i] ^ b[i];
-  }
-  return result == 0;
 }
