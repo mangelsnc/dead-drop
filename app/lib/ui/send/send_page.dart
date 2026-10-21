@@ -12,6 +12,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 import '../../src/crypto.dart';
 import '../../src/emitter.dart';
 import '../../src/handshake.dart';
+import '../../src/identity_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
@@ -116,9 +117,10 @@ class SendState {
 }
 
 class SendNotifier extends StateNotifier<SendState> {
-  SendNotifier(this._sodium) : super(SendState());
+  SendNotifier(this._sodium, this._identityStore) : super(SendState());
 
   final Sodium _sodium;
+  final IdentityStore _identityStore;
   Timer? _timer;
 
   Future<void> pickFile() async {
@@ -164,7 +166,10 @@ class SendNotifier extends StateNotifier<SendState> {
 
   Future<void> startEmitting() async {
     if (!state.readyToSend || state.isEmitting) return;
-    final identity = await Identity.generate(_sodium);
+    // Use the persistent device identity — NOT a fresh one per transfer.
+    // This is what makes the Ed25519 signature meaningful: the receiver
+    // can verify that the sender is the same installation across sessions.
+    final identity = await _identityStore.loadOrGenerate();
     final receiverKp = _ReceiverKeypairFromPk(state.receiverPk!);
     final emitter = await Emitter.create(
       _sodium,
@@ -248,7 +253,8 @@ class _ReceiverKeypairFromPk implements ReceiverKeypair {
 
 final sendProvider = StateNotifierProvider<SendNotifier, SendState>((ref) {
   final sodium = ref.watch(sodiumProvider);
-  return SendNotifier(sodium);
+  final identityStore = ref.watch(identityStoreProvider);
+  return SendNotifier(sodium, identityStore);
 });
 
 // ---------------------------------------------------------------------------
@@ -322,6 +328,10 @@ class SendPage extends ConsumerWidget {
 
             // ── Step 3: Configure (collapsible) ──────────────────
             _ConfigSection(state: state, notifier: notifier),
+            const SizedBox(height: 16),
+
+            // ── Identity fingerprint ─────────────────────────────
+            const _IdentityFingerprintCard(),
             const SizedBox(height: 24),
 
             // ── Step 4: Start ────────────────────────────────────
@@ -1225,5 +1235,78 @@ class _QrDisplay extends StatelessWidget {
       'H' => QrErrorCorrectLevel.H,
       _ => QrErrorCorrectLevel.M,
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Identity fingerprint card (shown on the send page)
+// ---------------------------------------------------------------------------
+
+/// Displays the device's persistent Ed25519 identity fingerprint.
+///
+/// This is the "who am I" of the sender: the receiver can compare this
+/// fingerprint out-of-band (in person, over a call) to confirm the file
+/// is coming from the expected device.
+class _IdentityFingerprintCard extends ConsumerWidget {
+  const _IdentityFingerprintCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final identityStore = ref.watch(identityStoreProvider);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.fingerprint, color: DeadDropColors.accent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Your identity fingerprint',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<String>(
+              future: identityStore.fingerprint(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return Column(
+                  children: [
+                    Center(
+                      child: SelectableText(
+                        snapshot.data!,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 18,
+                          letterSpacing: 2,
+                          color: DeadDropColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Share this fingerprint with the receiver through '
+                      'another channel (in person, phone call) so they can '
+                      'verify the file comes from your device.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
