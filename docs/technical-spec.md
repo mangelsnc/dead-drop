@@ -139,7 +139,7 @@ DeadDrop is organized into **six core modules**, each with a single responsibili
 
 1. **User selects file** -> `EmitterSession.create(file_path)`
 2. **Crypto engine generates ephemeral X25519 keypair** -> `CryptoContext.generate_ephemeral_keypair()`
-3. **File is hashed (SHA-256)** -> manifest created
+3. **File is hashed (BLAKE2b)** -> manifest created
 4. **Manifest is signed with sender's Ed25519 identity key** -> `SessionHeader`
 5. **Session header is encoded as a static QR** -> displayed to receiver
 6. **File is split into chunks (512 bytes each)** -> `FountainEncoder`
@@ -158,7 +158,7 @@ DeadDrop is organized into **six core modules**, each with a single responsibili
 6. **Each frame is decrypted** -> `CryptoContext.decrypt_chunk()`
 7. **Fountain decoder accumulates frames** -> `FountainDecoder.add_frame()`
 8. **When enough frames received (~1.3x chunk count), decode** -> `FountainDecoder.reassemble()`
-9. **Verify SHA-256 hash of reassembled file** -> manifest check
+9. **Verify BLAKE2b hash of reassembled file** -> manifest check
 10. **Save file to secure storage** -> `SecureStorage.save(file)`
 
 ---
@@ -190,7 +190,7 @@ All frames are binary, big-endian. Two frame types exist: **session header** (on
 +------------+-------------+------------+---------------------------+
 | TOTAL_SIZE | CHUNK_COUNT | CHUNK_SIZE |     MANIFEST_HASH         |
 |  4 bytes   |   2 bytes   |   2 bytes  |       32 bytes            |
-|  uint32    |   uint16    |   uint16   |  SHA-256 of plaintext     |
+|  uint32    |   uint16    |   uint16   |  BLAKE2b of plaintext     |
 +------------+-------------+------------+---------------------------+
 +--------------------------------------------------------------------+
 |                          SIGNATURE                                 |
@@ -210,7 +210,7 @@ All frames are binary, big-endian. Two frame types exist: **session header** (on
 - `TOTAL_SIZE`: plaintext file size in bytes (before encryption)
 - `CHUNK_COUNT`: number of source chunks (K in fountain code terminology)
 - `CHUNK_SIZE`: plaintext bytes per chunk (default: 512)
-- `MANIFEST_HASH`: SHA-256 of the plaintext file (end-to-end integrity check)
+- `MANIFEST_HASH`: BLAKE2b-256 of the plaintext file (end-to-end integrity check)
 - `SIGNATURE`: Ed25519 signature over all previous fields (sender authenticity)
 
 #### 2.2.2 Data frame (animated QR sequence)
@@ -276,7 +276,7 @@ A **fountain code** solves this: the sender generates an **infinite stream** of 
 
 **Per-frame integrity:** every frame is encrypted with XSalsa20-Poly1305 (AEAD). If a frame is corrupted (bit flips, partial scan), the Poly1305 tag check fails and the frame is **discarded**. It never corrupts the file.
 
-**End-to-end integrity:** after fountain decoding, the receiver computes SHA-256 of the reassembled plaintext and compares it to the `MANIFEST_HASH` in the session header. Mismatch = transfer failed (should never happen if AEAD is working).
+**End-to-end integrity:** after fountain decoding, the receiver computes BLAKE2b-256 of the reassembled plaintext and compares it to the `MANIFEST_HASH` in the session header. Mismatch = transfer failed (should never happen if AEAD is working).
 
 **Frame loss:** the fountain code tolerates arbitrary frame loss. The receiver just keeps scanning until it has enough frames. No timeout — the user decides when to give up.
 
@@ -287,7 +287,7 @@ A **fountain code** solves this: the sender generates an **infinite stream** of 
 The session header (section 2.2.1) is the only metadata transmitted. It contains:
 - Cryptographic parameters (public keys, signature)
 - File parameters (size, chunk count, chunk size)
-- Integrity check (SHA-256 hash)
+- Integrity check (BLAKE2b hash)
 
 **No filename is transmitted in the clear.** The filename is part of the encrypted payload (inside the first chunk), so it never appears in plaintext on the wire.
 
@@ -299,7 +299,7 @@ SENDER                                    RECEIVER
   |  1. Generate ephemeral X25519 keypair    |
   |  2. Read receiver's public key (OOB)     |
   |  3. Compute session key                  |
-  |  4. Hash file (SHA-256)                  |
+  |  4. Hash file (BLAKE2b)                  |
   |  5. Sign manifest (Ed25519)              |
   |                                          |
   |----- Session Header QR (static) -------->|
@@ -320,7 +320,7 @@ SENDER                                    RECEIVER
   |                                          | 12. Decrypt chunk
   |                                          | 13. Add to fountain decoder
   |                                          | 14. If enough frames: decode
-  |                                          | 15. Verify SHA-256
+  |                                          | 15. Verify BLAKE2b
   |                                          | 16. Save file
 ```
 
@@ -335,7 +335,7 @@ SENDER                                    RECEIVER
 | **Key exchange** | X25519 (Curve25519 ECDH) | libsodium `crypto_box` | Fast, modern, forward secrecy (ephemeral keys) |
 | **Symmetric encryption** | XSalsa20-Poly1305 (AEAD) | libsodium `crypto_secretbox` | 192-bit nonce (no counter management), authenticated |
 | **Signatures** | Ed25519 | libsodium `crypto_sign` | Fast, deterministic, sender authenticity |
-| **Hashing** | SHA-256 | libsodium `crypto_hash_sha256` | Standard, file integrity |
+| **Hashing** | BLAKE2b-256 | libsodium `crypto_generichash` | Fast, file integrity |
 | **PIN derivation** | Argon2id | libsodium `crypto_pwhash` | Memory-hard, GPU-resistant, PIN -> encryption key |
 
 **Why libsodium:**
@@ -409,7 +409,7 @@ The handshake is **asynchronous and one-way**: the sender shows a QR, the receiv
    - Ephemeral public key
    - Receiver's public key (binding)
    - File metadata (size, chunk count, chunk size)
-   - SHA-256 hash of the plaintext file
+   - BLAKE2b-256 hash of the plaintext file
    - Ed25519 signature over all fields
 
 5. **Sender displays the session header as a static QR**
@@ -942,7 +942,7 @@ class SessionHeader {
   final int totalSize;               // bytes
   final int chunkCount;              // K
   final int chunkSize;               // bytes per chunk
-  final Uint8List manifestHash;      // SHA-256 of plaintext
+  final Uint8List manifestHash;      // BLAKE2b-256 of plaintext
   final Uint8List signature;         // Ed25519 signature
 
   Uint8List pack();
@@ -1020,7 +1020,7 @@ Offset  Size  Field
 75      4     TOTAL_SIZE (uint32 BE)
 79      2     CHUNK_COUNT (uint16 BE)
 81      2     CHUNK_SIZE (uint16 BE)
-83      32    MANIFEST_HASH (SHA-256)
+83      32    MANIFEST_HASH (BLAKE2b-256)
 115     64    SIGNATURE (Ed25519)
 ```
 
@@ -1060,7 +1060,7 @@ These will be in `/tests/vectors/` and must pass on all platforms.
 - [x] AEAD on every chunk (no silent corruption)
 - [x] Sender authentication via Ed25519 signature
 - [x] Receiver binding (only intended receiver can decrypt)
-- [x] SHA-256 file integrity check
+- [x] BLAKE2b file integrity check
 - [x] Argon2id for PIN derivation (memory-hard)
 - [x] Identical timing for real vs. decoy PIN
 - [x] No network code in the app
