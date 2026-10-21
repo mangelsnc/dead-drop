@@ -6,7 +6,7 @@
 /// * Key exchange : X25519          (crypto_box / crypto_kx)
 /// * Cipher       : XSalsa20-Poly1305 (crypto_secretbox / crypto_box)
 /// * Signatures   : Ed25519         (crypto_sign) — sender authenticity
-/// * Hash         : SHA-256         (chunk ids, file manifest integrity)
+/// * Hash         : BLAKE2b         (file manifest integrity)
 library;
 
 import 'dart:convert';
@@ -24,7 +24,7 @@ const nonceSize = 24; // XSalsa20-Poly1305 nonce
 const tagSize = 16; // Poly1305 tag
 const pkSize = 32; // X25519 public key
 const sigSize = 64; // Ed25519 signature
-const hashSize = 32; // SHA-256
+const hashSize = 32; // BLAKE2b-256 (libsodium crypto_generichash)
 const fileIdSize = 8;
 
 class DeadDropCryptoError implements Exception {
@@ -82,7 +82,8 @@ class Identity {
   /// Returns the first 16 hex characters of the Ed25519 public key —
   /// enough for visual out-of-band comparison without being unwieldy.
   String get fingerprint {
-    final hex = verifyKey.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final hex =
+        verifyKey.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     return hex.substring(0, 16);
   }
 
@@ -122,7 +123,7 @@ class SessionHeader {
   final int totalSize; // 4   plaintext file size in bytes
   final int chunkCount; // 2   number of source chunks (K)
   final int chunkSize; // 2   plaintext bytes per chunk
-  final Uint8List manifestHash; // 32  sha256 of the plaintext file
+  final Uint8List manifestHash; // 32  BLAKE2b-256 of the plaintext file
   Uint8List signature; // 64  Ed25519 sig over all previous fields
 
   SessionHeader({
