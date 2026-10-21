@@ -257,7 +257,7 @@ A **fountain code** solves this: the sender generates an **infinite stream** of 
 - **Degree distribution:** Robust Soliton with parameters c=0.05, delta=0.5
 - **Encoding:** for each frame, sample degree d from the distribution, select d random chunks, XOR them
 - **Decoding:** belief propagation — each degree-1 frame reveals a chunk, which simplifies other frames
-- **Determinism:** chunk selection is seeded by `(seed << 32) ^ seq`, so both sides can reconstruct it (future: transmit only seed, not chunk_ids)
+- **Determinism:** chunk selection is derived from `(seed, seq)` via a fully specified 32-bit PRNG, so both sides can reconstruct it bit-for-bit on any platform (future: transmit only seed, not chunk_ids). The construction is `mixSeed(seed, seq)` (splitmix32-style bijective mixing) feeding a xorshift32 generator with explicit Fisher-Yates subset selection — see `app/lib/src/prng.dart` and `spike/src/fountain.py`, which produce identical streams (pinned by golden-vector tests in `app/test/prng_test.dart`). It replaces `dart:math.Random((seed << 32) ^ seq)`, which silently truncated the seed to 32 bits and whose algorithm is not specified across platforms. **Note:** this PRNG is a selection algorithm, not a cryptographic primitive — all cryptography remains in libsodium.
 
 #### 2.3.3 Chunk size selection
 
