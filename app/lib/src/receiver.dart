@@ -24,6 +24,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 import 'crypto.dart';
 import 'fountain.dart';
 import 'qrframe.dart';
+import 'utils.dart';
 
 class Receiver {
   final Sodium sodium;
@@ -70,7 +71,7 @@ class Receiver {
       return false;
     }
 
-    if (!_constantTimeEquals(frame.fileId, session!.header.fileId)) {
+    if (!constantTimeEquals(frame.fileId, session!.header.fileId)) {
       framesIgnoredOtherSession++;
       return false;
     }
@@ -125,15 +126,6 @@ class Receiver {
     }
     return plaintext;
   }
-}
-
-bool _constantTimeEquals(Uint8List a, Uint8List b) {
-  if (a.length != b.length) return false;
-  var result = 0;
-  for (var i = 0; i < a.length; i++) {
-    result |= a[i] ^ b[i];
-  }
-  return result == 0;
 }
 
 /// Returns true only if every chunk id is a valid source-chunk index,
