@@ -13,13 +13,10 @@ void main() {
 
   group('countPdfPages', () {
     test('counts /Type /Page occurrences', () {
-      // Build PDF bytes as an explicit int list (no String.codeUnits).
-      const pdfSource = '%PDF-1.4\n'
+      final pdfContent = '%PDF-1.4\n'
           '3 0 obj\n<< /Type /Page >>\nendobj\n'
           '4 0 obj\n<< /Type /Page >>\nendobj\n';
-      final bytes = Uint8List.fromList(
-        pdfSource.codeUnits.map((c) => c & 0xFF).toList(),
-      );
+      final bytes = Uint8List.fromList(pdfContent.codeUnits.toList());
       expect(countPdfPages(bytes), 2);
     });
   });
