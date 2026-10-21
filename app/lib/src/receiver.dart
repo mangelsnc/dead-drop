@@ -13,7 +13,7 @@
 ///       → LTDecoder.add_frame()   (belief propagation)
 ///     when decoder.done:
 ///       → reassemble, unpad to total_size
-///       → verify sha256 against signed manifest
+///       → verify BLAKE2b against signed manifest
 ///       → return plaintext
 library;
 
@@ -121,7 +121,8 @@ class Receiver {
     final padded = decoder!.reassemble();
     final plaintext = padded.sublist(0, session!.header.totalSize);
     if (!session!.verifyFile(sodium, plaintext)) {
-      throw DeadDropCryptoError('File integrity check failed (sha256 mismatch)');
+      throw DeadDropCryptoError(
+          'File integrity check failed (BLAKE2b mismatch)');
     }
     return plaintext;
   }
