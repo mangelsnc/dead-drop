@@ -27,13 +27,20 @@ const List<int> kChunkSizeOptions = [256, 512, 1024, 2048, 4096];
 /// the spike validated as the best throughput / scannability trade-off.
 const int kDefaultChunkSize = 512;
 
-/// The smallest chunk size from [kChunkSizeOptions] that can transfer a file
-/// of [fileSize] bytes without overflowing the uint16 `chunkCount` field.
+/// The recommended chunk size for a file of [fileSize] bytes.
+///
+/// Small files keep [kDefaultChunkSize] — the size the spike validated as the
+/// best throughput / scannability trade-off — rather than dropping to a
+/// smaller chunk that would only inflate the frame count. We only scale *up*
+/// (never below the default) when the file would overflow the uint16
+/// `chunkCount` field at the current size.
 ///
 /// Returns the largest option when even that cannot fit the file — callers
 /// must then surface [fileTooLargeError] instead of starting the transfer.
 int recommendedChunkSize(int fileSize) {
   for (final size in kChunkSizeOptions) {
+    // Never go below the validated default — smaller chunks only add frames.
+    if (size < kDefaultChunkSize) continue;
     if (fileSize <= maxFileSizeForChunkSize(size)) return size;
   }
   return kChunkSizeOptions.last;
