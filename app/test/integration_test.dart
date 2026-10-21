@@ -303,6 +303,73 @@ void main() {
           Identity.fromSecretKeyBytes(sodium, identity.secretKeyBytes);
       expect(restored.fingerprint, fp1);
     });
+
+    // Cross-platform known-answer tests for the manifest hash.
+    //
+    // The manifest hash is BLAKE2b-256 (libsodium `crypto_generichash`).
+    // These vectors were generated with Python's `hashlib.blake2b(data,
+    // digest_size=32)` — the exact construction the spike uses — so a
+    // matching result proves the Dart app and the Python spike produce
+    // identical manifest hashes for identical inputs.
+    test('Manifest hash matches Python BLAKE2b-256 vectors', () async {
+      final vectors = <String, String>{
+        // python3 -c "import hashlib; print(hashlib.blake2b(b'', digest_size=32).hexdigest())"
+        '': '0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8',
+        // python3 -c "import hashlib; print(hashlib.blake2b(b'hello air gap', digest_size=32).hexdigest())"
+        'hello air gap':
+            '0c8708c306b81c0af1073ef22378f781d3ecdd9acb0404da866dc1891cd6d858',
+      };
+
+      for (final entry in vectors.entries) {
+        final input = Uint8List.fromList(entry.key.codeUnits);
+        final digest = sodium.crypto.genericHash(message: input);
+        final hex =
+            digest.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+        expect(hex, entry.value, reason: 'input: "${entry.key}"');
+      }
+
+      // Binary vector: bytes 0x00..0xFF.
+      final binaryInput = Uint8List.fromList(
+        List.generate(256, (i) => i),
+      );
+      final binaryDigest = sodium.crypto.genericHash(message: binaryInput);
+      final binaryHex =
+          binaryDigest.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      expect(
+        binaryHex,
+        '39a7eb9fedc19aabc83425c6755dd90e6f9d0c804964a1f4aaeea3b9fb599835',
+        reason: 'input: bytes 0x00..0xFF',
+      );
+    });
+
+    test('Manifest hash verification accepts correct file, rejects tampered',
+        () async {
+      final plaintext = Uint8List.fromList('verify me end to end'.codeUnits);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final identity = await Identity.generate(sodium);
+      final (session, header) = await Session.open(
+        sodium,
+        plaintext,
+        512,
+        receiverKp.publicKey,
+        identity,
+      );
+
+      // Correct plaintext verifies.
+      expect(header.manifestHash.length, hashSize);
+
+      final receiver = await ReceiverSession.accept(
+        sodium,
+        header.pack(),
+        receiverKp,
+      );
+      expect(receiver.verifyFile(sodium, plaintext), isTrue);
+
+      // One flipped byte fails verification.
+      final tampered = Uint8List.fromList(plaintext);
+      tampered[0] ^= 1;
+      expect(receiver.verifyFile(sodium, tampered), isFalse);
+    });
   });
 
   group('Fountain', () {
