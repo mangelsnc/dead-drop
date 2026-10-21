@@ -2,7 +2,17 @@
 
 **Pass files from one device to another with no internet, no cables, no Bluetooth. Just the screen and the camera.**
 
-And if someone forces you to open the app, a decoy PIN shows a fake, convincing environment while your real files remain invisible.
+> ⚠️ **Development status — read this before relying on DeadDrop for your safety**
+>
+> DeadDrop is in **active development** (MVP target: February 2027). The following features are described in our docs as project goals but are **NOT yet implemented**:
+>
+> - **Decoy PIN** (duress mode that opens a fake environment)
+> - **At-rest encryption** (files stored encrypted inside the app)
+> - **Self-destruct** (automatic erase after failed PIN attempts)
+>
+> **What works today:** air-gapped file transfer via animated QR codes, end-to-end encrypted (X25519 + XSalsa20-Poly1305, Ed25519-signed session) between two devices.
+>
+> Do not rely on any unimplemented feature for your safety. The exact current security posture is in [docs/security.md](docs/security.md); planned work is tracked in [Issues](../../issues).
 
 ---
 
@@ -73,7 +83,7 @@ Download the installer for your system from the [Releases](../../releases) page 
 3. On the **receiving** device: tap **"Receive a file"** and point the camera at the other screen.
 4. You'll see a progress bar on both. When finished, the receiver taps **"Save"** and chooses where.
 
-That's it. The [full user guide](docs/user-guide.md) walks through every step with screenshots, what to do if the camera struggles to read, and how to set up the decoy PIN.
+That's it. The [full user guide](docs/user-guide.md) walks through every step with screenshots, what to do if the camera struggles to read, and an up-to-date list of [what works today vs. what's planned](docs/user-guide.md#what-works-today-vs-whats-planned).
 
 ---
 
@@ -81,7 +91,7 @@ That's it. The [full user guide](docs/user-guide.md) walks through every step wi
 
 **Do I need internet?** No. Never. Not to install the app (if you copy it via USB), not to use it, not to activate it.
 
-**What if someone forces me to unlock it?** You can set up a **decoy PIN**: if entered, the app opens normally but shows fake, credible content you chose in advance. Your real files are nowhere to be found. More details in the [FAQ](docs/faq.md).
+**What if someone forces me to unlock it?** A **decoy PIN** feature is planned for exactly this situation — but it is **not implemented yet**. Today the app has no PIN at all, so assume everything in it is visible to whoever opens it. Current protections and honest limits: [docs/security.md](docs/security.md).
 
 **Is it legal?** Yes. DeadDrop is free software (MIT licence), auditable by anyone, and does not hide its own existence. It protects the same right as a sealed letter: the privacy of correspondence. Full analysis in the [FAQ](docs/faq.md#is-it-legal).
 
@@ -94,7 +104,9 @@ More answers in [docs/faq.md](docs/faq.md).
 DeadDrop is in active development for the **#cryptograFREE** challenge (RootedCON + Criptored). This repository has been public since day one and will remain so forever.
 
 - ✅ Documentation and value proposition
+- ✅ E2E-encrypted air-gapped transfer prototype (v0.1)
 - 🚧 MVP in development (delivery: February 2027)
+- 📋 Planned: access PIN, decoy PIN, at-rest encryption, self-destruct — see [Issues](../../issues)
 - 📋 Roadmap: Android/iOS mobile apps after the MVP
 
 ## Documentation

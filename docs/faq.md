@@ -8,7 +8,7 @@ The questions anyone would ask before using DeadDrop, answered without jargon.
 
 ### Do I need internet to use DeadDrop?
 
-**No.** Not to send, not to receive, not to activate the app, not to create your PIN. DeadDrop never connects to the internet: it has no servers, no accounts, it sends no statistics. You can turn on airplane mode and verify it works exactly the same.
+**No.** Not to send, not to receive, not to activate the app. DeadDrop never connects to the internet: it has no servers, no accounts, it sends no statistics. You can turn on airplane mode and verify it works exactly the same.
 
 ### How can a file cross without internet, Bluetooth or cables?
 
@@ -48,15 +48,15 @@ On the internet: nothing, because there is no internet. On the devices: the app 
 
 ### What happens if I'm forced to unlock the app?
 
-That's what the **decoy PIN** is for. You can set up a second PIN that opens the app showing fake, credible content you prepared in advance (bland photos, unimportant documents). Whoever forces you sees a normal app with normal content. Your real files appear nowhere and there is no way to know another space exists. Read the [user guide](user-guide.md#the-decoy-pin-what-it-is-and-how-to-set-it-up) to set it up properly.
+**Today: nothing protects you here yet.** The **decoy PIN** — a second PIN that would open the app showing fake, credible content you prepared in advance — is a **planned feature and is not implemented**. The current version has no PIN at all: whoever opens the app sees everything in it. If physical coercion is a realistic scenario for you, do not store sensitive files in DeadDrop yet; use it only for the transfer and protect the device with your operating system's tools (disk encryption, strong unlock code). Follow the roadmap in the [user guide](user-guide.md#what-works-today-vs-whats-planned).
 
 ### What happens if I lose my device or it gets stolen?
 
-Your files stored inside DeadDrop are protected by your PIN. Without it, they cannot be read. And if you enable **self-destruct**, after several failed PIN attempts the protected content is irreversibly erased.
+**Today:** files you received with DeadDrop are stored as ordinary files wherever you saved them. They are protected only by your device's own security (user account, disk encryption such as FileVault/BitLocker/LUKS if enabled). DeadDrop's own **PIN protection, at-rest encryption and self-destruct are planned features and do not exist yet** — there is currently no PIN to enter and nothing that erases content after failed attempts.
 
 ### What if I forget my PIN?
 
-There is no way to recover it. There is no "security question" or recovery email, because that would require servers and accounts — exactly what DeadDrop avoids. **Write your PIN down and keep it somewhere safe** (or use a password manager). If you enabled self-destruct and fail too many times, you will lose the content.
+The current version has no PIN, so there is nothing to forget. When PIN protection ships, there will be no way to recover a forgotten PIN — no "security question" or recovery email, because that would require servers and accounts, exactly what DeadDrop avoids.
 
 ### Can I trust the encryption? Who has reviewed it?
 
