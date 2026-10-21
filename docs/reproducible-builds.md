@@ -66,7 +66,8 @@ sha256sum build/linux/x64/release/bundle/dead_drop
 - **Flutter SDK version**: Must match exactly. Check `FLUTTER_VERSION` in the CI workflow.
 - **pubspec.lock**: Ensures identical dependency versions. Never delete it.
 - **Build flags**: CI uses `--release` with default flags. Custom flags may change the binary.
-- **Timestamps**: Flutter embeds build timestamps in some artifacts. The CI strips these where possible; see the workflow for details.
+- **Absolute build path**: Flutter embeds the filesystem path into `lib/libapp.so` via `dart_plugin_registrant.dart`. To reproduce the CI hash, build in `/home/runner/work/dead-drop/dead-drop` (or use a container/symlink). See `docs/reproducibility-verification.md` section 2 for the full analysis.
+- **Packaging**: `tar` and `gzip` embed timestamps by default. The CI uses deterministic flags (`--sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner` + `gzip -n9`) so the `.tar.gz` hash is also reproducible.
 
 ---
 
