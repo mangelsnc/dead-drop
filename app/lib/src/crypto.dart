@@ -29,6 +29,21 @@ const sigSize = 64; // Ed25519 signature
 const hashSize = 32; // BLAKE2b-256 (libsodium crypto_generichash)
 const fileIdSize = 8;
 
+/// Wire-format limits.
+///
+/// `chunkCount` and `chunkSize` are both packed as **uint16** in the session
+/// header (see [SessionHeader.pack]). `ByteData.setUint16` truncates silently
+/// instead of throwing, so an out-of-range value would be written as garbage
+/// and the receiver would fail incomprehensibly. We validate both against
+/// these bounds *before* packing and fail loudly instead.
+const maxChunkCount = 0xFFFF; // 65535 — largest value a uint16 holds
+const maxChunkSize = 0xFFFF; // 65535 — uint16
+const minChunkSize = 1;
+
+/// The largest plaintext that can be transferred with a given [chunkSize]
+/// without overflowing the uint16 `chunkCount` field.
+int maxFileSizeForChunkSize(int chunkSize) => maxChunkCount * chunkSize;
+
 class DeadDropCryptoError implements Exception {
   final String message;
   DeadDropCryptoError(this.message);
@@ -277,6 +292,18 @@ class Session {
     Identity senderIdentity, {
     String? fileName,
   }) async {
+    // Validate BEFORE doing any work: `chunkSize` and the resulting
+    // `chunkCount` are packed as uint16, and `ByteData.setUint16` truncates
+    // silently instead of throwing. Fail loudly here so an oversized file
+    // surfaces as a clear, actionable error instead of a corrupted header
+    // the receiver cannot make sense of.
+    if (chunkSize < minChunkSize || chunkSize > maxChunkSize) {
+      throw DeadDropCryptoError(
+        'Invalid chunk size $chunkSize bytes — must be between '
+        '$minChunkSize and $maxChunkSize bytes.',
+      );
+    }
+
     final ephKp = sodium.crypto.box.keyPair();
     final box = sodium.crypto.box.precalculate(
       publicKey: receiverPk,
@@ -286,6 +313,16 @@ class Session {
     final fileId = sodium.randombytes.buf(fileIdSize);
     final manifestHash = sodium.crypto.genericHash(message: plaintext);
     final chunkCount = (plaintext.length + chunkSize - 1) ~/ chunkSize;
+
+    if (chunkCount > maxChunkCount) {
+      throw DeadDropCryptoError(
+        'File too large: ${plaintext.length} bytes needs $chunkCount chunks '
+        'of $chunkSize bytes, but the protocol supports at most '
+        '$maxChunkCount chunks. Maximum file size at this chunk size is '
+        '${maxFileSizeForChunkSize(chunkSize)} bytes. Use a larger chunk '
+        'size.',
+      );
+    }
 
     // Pre-split into source chunks (padded last chunk)
     final chunks = List<Uint8List>.generate(chunkCount, (i) {
