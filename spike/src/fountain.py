@@ -31,8 +31,62 @@ tested in `compact=True` mode.)
 from __future__ import annotations
 
 import math
-import random
 from dataclasses import dataclass, field
+
+# ---------------------------------------------------------------------------
+# Deterministic PRNG (splitmix32-style mixing + xorshift32)
+# ---------------------------------------------------------------------------
+#
+# Ported 1:1 from app/lib/src/prng.dart. `random.Random` is NOT usable for
+# cross-implementation determinism: its algorithm is CPython-specific and its
+# seeding accepts arbitrary-precision ints (which is why the spike never
+# showed the 32-bit-truncation bug the Dart side had). The generator below is
+# fully specified in 32-bit arithmetic and produces the identical stream in
+# both implementations — pinned by golden-vector tests on both sides.
+
+_M32 = 0xFFFFFFFF
+
+
+def _mul32(a: int, b: int) -> int:
+    """Low 32 bits of a*b, computed so the result matches Dart exactly."""
+    a_lo, a_hi = a & 0xFFFF, (a >> 16) & 0xFFFF
+    b_lo, b_hi = b & 0xFFFF, (b >> 16) & 0xFFFF
+    mid = ((a_hi * b_lo + a_lo * b_hi) & 0xFFFF) << 16
+    return (a_lo * b_lo + mid) & _M32
+
+
+def mix_seed(seed: int, seq: int) -> int:
+    """splitmix32-style finalizer over seed + seq*phi. Bijective over 32 bits."""
+    z = (seed + _mul32(seq, 0x9E3779B9)) & _M32
+    z = _mul32(z ^ (z >> 16), 0x21F0AAAD)
+    z = _mul32(z ^ (z >> 15), 0x735A2D97)
+    return (z ^ (z >> 15)) & _M32
+
+
+class DeterministicRandom:
+    """xorshift32 (Marsaglia). State 0 is remapped (fixed point)."""
+
+    def __init__(self, seed: int):
+        s = seed & _M32
+        self._state = s if s != 0 else 0x6D2B79F5
+
+    def next_uint32(self) -> int:
+        x = self._state
+        x = (x ^ ((x << 13) & _M32)) & _M32
+        x = (x ^ (x >> 17)) & _M32
+        x = (x ^ ((x << 5) & _M32)) & _M32
+        self._state = x
+        return x
+
+    def random(self) -> float:
+        """Uniform double in [0, 1) — same name as random.Random for drop-in use."""
+        return self.next_uint32() / 0x100000000
+
+    def next_int(self, mx: int) -> int:
+        """Uniform int in [0, mx) via multiply-divide (no modulo bias)."""
+        if mx <= 0:
+            raise ValueError("max must be positive")
+        return (self.next_uint32() * mx) // 0x100000000
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +122,7 @@ def robust_soliton_cdf(k: int, c: float = 0.05, delta: float = 0.5) -> list[floa
     return cdf
 
 
-def sample_degree(rng: random.Random, cdf: list[float]) -> int:
+def sample_degree(rng, cdf: list[float]) -> int:
     u = rng.random()
     for d, p in enumerate(cdf, start=1):
         if u <= p:
@@ -98,9 +152,16 @@ class LTEncoder:
         Returns (chunk_ids, payload) where payload = XOR of the chosen
         chunks. Deterministic for a given (seq, seed).
         """
-        rng = random.Random((seed << 32) ^ seq)
+        rng = DeterministicRandom(mix_seed(seed, seq))
         degree = min(sample_degree(rng, self.cdf), self.k)
-        chunk_ids = sorted(rng.sample(range(self.k), degree))
+        # Fisher-Yates on the identity permutation, driven by the
+        # deterministic generator. random.Random.sample is not usable here:
+        # its algorithm is CPython-specific and not portable to Dart.
+        indices = list(range(self.k))
+        for i in range(self.k - 1, 0, -1):
+            j = rng.next_int(i + 1)
+            indices[i], indices[j] = indices[j], indices[i]
+        chunk_ids = sorted(indices[:degree])
 
         payload = bytearray(self.chunk_size)
         for cid in chunk_ids:

@@ -18,6 +18,8 @@ library;
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'prng.dart';
+
 // ---------------------------------------------------------------------------
 // Degree distribution (robust soliton, simplified)
 // ---------------------------------------------------------------------------
@@ -50,7 +52,7 @@ List<double> robustSolitonCdf(int k, {double c = 0.05, double delta = 0.5}) {
   return cdf;
 }
 
-int sampleDegree(Random rng, List<double> cdf) {
+int sampleDegree(DeterministicRandom rng, List<double> cdf) {
   final u = rng.nextDouble();
   for (var d = 0; d < cdf.length; d++) {
     if (u <= cdf[d]) return d + 1;
@@ -82,15 +84,24 @@ class LTEncoder {
 
   /// Produce encoded frame #(seq) under PRNG seed.
   /// Returns (chunk_ids, payload) where payload = XOR of the chosen chunks.
+  ///
+  /// Deterministic for a given (seq, seed) on every platform: the generator
+  /// is the specified xorshift32 in prng.dart, NOT `dart:math.Random` (which
+  /// truncated `(seed << 32) ^ seq` to 32 bits — silently discarding `seed` —
+  /// and guarantees no stable sequence across platforms or SDK versions).
   (List<int>, Uint8List) makeFrame(int seq, int seed) {
-    final rng = Random((seed << 32) ^ seq);
+    final rng = DeterministicRandom(mixSeed(seed, seq));
     final degree = min(sampleDegree(rng, cdf), k);
-    final chunkIds = <int>[];
-    final indices = List<int>.generate(k, (i) => i)..shuffle(rng);
-    for (var i = 0; i < degree; i++) {
-      chunkIds.add(indices[i]);
+    // Fisher-Yates on the identity permutation, driven by the deterministic
+    // generator. `List.shuffle` is not usable here: it takes `dart:math.Random`.
+    final indices = List<int>.generate(k, (i) => i);
+    for (var i = k - 1; i > 0; i--) {
+      final j = rng.nextInt(i + 1);
+      final tmp = indices[i];
+      indices[i] = indices[j];
+      indices[j] = tmp;
     }
-    chunkIds.sort();
+    final chunkIds = indices.sublist(0, degree)..sort();
 
     final payload = Uint8List(chunkSize);
     for (final cid in chunkIds) {
