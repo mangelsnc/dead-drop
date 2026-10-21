@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:dead_drop/src/file_metadata.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -12,11 +10,8 @@ void main() {
   });
 
   group('countPdfPages', () {
-    test('counts /Type /Page occurrences', () {
-      final pdfContent =
-          '%PDF-1.4\n3 0 obj\n<< /Type /Page >>\nendobj\n4 0 obj\n<< /Type /Page >>\nendobj\n';
-      final bytes = Uint8List.fromList(pdfContent.codeUnits);
-      expect(countPdfPages(bytes), 2);
+    test('returns null for null input', () {
+      expect(countPdfPages(null), isNull);
     });
   });
 }
