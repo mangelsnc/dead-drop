@@ -32,6 +32,7 @@ class Receiver {
   LTDecoder? decoder;
   int framesDropped = 0;
   int framesIgnoredOtherSession = 0;
+  int framesRejectedBadChunkIds = 0;
 
   /// Original file name recovered from the encrypted metadata frame (seq 0),
   /// when the sender included one.
@@ -93,6 +94,17 @@ class Receiver {
       return false;
     }
 
+    // Bounds-check chunk ids before they reach the decoder. The payload is
+    // AEAD-authenticated, so this is defence-in-depth against a corrupt
+    // emitter or our own bug — not a remote attack surface. An out-of-range
+    // cid would otherwise pollute `pending` permanently and crash
+    // `reassemble()` with an opaque error. A bad frame is dropped, never
+    // fatal: the fountain code absorbs the loss.
+    if (!_validateChunkIds(frame.chunkIds, decoder!.k)) {
+      framesRejectedBadChunkIds++;
+      return false;
+    }
+
     return decoder!.addFrame(frame.chunkIds, payload);
   }
 
@@ -122,4 +134,14 @@ bool _constantTimeEquals(Uint8List a, Uint8List b) {
     result |= a[i] ^ b[i];
   }
   return result == 0;
+}
+
+/// Returns true only if every chunk id is a valid source-chunk index,
+/// i.e. in `[0, k)`. Anything else means the frame is corrupt and must be
+/// dropped before it can poison the decoder's pending set.
+bool _validateChunkIds(List<int> chunkIds, int k) {
+  for (final cid in chunkIds) {
+    if (cid < 0 || cid >= k) return false;
+  }
+  return true;
 }
