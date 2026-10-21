@@ -91,6 +91,7 @@ Project rule: **libsodium with default parameters. Zero home-grown cryptography.
 | Session key agreement | X25519, ephemeral per-session keys → forward secrecy | ✅ Implemented |
 | Payload encryption | XSalsa20-Poly1305, AEAD with per-chunk authentication | ✅ Implemented |
 | Session manifest signature | Ed25519 over the session header | ✅ Implemented |
+| File integrity hash | BLAKE2b-256 (`crypto_generichash`), end-to-end manifest check | ✅ Implemented |
 | Key derivation from PIN (data at rest) | Argon2id (`crypto_pwhash`) with at least interactive parameters | 📋 Planned |
 | Data at rest | Database encrypted with a key derived from the PIN; the decoy space and the real space use keys derived from different PINs, with no artefact revealing the existence of two spaces | 📋 Planned |
 | Self-destruct | Erasure of the wrapped key + overwriting of the encrypted store (app-level secure erase; the limits of flash wear-levelling will be documented honestly) | 📋 Planned |
