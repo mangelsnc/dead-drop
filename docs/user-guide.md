@@ -6,6 +6,28 @@ This guide takes you by the hand from the moment you open the app for the first 
 
 ---
 
+## What works today vs. what's planned
+
+DeadDrop is in **active development** (MVP target: February 2027). To avoid any misunderstanding that could affect your safety, here is the exact status of every feature mentioned in this guide:
+
+**✅ Works today (v0.1):**
+
+- Air-gapped file transfer via animated QR codes (screen → camera, no network).
+- End-to-end encryption of the transfer: only the receiving device can read the file.
+- File integrity check: the app verifies the file arrived identical to the original.
+- Resume after interruption: the codes repeat in a loop and the transfer continues where it left off.
+
+**📋 Planned — NOT yet implemented:**
+
+- **Access PIN** — the app does not currently ask for or use any PIN.
+- **Decoy PIN** (duress mode) — there is no second PIN and no decoy environment.
+- **At-rest encryption** — received files are saved as ordinary files, protected only by your operating system (user account, disk encryption such as FileVault/BitLocker/LUKS if you enabled it).
+- **Self-destruct** — no automatic erasure exists.
+
+> ⚠️ **Do not rely on any planned feature for your safety.** If someone may coerce you into unlocking your device, assume that today everything stored in DeadDrop is visible to whoever opens the app. This guide will be updated the day each feature ships.
+
+---
+
 ## Before you start: what you need
 
 - **Two devices** with DeadDrop installed (two computers, or a computer and a phone once the mobile apps are available).
@@ -25,7 +47,7 @@ When you open the app you will see a screen with two large buttons:
 - **"Send a file"**
 - **"Receive a file"**
 
-The first time, the app will ask you to create an **access PIN**. This is the code that protects your files stored inside the app. Choose something you will remember that is not your date of birth. Later you can also set up a **decoy PIN** (we explain it in the "The decoy PIN" section below).
+The app opens directly — **no account, no PIN, no setup**. (An access PIN to protect the app is a planned feature; see "What works today vs. what's planned" above.)
 
 ### Step 2 — On the SENDING device
 
@@ -62,16 +84,18 @@ If the transfer stalls at a percentage, no problem: the codes repeat in a loop, 
 
 ---
 
-## The decoy PIN: what it is and how to set it up
+## The decoy PIN (planned feature)
 
-DeadDrop lets you have **two PINs**:
+> ⚠️ **Not yet implemented.** The decoy PIN is a **planned feature** for a future version of DeadDrop. It does **not exist** in the current version — there is no PIN, no Settings → Decoy PIN screen, and no decoy space. Do not rely on it. This section is kept so you can understand the design and prepare; it will become a how-to when the feature ships.
+
+DeadDrop will let you have **two PINs**:
 
 - Your **real PIN**: opens the app with your real files.
 - Your **decoy PIN**: opens the app with fake content you prepared in advance.
 
 What is it for? For the situation where someone **forces** you to unlock the app: a checkpoint, a search, a threat. You enter the decoy PIN and the app opens completely normally, showing the files you left there for that case. There is no "hidden mode" screen, no suspicious message, nothing that reveals that other content exists. The app behaves exactly the same as with the real PIN.
 
-### How to set it up
+### How it will work
 
 1. Open DeadDrop with your real PIN.
 2. Go to **Settings → Decoy PIN**.
@@ -79,7 +103,7 @@ What is it for? For the situation where someone **forces** you to unlock the app
 4. **Prepare the decoy content:** the app lets you add files to the decoy space. Choose credible, bland files: holiday photos, unimportant documents, notes. A completely empty space would raise suspicions, so spend five minutes on this.
 5. From that moment on, each PIN opens its own space. No one who doesn't know both PINs can know that two exist.
 
-### Golden rules for the decoy PIN
+### Golden rules for the decoy PIN (once it exists)
 
 - **Never write it down** next to the real PIN or in the same place.
 - **Keep the decoy content alive:** if your "holiday photos" are three years old and there is nothing recent, it looks strange. Add a file now and then.
@@ -87,15 +111,17 @@ What is it for? For the situation where someone **forces** you to unlock the app
 
 ---
 
-## Self-destruct (optional, for high-risk situations)
+## Self-destruct (planned feature)
 
-DeadDrop can securely erase all protected content if someone enters the wrong PIN too many times in a row.
+> ⚠️ **Not yet implemented.** Self-destruct is a **planned feature** and does **not exist** in the current version. Nothing in DeadDrop erases content today.
+
+When it ships, DeadDrop will be able to securely erase all protected content if someone enters the wrong PIN too many times in a row:
 
 1. Go to **Settings → Self-destruct**.
 2. Turn it on and choose the number of failed attempts (for example, 5).
 3. From then on, if someone exceeds that number of attempts, the protected content is irreversibly erased.
 
-**Important warning:** this feature is irreversible. If you turn it on and forget your PIN, you will lose your files forever. It is off by default and we only recommend enabling it if your situation justifies it.
+**Important warning (for when it ships):** this feature will be irreversible. If you turn it on and forget your PIN, you will lose your files forever. It will be off by default and we only recommend enabling it if your situation justifies it.
 
 ---
 
