@@ -11,29 +11,28 @@ void main() {
     });
   });
 
-  group('parseImageDimensions', () {
-    test('PNG 1920x1080', () {
-      // Minimal PNG header: 8-byte signature + IHDR chunk
-      final png = Uint8List.fromList([
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
-        0x00, 0x00, 0x00, 0x0D, // IHDR length
-        0x49, 0x48, 0x44, 0x52, // "IHDR"
-        0x00, 0x00, 0x07, 0x80, // width: 1920 (big-endian)
-        0x00, 0x00, 0x04, 0x38, // height: 1080 (big-endian)
-        0x08, 0x06, 0x00, 0x00, 0x00, // bit depth, color type, etc.
-      ]);
-      final dims = parseImageDimensions(png);
-      expect(dims, isNotNull);
-      expect(dims!.width, 1920);
-      expect(dims.height, 1080);
+  group('countPdfPages', () {
+    test('counts /Type /Page occurrences', () {
+      final pdfContent = '%PDF-1.4\n'
+          '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
+          '2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n'
+          '3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n'
+          '4 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n';
+      final bytes = Uint8List.fromList(pdfContent.codeUnits);
+      expect(countPdfPages(bytes), 2);
     });
 
-    test('returns null for null bytes', () {
-      expect(parseImageDimensions(null), isNull);
-    });
-
-    test('returns null for too-short data', () {
-      expect(parseImageDimensions(Uint8List.fromList([0x89, 0x50])), isNull);
+    test('respects maxScanBytes limit', () {
+      // Create a PDF with a page marker beyond the scan limit
+      final header = '%PDF-1.4\n';
+      final padding = List.filled(200, 'x').join();
+      final pageMarker = '\n3 0 obj\n<< /Type /Page >>\nendobj\n';
+      final content = header + padding + pageMarker;
+      final bytes = Uint8List.fromList(content.codeUnits);
+      // With a small scan limit, the page marker is beyond it
+      expect(countPdfPages(bytes, maxScanBytes: 50), isNull);
+      // With a large enough limit, it finds the page
+      expect(countPdfPages(bytes, maxScanBytes: content.length), 1);
     });
   });
 }
