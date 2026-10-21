@@ -13,7 +13,7 @@ void main() {
 
   group('countPdfPages', () {
     test('counts /Type /Page occurrences', () {
-      final pdfContent = '%PDF-1.4\n'
+      const pdfContent = '%PDF-1.4\n'
           '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
           '2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n'
           '3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n'
