@@ -506,6 +506,75 @@ void main() {
       expect(receiver.fileName, 'photo.jpg');
       expect(receiver.finish(), plaintext);
     });
+
+    test('Frame with out-of-range chunkIds is dropped, not fatal', () async {
+      // Security audit finding #5: chunkIds come from the decrypted frame and
+      // were passed to the decoder unchecked. An out-of-range cid would
+      // permanently pollute `pending` and crash `reassemble()`. The payload is
+      // AEAD-authenticated, so this is robustness against a corrupt emitter /
+      // own bug, not a remote vulnerability — but a bad frame must be dropped,
+      // never fatal.
+      final plaintext = Uint8List.fromList(List.generate(2048, (i) => i % 256));
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final emitter = await Emitter.create(
+        sodium,
+        plaintext,
+        receiverKp,
+        chunkSize: 512,
+      );
+      final receiver = Receiver(sodium: sodium, keypair: receiverKp);
+      await receiver.startSession(emitter.bootstrapQrPayload());
+
+      final k = receiver.decoder!.k;
+      expect(k, greaterThan(0));
+
+      // Forge a frame whose payload is validly encrypted (passes AEAD) but
+      // whose chunkIds are out of range. Note: Frame.pack() writes each id
+      // with setUint16, which truncates silently — so -1 comes back off the
+      // wire as 0xFFFF (65535). Either way it is >= k and must be rejected.
+      final forgedPayload = Uint8List(512);
+      final (nonce, ct) = emitter.session.encryptPayload(sodium, forgedPayload);
+      final evilFrame = Frame(
+        fileId: emitter.session.fileId,
+        seq: 9999, // non-zero so it is treated as a fountain frame
+        seed: emitter.transferSeed,
+        chunkIds: [-1, k, k + 1000],
+        nonce: nonce,
+        payload: ct,
+      );
+
+      final decodedBefore = receiver.decoder!.decoded.length;
+      final pendingBefore = receiver.decoder!.pending.length;
+
+      // Must not throw, must not advance decoding, must not pollute state.
+      final advanced = receiver.feedFrame(evilFrame.pack());
+      expect(advanced, isFalse);
+      expect(receiver.framesRejectedBadChunkIds, 1);
+      expect(receiver.decoder!.decoded.length, decodedBefore);
+      expect(receiver.decoder!.pending.length, pendingBefore);
+
+      // A second forged frame with a single out-of-range id (the minimal bad
+      // case) is also dropped.
+      final (nonce2, ct2) = emitter.session.encryptPayload(sodium, forgedPayload);
+      final evilFrame2 = Frame(
+        fileId: emitter.session.fileId,
+        seq: 10000,
+        seed: emitter.transferSeed,
+        chunkIds: [k], // == k is out of range: valid ids are [0, k)
+        nonce: nonce2,
+        payload: ct2,
+      );
+      expect(receiver.feedFrame(evilFrame2.pack()), isFalse);
+      expect(receiver.framesRejectedBadChunkIds, 2);
+      expect(receiver.decoder!.pending.length, pendingBefore);
+
+      // The channel absorbs the loss: a normal transfer still completes.
+      for (var i = 0; i < 500 && !receiver.done; i++) {
+        receiver.feedFrame(emitter.nextFrame().pack());
+      }
+      expect(receiver.done, isTrue);
+      expect(receiver.finish(), plaintext);
+    });
   });
 }
 
