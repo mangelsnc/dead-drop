@@ -22,6 +22,8 @@ dependencies:
   path_provider: ^2.1.4
   # State management
   flutter_riverpod: ^2.5.1
+  # Secure storage for identity keypair and TOFU store
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:

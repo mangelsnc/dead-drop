@@ -40,15 +40,15 @@ class Receiver {
   Receiver({required this.sodium, required this.keypair});
 
   /// Consume the one-time bootstrap QR and arm the decoder.
-  Future<void> startSession(
-    Uint8List bootstrapPayload, {
-    Uint8List? senderVerifyKey,
-  }) async {
+  ///
+  /// The session header carries the sender's Ed25519 verify key, and the
+  /// signature is verified against it automatically. The UI layer should
+  /// separately check the sender fingerprint against the TOFU store.
+  Future<void> startSession(Uint8List bootstrapPayload) async {
     session = await ReceiverSession.accept(
       sodium,
       bootstrapPayload,
       keypair,
-      senderVerifyKey: senderVerifyKey,
     );
     final h = session!.header;
     decoder = LTDecoder(k: h.chunkCount, chunkSize: h.chunkSize);

@@ -19,7 +19,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 // ---------------------------------------------------------------------------
 
 const magic = [0x44, 0x44]; // "DD"
-const version = 1;
+const version = 2; // v2: added senderVerifyKey to SessionHeader
 const nonceSize = 24; // XSalsa20-Poly1305 nonce
 const tagSize = 16; // Poly1305 tag
 const pkSize = 32; // X25519 public key
@@ -38,18 +38,53 @@ class DeadDropCryptoError implements Exception {
 // Identities
 // ---------------------------------------------------------------------------
 
-/// Long-term-ish Ed25519 signing identity (per install, per user).
+/// Long-term Ed25519 signing identity (per install, per user).
+///
+/// The identity is generated once on first run and persisted in secure
+/// storage. It authenticates the sender: the receiver verifies the
+/// session-header signature against this identity's public key.
 class Identity {
   final KeyPair keyPair;
 
   Identity._(this.keyPair);
 
+  /// Generate a fresh random identity. Used only on first run.
   static Future<Identity> generate(Sodium sodium) async {
     final key = sodium.crypto.sign.keyPair();
     return Identity._(key);
   }
 
+  /// Reconstruct an identity from a 64-byte secret key (seed + public key).
+  ///
+  /// This is the format produced by [secretKeyBytes] and is what gets
+  /// persisted in secure storage.
+  static Identity fromSecretKeyBytes(Sodium sodium, Uint8List secretKeyBytes) {
+    if (secretKeyBytes.length != 64) {
+      throw ArgumentError(
+        'Ed25519 secret key must be 64 bytes, got ${secretKeyBytes.length}',
+      );
+    }
+    final publicKey = secretKeyBytes.sublist(32, 64);
+    final keyPair = KeyPair(
+      publicKey: Uint8List.fromList(publicKey),
+      secretKey: SecureKey.fromList(sodium, secretKeyBytes),
+    );
+    return Identity._(keyPair);
+  }
+
   Uint8List get verifyKey => keyPair.publicKey;
+
+  /// The 64-byte secret key (seed || public key) for persistence.
+  Uint8List get secretKeyBytes => keyPair.secretKey.extractBytes();
+
+  /// Short human-readable fingerprint of this identity's public key.
+  ///
+  /// Returns the first 16 hex characters of the Ed25519 public key —
+  /// enough for visual out-of-band comparison without being unwieldy.
+  String get fingerprint {
+    final hex = verifyKey.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return hex.substring(0, 16);
+  }
 
   Uint8List sign(Sodium sodium, Uint8List data) {
     return sodium.crypto.sign.detached(
@@ -82,6 +117,7 @@ class ReceiverKeypair {
 class SessionHeader {
   final Uint8List senderEphPk; // 32  ephemeral X25519 public key
   final Uint8List receiverPk; // 32  receiver's public key (binding)
+  final Uint8List senderVerifyKey; // 32  sender's Ed25519 public key
   final Uint8List fileId; // 8   random transfer id
   final int totalSize; // 4   plaintext file size in bytes
   final int chunkCount; // 2   number of source chunks (K)
@@ -92,6 +128,7 @@ class SessionHeader {
   SessionHeader({
     required this.senderEphPk,
     required this.receiverPk,
+    required this.senderVerifyKey,
     required this.fileId,
     required this.totalSize,
     required this.chunkCount,
@@ -100,7 +137,7 @@ class SessionHeader {
     required this.signature,
   });
 
-  static const int packedSize = 2 + 1 + 32 + 32 + 8 + 4 + 2 + 2 + 32 + 64;
+  static const int packedSize = 2 + 1 + 32 + 32 + 32 + 8 + 4 + 2 + 2 + 32 + 64;
 
   Uint8List pack() {
     final out = ByteData(packedSize);
@@ -116,6 +153,9 @@ class SessionHeader {
     offset += 32;
     // receiver_pk(32)
     out.buffer.asUint8List().setRange(offset, offset + 32, receiverPk);
+    offset += 32;
+    // sender_verify_key(32)
+    out.buffer.asUint8List().setRange(offset, offset + 32, senderVerifyKey);
     offset += 32;
     // file_id(8)
     out.buffer.asUint8List().setRange(offset, offset + 8, fileId);
@@ -161,6 +201,9 @@ class SessionHeader {
     // receiver_pk(32)
     final receiverPk = data.sublist(offset, offset + 32);
     offset += 32;
+    // sender_verify_key(32)
+    final senderVerifyKey = data.sublist(offset, offset + 32);
+    offset += 32;
     // file_id(8)
     final fileId = data.sublist(offset, offset + 8);
     offset += 8;
@@ -182,6 +225,7 @@ class SessionHeader {
     return SessionHeader(
       senderEphPk: senderEphPk,
       receiverPk: receiverPk,
+      senderVerifyKey: senderVerifyKey,
       fileId: fileId,
       totalSize: totalSize,
       chunkCount: chunkCount,
@@ -252,6 +296,7 @@ class Session {
     final header = SessionHeader(
       senderEphPk: ephKp.publicKey,
       receiverPk: receiverPk,
+      senderVerifyKey: senderIdentity.verifyKey,
       fileId: fileId,
       totalSize: plaintext.length,
       chunkCount: chunkCount,
@@ -333,24 +378,30 @@ class ReceiverSession {
   static Future<ReceiverSession> accept(
     Sodium sodium,
     Uint8List headerBytes,
-    ReceiverKeypair receiverKeypair, {
-    Uint8List? senderVerifyKey,
-  }) async {
+    ReceiverKeypair receiverKeypair,
+  ) async {
     final header = SessionHeader.unpack(headerBytes);
 
     if (!_constantTimeEquals(header.receiverPk, receiverKeypair.publicKey)) {
       throw DeadDropCryptoError('Session not addressed to this receiver');
     }
 
-    if (senderVerifyKey != null) {
-      final valid = sodium.crypto.sign.verifyDetached(
-        signature: header.signature,
-        message: header.signedPayload(),
-        publicKey: senderVerifyKey,
+    // Signature verification is MANDATORY — the session header must be
+    // signed by the sender identity key embedded in the header itself.
+    // This proves the header was not tampered with in transit.
+    // The UI layer separately checks the sender fingerprint against the
+    // TOFU store to detect first-time or changed senders.
+    final valid = sodium.crypto.sign.verifyDetached(
+      signature: header.signature,
+      message: header.signedPayload(),
+      publicKey: header.senderVerifyKey,
+    );
+    if (!valid) {
+      throw DeadDropCryptoError(
+        'Sender signature invalid — the session header was not signed by '
+        'the sender identity it claims. This may indicate a forged or '
+        'tampered bootstrap QR code.',
       );
-      if (!valid) {
-        throw DeadDropCryptoError('Sender signature invalid');
-      }
     }
 
     final box = sodium.crypto.box.precalculate(

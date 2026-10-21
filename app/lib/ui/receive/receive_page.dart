@@ -12,6 +12,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 import '../../src/crypto.dart';
 import '../../src/handshake.dart';
 import '../../src/receiver.dart';
+import '../../src/tofu_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
@@ -29,6 +30,8 @@ class ReceiveState {
     this.fileName,
     this.savedPath,
     this.error,
+    this.senderFingerprint,
+    this.isNewSender = false,
   });
 
   final ReceiverKeypair? receiverKeypair;
@@ -41,6 +44,14 @@ class ReceiveState {
   final String? fileName;
   final String? savedPath;
   final String? error;
+
+  /// The sender's identity fingerprint (first 16 hex chars of their
+  /// Ed25519 public key), extracted from the verified session header.
+  final String? senderFingerprint;
+
+  /// True when this sender fingerprint has never been seen before (TOFU).
+  /// The UI shows a warning prompting out-of-band verification.
+  final bool isNewSender;
 
   double get progress =>
       totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
@@ -58,6 +69,8 @@ class ReceiveState {
     String? fileName,
     String? savedPath,
     String? error,
+    String? senderFingerprint,
+    bool? isNewSender,
   }) {
     return ReceiveState(
       receiverKeypair: receiverKeypair ?? this.receiverKeypair,
@@ -70,14 +83,17 @@ class ReceiveState {
       fileName: fileName ?? this.fileName,
       savedPath: savedPath ?? this.savedPath,
       error: error,
+      senderFingerprint: senderFingerprint ?? this.senderFingerprint,
+      isNewSender: isNewSender ?? this.isNewSender,
     );
   }
 }
 
 class ReceiveNotifier extends StateNotifier<ReceiveState> {
-  ReceiveNotifier(this._sodium) : super(ReceiveState());
+  ReceiveNotifier(this._sodium, this._tofuStore) : super(ReceiveState());
 
   final Sodium _sodium;
+  final TofuStore _tofuStore;
 
   Future<void> initKeypair() async {
     if (state.receiverKeypair != null) return;
@@ -122,11 +138,31 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         sodium: _sodium,
         keypair: state.receiverKeypair!,
       );
+      // startSession() now verifies the Ed25519 signature inside
+      // ReceiverSession.accept() — a bad signature throws here.
       await receiver.startSession(data);
+
+      // Extract the sender's identity fingerprint from the verified header.
+      final senderKey = receiver.session!.header.senderVerifyKey;
+      final fingerprint = senderKey
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .substring(0, 16);
+
+      // TOFU check: have we seen this sender before?
+      final known = await _tofuStore.isKnown(fingerprint);
+      if (!known) {
+        // First time seeing this sender — flag for UI warning.
+        // The user should verify the fingerprint out-of-band.
+        await _tofuStore.markKnown(fingerprint);
+      }
+
       state = state.copyWith(
         receiver: receiver,
         totalChunks: receiver.session!.header.chunkCount,
         error: null,
+        senderFingerprint: fingerprint,
+        isNewSender: !known,
       );
     } on DeadDropCryptoError catch (e) {
       state = state.copyWith(error: 'Session rejected: ${e.message}');
@@ -185,7 +221,8 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
 final receiveProvider =
     StateNotifierProvider<ReceiveNotifier, ReceiveState>((ref) {
   final sodium = ref.watch(sodiumProvider);
-  return ReceiveNotifier(sodium);
+  final tofuStore = ref.watch(tofuStoreProvider);
+  return ReceiveNotifier(sodium, tofuStore);
 });
 
 class ReceivePage extends ConsumerStatefulWidget {
@@ -386,6 +423,15 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               ),
             ),
             const SizedBox(height: 16),
+
+            // ── Sender identity (shown after bootstrap) ──────────
+            if (state.senderFingerprint != null) ...[
+              _SenderIdentityCard(
+                fingerprint: state.senderFingerprint!,
+                isNewSender: state.isNewSender,
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Step 3: live progress / result.
             if (state.sessionActive) ...[
@@ -652,6 +698,108 @@ class _PublicKeyTextView extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sender identity card (shown on the receive page after bootstrap)
+// ---------------------------------------------------------------------------
+
+/// Displays the sender's identity fingerprint and a TOFU warning when the
+/// sender has never been seen before.
+///
+/// The fingerprint is extracted from the verified session header — the
+/// Ed25519 signature has already been validated by the time this widget
+/// appears. The TOFU warning prompts the user to verify the fingerprint
+/// through a separate channel (in person, phone call, etc.).
+class _SenderIdentityCard extends StatelessWidget {
+  const _SenderIdentityCard({
+    required this.fingerprint,
+    required this.isNewSender,
+  });
+
+  final String fingerprint;
+  final bool isNewSender;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  isNewSender ? Icons.warning_amber : Icons.verified_user,
+                  color: isNewSender
+                      ? DeadDropColors.warning
+                      : DeadDropColors.success,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Sender identity',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: SelectableText(
+                fingerprint,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 18,
+                  letterSpacing: 2,
+                  color: DeadDropColors.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (isNewSender) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: DeadDropColors.warning.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: DeadDropColors.warning.withOpacity(0.4),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline,
+                        color: DeadDropColors.warning, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'New sender — verify this fingerprint through '
+                        'another channel (in person, phone call) to '
+                        'confirm the sender\'s identity.',
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: DeadDropColors.warning),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              Text(
+                'Known sender — this device has received files from '
+                'this identity before.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: DeadDropColors.success,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
