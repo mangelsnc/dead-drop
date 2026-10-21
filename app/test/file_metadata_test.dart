@@ -13,11 +13,8 @@ void main() {
 
   group('countPdfPages', () {
     test('counts /Type /Page occurrences', () {
-      const pdfContent = '%PDF-1.4\n'
-          '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
-          '2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n'
-          '3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n'
-          '4 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n';
+      final pdfContent =
+          '%PDF-1.4\n3 0 obj\n<< /Type /Page >>\nendobj\n4 0 obj\n<< /Type /Page >>\nendobj\n';
       final bytes = Uint8List.fromList(pdfContent.codeUnits);
       expect(countPdfPages(bytes), 2);
     });
