@@ -9,6 +9,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
+import '../../src/chunking.dart';
 import '../../src/crypto.dart';
 import '../../src/emitter.dart';
 import '../../src/handshake.dart';
@@ -27,7 +28,7 @@ class SendState {
     this.receiverPk,
     this.emitter,
     this.identity,
-    this.chunkSize = 512,
+    this.chunkSize = kDefaultChunkSize,
     this.ecLevel = 'M',
     this.fps = 12.0,
     this.isEmitting = false,
@@ -35,6 +36,7 @@ class SendState {
     this.totalFrames,
     this.currentQrData,
     this.showingBootstrap = false,
+    this.sendError,
   });
 
   final String? fileName;
@@ -67,10 +69,18 @@ class SendState {
   /// True while the static session-bootstrap QR is on screen.
   final bool showingBootstrap;
 
-  bool get readyToSend => fileBytes != null && receiverPk != null;
+  /// A user-facing reason the current file cannot be sent, or null when the
+  /// configuration is valid. Set when file-size validation fails.
+  final String? sendError;
+
+  bool get readyToSend =>
+      fileBytes != null && receiverPk != null && sendError == null;
 
   /// Human-readable hint about what's missing before starting.
   String? get missingHint {
+    // A validation error (e.g. file too large) takes priority — it is the
+    // thing the user must fix before anything else can proceed.
+    if (sendError != null) return sendError;
     if (fileBytes == null && receiverPk == null) {
       return 'Select a file and scan the receiver\'s QR code';
     }
@@ -95,6 +105,8 @@ class SendState {
     int? totalFrames,
     String? currentQrData,
     bool? showingBootstrap,
+    String? sendError,
+    bool clearSendError = false,
   }) {
     return SendState(
       fileName: fileName ?? this.fileName,
@@ -112,6 +124,8 @@ class SendState {
       totalFrames: totalFrames ?? this.totalFrames,
       currentQrData: currentQrData ?? this.currentQrData,
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
+      sendError:
+          clearSendError ? null : (sendError ?? this.sendError),
     );
   }
 }
@@ -130,15 +144,27 @@ class SendNotifier extends StateNotifier<SendState> {
     final bytes = file.bytes;
     if (bytes == null) return;
     _stopTimer();
+
+    // Auto-select the smallest chunk size that can carry this file without
+    // overflowing the uint16 chunkCount field. The user can still lower it
+    // afterwards; if even the largest option cannot fit the file, surface a
+    // clear error instead of letting the transfer fail silently later.
+    final chunkSize = recommendedChunkSize(bytes.length);
+    final error = fileSizeError(bytes.length, chunkSize) ??
+        (bytes.length > maxFileSizeForChunkSize(chunkSize)
+            ? fileTooLargeError(bytes.length)
+            : null);
+
     state = SendState(
       fileName: file.name,
       fileBytes: bytes,
       fileExtension: file.extension?.toLowerCase(),
       filePath: file.path,
       receiverPk: state.receiverPk,
-      chunkSize: state.chunkSize,
+      chunkSize: chunkSize,
       ecLevel: state.ecLevel,
       fps: state.fps,
+      sendError: error,
     );
   }
 
@@ -148,7 +174,15 @@ class SendNotifier extends StateNotifier<SendState> {
 
   void setChunkSize(int size) {
     if (state.isEmitting) return; // locked during a transfer
-    state = state.copyWith(chunkSize: size);
+    // Re-validate the picked file against the new chunk size so the error
+    // appears / clears immediately as the user moves the slider.
+    final bytes = state.fileBytes;
+    final error = bytes == null ? null : fileSizeError(bytes.length, size);
+    state = state.copyWith(
+      chunkSize: size,
+      sendError: error,
+      clearSendError: error == null,
+    );
   }
 
   void setEcLevel(String level) {
@@ -171,14 +205,27 @@ class SendNotifier extends StateNotifier<SendState> {
     // can verify that the sender is the same installation across sessions.
     final identity = await _identityStore.loadOrGenerate();
     final receiverKp = _ReceiverKeypairFromPk(state.receiverPk!);
-    final emitter = await Emitter.create(
-      _sodium,
-      state.fileBytes!,
-      receiverKp,
-      senderIdentity: identity,
-      chunkSize: state.chunkSize,
-      fileName: state.fileName,
-    );
+
+    // Session.open validates the file size against the chunk size and throws
+    // a DeadDropCryptoError if the uint16 chunkCount would overflow. Surface
+    // that as a friendly message instead of letting the transfer die silently.
+    final Emitter emitter;
+    try {
+      emitter = await Emitter.create(
+        _sodium,
+        state.fileBytes!,
+        receiverKp,
+        senderIdentity: identity,
+        chunkSize: state.chunkSize,
+        fileName: state.fileName,
+      );
+    } on DeadDropCryptoError catch (e) {
+      state = state.copyWith(
+        sendError: fileSizeError(state.fileBytes!.length, state.chunkSize) ??
+            e.message,
+      );
+      return;
+    }
     state = state.copyWith(
       emitter: emitter,
       identity: identity,
@@ -187,6 +234,7 @@ class SendNotifier extends StateNotifier<SendState> {
       totalFrames: emitter.session.chunkCount,
       showingBootstrap: true,
       currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
+      clearSendError: true,
     );
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
@@ -979,15 +1027,7 @@ class _ConfigSection extends StatelessWidget {
           initiallyExpanded: false,
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
-            _ParamSlider(
-              label: 'Chunk size',
-              value: state.chunkSize.toDouble(),
-              min: 256,
-              max: 1024,
-              divisions: 3,
-              unit: ' bytes',
-              onChanged: (v) => notifier.setChunkSize(v.round()),
-            ),
+            _ChunkSizeSelector(state: state, notifier: notifier),
             _ParamSlider(
               label: 'Frame rate',
               value: state.fps,
@@ -1045,8 +1085,12 @@ class _StartSection extends StatelessWidget {
           Text(
             state.missingHint!,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: DeadDropColors.warning,
+            style: TextStyle(
+              // A validation error is a hard stop — show it in the error
+              // colour; a "what's missing" hint stays a softer warning.
+              color: state.sendError != null
+                  ? DeadDropColors.error
+                  : DeadDropColors.warning,
               fontSize: 13,
             ),
           ),
@@ -1184,6 +1228,68 @@ class _ParamSlider extends StatelessWidget {
           max: max,
           divisions: divisions,
           onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+/// Discrete chunk-size picker.
+///
+/// Chunk size is a trade-off a non-technical user should not have to reason
+/// about, so the file picker pre-selects the smallest size that fits the file
+/// (see [recommendedChunkSize]). This control exists for the rare case where
+/// the user wants to override that choice. Options that cannot fit the
+/// current file are disabled, and the chosen size shows the largest file it
+/// can carry — so the limit is visible *before* it bites, never as a silent
+/// failure mid-transfer.
+class _ChunkSizeSelector extends StatelessWidget {
+  const _ChunkSizeSelector({required this.state, required this.notifier});
+
+  final SendState state;
+  final SendNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    final fileSize = state.fileBytes?.length;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Chunk size'),
+            Text('${state.chunkSize} bytes'),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final size in kChunkSizeOptions)
+              ChoiceChip(
+                label: Text('$size'),
+                selected: state.chunkSize == size,
+                // Disable sizes that cannot fit the picked file.
+                onSelected: state.isEmitting ||
+                        (fileSize != null &&
+                            fileSize > maxFileSizeForChunkSize(size))
+                    ? null
+                    : (_) => notifier.setChunkSize(size),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          fileSize == null
+              ? 'Larger chunks fit larger files but are harder to scan.'
+              : 'Up to ${formatSizeForMessage(maxFileSizeForChunkSize(state.chunkSize))} '
+                  'per transfer at this size.',
+          style: textTheme.bodySmall
+              ?.copyWith(color: DeadDropColors.textSecondary),
         ),
       ],
     );
