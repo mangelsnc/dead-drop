@@ -21,6 +21,8 @@ class SendState {
   SendState({
     this.fileName,
     this.fileBytes,
+    this.fileExtension,
+    this.filePath,
     this.receiverPk,
     this.emitter,
     this.identity,
@@ -35,6 +37,14 @@ class SendState {
 
   final String? fileName;
   final Uint8List? fileBytes;
+
+  /// Lowercase file extension without the dot (e.g. "pdf", "png"), if known.
+  final String? fileExtension;
+
+  /// Absolute path of the picked file on the sender device, if the platform
+  /// file picker exposed one (not available on web).
+  final String? filePath;
+
   final Uint8List? receiverPk;
   final Emitter? emitter;
   final Identity? identity;
@@ -66,6 +76,8 @@ class SendState {
   SendState copyWith({
     String? fileName,
     Uint8List? fileBytes,
+    String? fileExtension,
+    String? filePath,
     Uint8List? receiverPk,
     Emitter? emitter,
     Identity? identity,
@@ -80,6 +92,8 @@ class SendState {
     return SendState(
       fileName: fileName ?? this.fileName,
       fileBytes: fileBytes ?? this.fileBytes,
+      fileExtension: fileExtension ?? this.fileExtension,
+      filePath: filePath ?? this.filePath,
       receiverPk: receiverPk ?? this.receiverPk,
       emitter: emitter ?? this.emitter,
       identity: identity ?? this.identity,
@@ -110,6 +124,8 @@ class SendNotifier extends StateNotifier<SendState> {
     state = SendState(
       fileName: file.name,
       fileBytes: bytes,
+      fileExtension: file.extension?.toLowerCase(),
+      filePath: file.path,
       receiverPk: state.receiverPk,
       chunkSize: state.chunkSize,
       ecLevel: state.ecLevel,
@@ -263,6 +279,9 @@ class SendPage extends ConsumerWidget {
                     _FileInfoTile(
                       fileName: state.fileName!,
                       fileSize: state.fileBytes!.length,
+                      fileExtension: state.fileExtension,
+                      filePath: state.filePath,
+                      fileBytes: state.fileBytes,
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -362,45 +381,215 @@ class _StepCard extends StatelessWidget {
 // File info tile
 // ---------------------------------------------------------------------------
 
-class _FileInfoTile extends StatelessWidget {
-  const _FileInfoTile({required this.fileName, required this.fileSize});
+/// Maps a lowercase file extension (no dot) to a type-specific icon.
+IconData fileIconForExtension(String? extension) {
+  switch (extension) {
+    // Images
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+    case 'webp':
+    case 'svg':
+    case 'bmp':
+    case 'heic':
+      return Icons.image;
+    // Video
+    case 'mp4':
+    case 'mov':
+    case 'avi':
+    case 'mkv':
+    case 'webm':
+      return Icons.videocam;
+    // Audio
+    case 'mp3':
+    case 'wav':
+    case 'ogg':
+    case 'flac':
+    case 'm4a':
+      return Icons.audio_file;
+    // PDF
+    case 'pdf':
+      return Icons.picture_as_pdf;
+    // Text / code
+    case 'txt':
+    case 'md':
+    case 'dart':
+    case 'py':
+    case 'js':
+    case 'ts':
+    case 'json':
+    case 'yaml':
+    case 'yml':
+    case 'xml':
+    case 'html':
+    case 'css':
+      return Icons.description;
+    // Archives
+    case 'zip':
+    case 'tar':
+    case 'gz':
+    case '7z':
+    case 'rar':
+    case 'bz2':
+      return Icons.folder_zip;
+    default:
+      return Icons.insert_drive_file;
+  }
+}
+
+/// True for raster image extensions we can preview with [Image.memory].
+bool isPreviewableImageExtension(String? extension) {
+  switch (extension) {
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+    case 'webp':
+    case 'bmp':
+    case 'heic':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/// Shows the picked file: type icon (or image thumbnail), name and size by
+/// default; tapping expands a metadata section with extension, size in
+/// bytes, and full path. The file picker's `PlatformFile` does not expose a
+/// last-modified date, so that field is omitted.
+class _FileInfoTile extends StatefulWidget {
+  const _FileInfoTile({
+    required this.fileName,
+    required this.fileSize,
+    this.fileExtension,
+    this.filePath,
+    this.fileBytes,
+  });
 
   final String fileName;
   final int fileSize;
 
+  /// Lowercase extension without dot (e.g. "pdf"), if known.
+  final String? fileExtension;
+
+  /// Absolute path on the sender device, if the picker exposed one.
+  final String? filePath;
+
+  /// File bytes, used to render a thumbnail for image files.
+  final Uint8List? fileBytes;
+
+  @override
+  State<_FileInfoTile> createState() => _FileInfoTileState();
+}
+
+class _FileInfoTileState extends State<_FileInfoTile> {
+  bool _expanded = false;
+
   @override
   Widget build(BuildContext context) {
+    final hasMetadata = widget.fileExtension != null || widget.filePath != null;
+
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: DeadDropColors.bgSurface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: DeadDropColors.borderInput),
       ),
-      child: Row(
+      child: Column(
         children: [
-          const Icon(Icons.insert_drive_file, color: DeadDropColors.accent),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  fileName,
-                  style: Theme.of(context).textTheme.titleSmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  _formatSize(fileSize),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
+          InkWell(
+            onTap: hasMetadata
+                ? () => setState(() => _expanded = !_expanded)
+                : null,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  _buildLeading(),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.fileName,
+                          style: Theme.of(context).textTheme.titleSmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          _formatSize(widget.fileSize),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (hasMetadata)
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      color: DeadDropColors.textSecondary,
+                      size: 20,
+                    ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.check_circle,
+                      color: DeadDropColors.success, size: 20),
+                ],
+              ),
             ),
           ),
-          const Icon(Icons.check_circle,
-              color: DeadDropColors.success, size: 20),
+          if (_expanded && hasMetadata)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  if (widget.fileExtension != null)
+                    _MetadataRow(
+                      label: 'Type',
+                      value: widget.fileExtension!.toUpperCase(),
+                    ),
+                  _MetadataRow(
+                    label: 'Size',
+                    value: '${widget.fileSize} bytes',
+                  ),
+                  if (widget.filePath != null)
+                    _MetadataRow(
+                      label: 'Path',
+                      value: widget.filePath!,
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLeading() {
+    final bytes = widget.fileBytes;
+    if (isPreviewableImageExtension(widget.fileExtension) &&
+        bytes != null &&
+        bytes.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.memory(
+          bytes,
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          // If decoding fails (corrupt/unsupported), fall back to the icon.
+          errorBuilder: (context, error, stackTrace) => Icon(
+            fileIconForExtension(widget.fileExtension),
+            color: DeadDropColors.accent,
+          ),
+        ),
+      );
+    }
+    return Icon(
+      fileIconForExtension(widget.fileExtension),
+      color: DeadDropColors.accent,
     );
   }
 
@@ -410,6 +599,46 @@ class _FileInfoTile extends StatelessWidget {
       return '${(bytes / 1024).toStringAsFixed(1)} KB';
     }
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+/// A single label/value line in the expanded metadata section.
+class _MetadataRow extends StatelessWidget {
+  const _MetadataRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 56,
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: DeadDropColors.textSecondary,
+                  ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: DeadDropColors.textPrimary,
+                  ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
