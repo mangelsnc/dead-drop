@@ -29,6 +29,7 @@ class SendState {
     this.fps = 12.0,
     this.isEmitting = false,
     this.framesEmitted = 0,
+    this.totalFrames,
     this.currentQrData,
     this.showingBootstrap = false,
   });
@@ -43,6 +44,10 @@ class SendState {
   final double fps;
   final bool isEmitting;
   final int framesEmitted;
+
+  /// Total number of source chunks (K) for the current transfer, when an
+  /// emitter is active. Null before a transfer starts.
+  final int? totalFrames;
 
   /// Current QR content (already enveloped, printable ASCII). Driven by the
   /// single frame generator in [SendNotifier] — the widget only renders it.
@@ -74,6 +79,7 @@ class SendState {
     double? fps,
     bool? isEmitting,
     int? framesEmitted,
+    int? totalFrames,
     String? currentQrData,
     bool? showingBootstrap,
   }) {
@@ -88,6 +94,7 @@ class SendState {
       fps: fps ?? this.fps,
       isEmitting: isEmitting ?? this.isEmitting,
       framesEmitted: framesEmitted ?? this.framesEmitted,
+      totalFrames: totalFrames ?? this.totalFrames,
       currentQrData: currentQrData ?? this.currentQrData,
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
     );
@@ -156,6 +163,7 @@ class SendNotifier extends StateNotifier<SendState> {
       identity: identity,
       isEmitting: true,
       framesEmitted: 0,
+      totalFrames: emitter.session.chunkCount,
       showingBootstrap: true,
       currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
     );
@@ -855,7 +863,9 @@ class _SendingScreen extends StatelessWidget {
               Text(
                 state.showingBootstrap
                     ? 'Session bootstrap'
-                    : 'Frame ${state.framesEmitted}',
+                    : state.totalFrames != null
+                        ? 'Frame ${state.framesEmitted}/${state.totalFrames}'
+                        : 'Frame ${state.framesEmitted}',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 4),
@@ -969,12 +979,11 @@ class _QrDisplay extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          state.showingBootstrap
-              ? 'Session bootstrap — point the receiver camera here'
-              : 'Frame ${state.framesEmitted}',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+        if (state.showingBootstrap)
+          Text(
+            'Session bootstrap — point the receiver camera here',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
       ],
     );
   }
