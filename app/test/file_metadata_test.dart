@@ -268,7 +268,7 @@ void main() {
   // =========================================================================
   group('countPdfPages', () {
     test('counts /Type /Page occurrences', () {
-      final pdfContent = '%PDF-1.4\n'
+      const pdfContent = '%PDF-1.4\n'
           '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
           '2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n'
           '3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n'
@@ -278,7 +278,7 @@ void main() {
     });
 
     test('excludes /Type /Pages', () {
-      final pdfContent = '%PDF-1.4\n'
+      const pdfContent = '%PDF-1.4\n'
           '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n'
           '3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n';
       final bytes = Uint8List.fromList(pdfContent.codeUnits);
@@ -286,7 +286,7 @@ void main() {
     });
 
     test('handles compact /Type/Page form', () {
-      final pdfContent = '%PDF-1.4\n'
+      const pdfContent = '%PDF-1.4\n'
           '3 0 obj\n<< /Type/Page /Parent 2 0 R >>\nendobj\n'
           '4 0 obj\n<< /Type/Page /Parent 2 0 R >>\nendobj\n'
           '5 0 obj\n<< /Type/Page /Parent 2 0 R >>\nendobj\n';
@@ -295,7 +295,7 @@ void main() {
     });
 
     test('compact form excludes /Type/Pages', () {
-      final pdfContent = '%PDF-1.4\n'
+      const pdfContent = '%PDF-1.4\n'
           '2 0 obj\n<< /Type/Pages /Kids [3 0 R] /Count 1 >>\nendobj\n'
           '3 0 obj\n<< /Type/Page /Parent 2 0 R >>\nendobj\n';
       final bytes = Uint8List.fromList(pdfContent.codeUnits);
@@ -312,7 +312,7 @@ void main() {
     });
 
     test('returns null when no pages found', () {
-      final pdfContent = '%PDF-1.4\n'
+      const pdfContent = '%PDF-1.4\n'
           '1 0 obj\n<< /Type /Catalog >>\nendobj\n';
       final bytes = Uint8List.fromList(pdfContent.codeUnits);
       expect(countPdfPages(bytes), isNull);
@@ -320,9 +320,9 @@ void main() {
 
     test('respects maxScanBytes limit', () {
       // Create a PDF with a page marker beyond the scan limit
-      final header = '%PDF-1.4\n';
+      const header = '%PDF-1.4\n';
       final padding = List.filled(200, 'x').join();
-      final pageMarker = '\n3 0 obj\n<< /Type /Page >>\nendobj\n';
+      const pageMarker = '\n3 0 obj\n<< /Type /Page >>\nendobj\n';
       final content = header + padding + pageMarker;
       final bytes = Uint8List.fromList(content.codeUnits);
       // With a small scan limit, the page marker is beyond it
