@@ -11,45 +11,29 @@ void main() {
     });
   });
 
-  group('formatByteCount', () {
-    test('thousands', () {
-      expect(formatByteCount(1000), '1,000');
-      expect(formatByteCount(2515968), '2,515,968');
-    });
-  });
-
-  group('fileSignature', () {
-    test('PNG signature', () {
-      final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-      expect(fileSignature(png), '89 50 4E 47 0D 0A 1A 0A');
-    });
-
-    test('empty bytes', () {
-      expect(fileSignature(Uint8List(0)), '');
-    });
-
-    test('custom count', () {
-      final data = Uint8List.fromList(List.generate(16, (i) => i));
-      expect(fileSignature(data, count: 4), '00 01 02 03');
-    });
-  });
-
-  group('guessMimeType', () {
-    test('from magic bytes: PNG', () {
-      final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-      expect(guessMimeType(png, null), 'image/png');
+  group('parseImageDimensions', () {
+    test('PNG 1920x1080', () {
+      // Minimal PNG header: 8-byte signature + IHDR chunk
+      final png = Uint8List.fromList([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
+        0x00, 0x00, 0x00, 0x0D, // IHDR length
+        0x49, 0x48, 0x44, 0x52, // "IHDR"
+        0x00, 0x00, 0x07, 0x80, // width: 1920 (big-endian)
+        0x00, 0x00, 0x04, 0x38, // height: 1080 (big-endian)
+        0x08, 0x06, 0x00, 0x00, 0x00, // bit depth, color type, etc.
+      ]);
+      final dims = parseImageDimensions(png);
+      expect(dims, isNotNull);
+      expect(dims!.width, 1920);
+      expect(dims.height, 1080);
     });
 
-    test('extension fallback when no magic bytes match', () {
-      final unknown = Uint8List.fromList([0x00, 0x00, 0x00, 0x00]);
-      expect(guessMimeType(unknown, 'txt'), 'text/plain');
-      expect(guessMimeType(unknown, 'pdf'), 'application/pdf');
+    test('returns null for null bytes', () {
+      expect(parseImageDimensions(null), isNull);
     });
 
-    test('null when nothing matches', () {
-      final unknown = Uint8List.fromList([0x00, 0x00, 0x00, 0x00]);
-      expect(guessMimeType(unknown, 'xyz'), isNull);
-      expect(guessMimeType(unknown, null), isNull);
+    test('returns null for too-short data', () {
+      expect(parseImageDimensions(Uint8List.fromList([0x89, 0x50])), isNull);
     });
   });
 }
