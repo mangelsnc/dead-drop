@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sodium_libs/sodium_libs.dart' show Sodium;
 import 'package:sodium/sodium.dart' show SodiumInit;
 
+import 'package:dead_drop/src/chunking.dart';
 import 'package:dead_drop/src/crypto.dart';
 import 'package:dead_drop/src/emitter.dart';
 import 'package:dead_drop/src/fountain.dart';
@@ -369,6 +370,129 @@ void main() {
       final tampered = Uint8List.fromList(plaintext);
       tampered[0] ^= 1;
       expect(receiver.verifyFile(sodium, tampered), isFalse);
+    });
+  });
+
+  group('Chunk size limits', () {
+    // The session header packs chunkCount as a uint16, so a transfer can carry
+    // at most 65535 chunks. ByteData.setUint16 truncates silently on overflow,
+    // so Session.open must reject an oversized file *loudly* instead of
+    // emitting a corrupted header the receiver cannot make sense of.
+
+    test('recommendedChunkSize picks the smallest fitting chunk size', () {
+      // Small files stay on the default (best-scannable) chunk size.
+      expect(recommendedChunkSize(1024), kDefaultChunkSize);
+      expect(recommendedChunkSize(maxFileSizeForChunkSize(512)), 512);
+      // Just past a boundary bumps to the next size up.
+      expect(recommendedChunkSize(maxFileSizeForChunkSize(512) + 1), 1024);
+      expect(recommendedChunkSize(32 * 1024 * 1024), 1024); // 32 MB
+      expect(recommendedChunkSize(maxFileSizeForChunkSize(1024) + 1), 2048);
+      expect(recommendedChunkSize(64 * 1024 * 1024), 2048); // 64 MB
+      // Beyond every option, it returns the largest so the caller can error.
+      expect(
+        recommendedChunkSize(maxFileSizeForChunkSize(4096) + 1),
+        kChunkSizeOptions.last,
+      );
+    });
+
+    test('fileSizeError is null when the file fits and clear when it does not',
+        () {
+      expect(fileSizeError(1024, 512), isNull);
+      expect(fileSizeError(maxFileSizeForChunkSize(512), 512), isNull);
+
+      final msg = fileSizeError(32 * 1024 * 1024, 512);
+      expect(msg, isNotNull);
+      expect(msg, contains('too large'));
+      expect(msg, contains('chunk size')); // points at the fix
+    });
+
+    test('Session.open rejects chunkCount overflow (32 MB @ 512 B)', () async {
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      // 65536 chunks at 512 B — one past the uint16 ceiling.
+      final plaintext = Uint8List(32 * 1024 * 1024);
+
+      expect(
+        () => Session.open(sodium, plaintext, 512, receiverKp.publicKey, identity),
+        throwsA(isA<DeadDropCryptoError>()),
+      );
+    });
+
+    test('Session.open accepts the exact uint16 boundary', () async {
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      // Exactly 65535 chunks at 512 B — the largest valid transfer at 512 B.
+      final plaintext = Uint8List(maxChunkCount * 512);
+
+      final (_, header) = await Session.open(
+        sodium,
+        plaintext,
+        512,
+        receiverKp.publicKey,
+        identity,
+      );
+      expect(header.chunkCount, maxChunkCount);
+      // Round-trips through the wire format without truncation.
+      final unpacked = SessionHeader.unpack(header.pack());
+      expect(unpacked.chunkCount, maxChunkCount);
+    });
+
+    test('Session.open rejects an out-of-range chunk size', () async {
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final plaintext = Uint8List(1024);
+
+      expect(
+        () => Session.open(sodium, plaintext, 0, receiverKp.publicKey, identity),
+        throwsA(isA<DeadDropCryptoError>()),
+      );
+      expect(
+        () => Session.open(
+            sodium, plaintext, maxChunkSize + 1, receiverKp.publicKey, identity),
+        throwsA(isA<DeadDropCryptoError>()),
+      );
+    });
+
+    test('Session.open accepts 32 MB with 1024 B chunks', () async {
+      // The case that silently corrupted before: 32 MB needs 65536 chunks at
+      // 512 B (overflow), but 32768 at 1024 B — within uint16. We assert the
+      // session is built and the header round-trips intact. A full fountain
+      // decode at this K is O(K^2) and too slow for a unit test; the wire
+      // format is what the overflow bug corrupted, so that is what we verify.
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final plaintext = Uint8List(32 * 1024 * 1024);
+
+      final (session, header) = await Session.open(
+        sodium,
+        plaintext,
+        1024,
+        receiverKp.publicKey,
+        identity,
+      );
+      expect(session.chunkCount, 32768);
+      final unpacked = SessionHeader.unpack(header.pack());
+      expect(unpacked.chunkCount, 32768);
+      expect(unpacked.chunkSize, 1024);
+      expect(unpacked.totalSize, 32 * 1024 * 1024);
+    });
+
+    test('Session.open accepts 64 MB with 2048 B chunks', () async {
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final plaintext = Uint8List(64 * 1024 * 1024);
+
+      final (session, header) = await Session.open(
+        sodium,
+        plaintext,
+        2048,
+        receiverKp.publicKey,
+        identity,
+      );
+      expect(session.chunkCount, 32768);
+      final unpacked = SessionHeader.unpack(header.pack());
+      expect(unpacked.chunkCount, 32768);
+      expect(unpacked.chunkSize, 2048);
     });
   });
 
