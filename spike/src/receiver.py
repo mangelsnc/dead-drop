@@ -12,7 +12,7 @@ Pipeline
       → LTDecoder.add_frame()   (belief propagation)
     when decoder.done:
       → reassemble, unpad to total_size
-      → verify sha256 against signed manifest
+      → verify BLAKE2b against signed manifest
       → return plaintext
 """
 
@@ -96,5 +96,5 @@ class Receiver:
         padded = self.decoder.reassemble()
         plaintext = padded[: self.session.header.total_size]
         if not self.session.verify_file(plaintext):
-            raise DeadDropCryptoError("file integrity check failed (sha256 mismatch)")
+            raise DeadDropCryptoError("file integrity check failed (BLAKE2b mismatch)")
         return plaintext
