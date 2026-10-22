@@ -23,5 +23,8 @@ spike/out_frames/
 build/
 *.iml
 
+# Local Docker image stamps (see Makefile)
+.make/
+
 # FVM: local SDK symlink (.fvmrc IS versioned, this is not)
 .fvm/
