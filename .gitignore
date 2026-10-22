@@ -22,3 +22,6 @@ spike/out_frames/
 .flutter-plugins-dependencies
 build/
 *.iml
+
+# Local Docker image stamps (see Makefile)
+.make/
