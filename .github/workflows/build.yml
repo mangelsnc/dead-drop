@@ -6,6 +6,10 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # TEMPORARY — remove before merging. Lets the Firebase upload be exercised
+  # from this branch to confirm the repository secrets are correct, without
+  # merging an untested credential path into main.
+  workflow_dispatch:
 
 env:
   FLUTTER_VERSION: '3.24.5'
@@ -159,7 +163,11 @@ jobs:
     #
     # The app bundles no Firebase SDK, so no google-services.json is needed
     # to build — App Distribution only needs the app id and a credential.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # The workflow_dispatch clause is TEMPORARY — remove it together with the
+    # trigger above, leaving only the push-to-main condition.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
