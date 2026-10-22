@@ -51,7 +51,7 @@ FLUTTER_VERSION := $(shell sed -n 's/.*"flutter"[[:space:]]*:[[:space:]]*"\([^"]
 # with $(FLUTTER_VERSION); fall back to PATH otherwise, with a warning.
 HOST_FLUTTER := $(shell command -v fvm >/dev/null 2>&1 && echo "fvm flutter" || echo "flutter")
 
-.PHONY: help image build-linux build-android build-ios build-macos test analyze clean shell doctor
+.PHONY: help image _check-host-flutter build-linux build-android build-ios build-macos test analyze clean shell doctor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
