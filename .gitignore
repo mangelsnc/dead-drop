@@ -16,9 +16,15 @@ spike/out_frames/
 .idea/
 .vscode/
 
-# Flutter / Dart (future phases)
+# Flutter / Dart
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 build/
 *.iml
+
+# Firebase / Google services (NEVER commit)
+google-services.json
+GoogleService-Info.plist
+**/google-services.json
+**/GoogleService-Info.plist
