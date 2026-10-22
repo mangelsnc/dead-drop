@@ -5,6 +5,18 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+// Release signing material, when available.
+//
+// android/key.properties is never committed (see .gitignore): CI writes it
+// from repository secrets, and a developer signing locally creates their own.
+// When it is absent the release build falls back to the debug keys below, so
+// `flutter build apk --release` keeps working on a fresh clone.
+def keystorePropertiesFile = rootProject.file("key.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "dev.deaddrop.dead_drop"
     compileSdk = 35
@@ -27,11 +39,27 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                storeFile = file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            // Signed with the upload key when key.properties is present
+            // (CI, or a developer who set one up). Otherwise the debug keys,
+            // which keep local release builds working but produce APKs that
+            // cannot be distributed: debug keys differ per machine, so an
+            // update would fail to install over a previous build.
+            signingConfig = keystorePropertiesFile.exists()
+                ? signingConfigs.release
+                : signingConfigs.debug
         }
     }
 }
