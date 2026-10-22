@@ -73,7 +73,7 @@ Flutter produces errors that look like bugs in our code (for example
 Use [FVM](https://fvm.app/) so your toolchain matches the project:
 
 ```bash
-brew install leoafarias/fvm/fvm
+brew install fvm
 cd dead-drop
 fvm install     # reads .fvmrc
 fvm use         # activates 3.24.5 for this project

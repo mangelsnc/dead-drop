@@ -77,8 +77,8 @@ build-android: ## Compile the Android APK (release)
 
 build-ios: ## iOS build — runs on HOST, not in Docker (requires macOS + Xcode + Flutter)
 	@echo "⚠️  iOS builds cannot run in Docker (Apple requires macOS + Xcode)."
-	@echo "   This will run on your Mac using your local Flutter installation."
-	@echo "   Make sure you have Flutter SDK installed and in your PATH."
+	@echo "   It runs on your Mac with the Flutter version pinned in .fvmrc,"
+	@echo "   via FVM when installed (brew install fvm). See docs/development.md."
 	@echo ""
 	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
 	@$(MAKE) --no-print-directory _check-host-flutter
@@ -87,8 +87,8 @@ build-ios: ## iOS build — runs on HOST, not in Docker (requires macOS + Xcode 
 
 build-macos: ## macOS build — runs on HOST, not in Docker (requires macOS + Flutter)
 	@echo "⚠️  macOS builds cannot run in Docker (Apple requires macOS + Xcode)."
-	@echo "   This will run on your Mac using your local Flutter installation."
-	@echo "   Make sure you have Flutter SDK installed and in your PATH."
+	@echo "   It runs on your Mac with the Flutter version pinned in .fvmrc,"
+	@echo "   via FVM when installed (brew install fvm). See docs/development.md."
 	@echo ""
 	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
 	@$(MAKE) --no-print-directory _check-host-flutter
@@ -113,13 +113,13 @@ analyze: ## Run static analysis (flutter analyze)
 _check-host-flutter:
 	@actual=$$($(HOST_FLUTTER) --version 2>/dev/null | sed -n '1s/Flutter \([0-9.]*\).*/\1/p'); \
 	if [ -z "$$actual" ]; then \
-		echo "✖ No Flutter found on PATH. Install FVM (brew install leoafarias/fvm/fvm)"; \
+		echo "✖ No Flutter found on PATH. Install FVM (brew install fvm)"; \
 		echo "  then run: fvm install $(FLUTTER_VERSION) && fvm use $(FLUTTER_VERSION)"; \
 		exit 1; \
 	elif [ "$$actual" != "$(FLUTTER_VERSION)" ]; then \
 		echo "✖ Flutter $$actual found, but this project pins $(FLUTTER_VERSION) (.fvmrc)."; \
 		echo "  Building with another version produces errors that look like code bugs."; \
-		echo "  Fix: brew install leoafarias/fvm/fvm && fvm install $(FLUTTER_VERSION) && fvm use $(FLUTTER_VERSION)"; \
+		echo "  Fix: brew install fvm && fvm install $(FLUTTER_VERSION) && fvm use $(FLUTTER_VERSION)"; \
 		exit 1; \
 	else \
 		echo "✔ Flutter $$actual matches .fvmrc"; \
