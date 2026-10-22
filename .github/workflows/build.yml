@@ -241,11 +241,24 @@ jobs:
           umask 077
           printf '%s' "$SERVICE_ACCOUNT_JSON" > "$CREDS"
 
+          # Fail with a precise message rather than the CLI's generic
+          # "have you run firebase login?", which is what a malformed or
+          # truncated secret looks like from the outside.
+          if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get('type')=='service_account' and d.get('client_email') else 1)" "$CREDS"; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT_JSON is not a valid service account key (expected a JSON object with type=service_account). Re-copy the whole file from the Firebase console."
+            exit 1
+          fi
+          echo "Service account: $(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['client_email'])" "$CREDS")"
+
           printf '%s\n\nCommit: %s\n' \
             "$(git log -1 --pretty=%s)" "$(git rev-parse --short HEAD)" \
             > "${RUNNER_TEMP}/release-notes.txt"
 
-          GOOGLE_APPLICATION_CREDENTIALS="$CREDS" \
+          # Exported, not set as a command prefix: firebase-tools reads it
+          # from the environment during its own auth bootstrap, which runs
+          # before the subcommand.
+          export GOOGLE_APPLICATION_CREDENTIALS="$CREDS"
+
           firebase appdistribution:distribute \
             app/build/app/outputs/flutter-apk/app-release.apk \
             --app "$FIREBASE_APP_ID" \
