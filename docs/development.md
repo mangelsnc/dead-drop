@@ -57,14 +57,53 @@ automatically on first run (and rebuild it whenever `docker/Dockerfile` changes)
 
 ---
 
+## Flutter version
+
+The project pins **Flutter 3.24.5** in `.fvmrc`. Every environment must use
+it: the Docker image builds it in, CI installs it, and the Makefile reads the
+version from that file so the three cannot drift.
+
+Linux, Windows and Android builds run in Docker, so they get the right
+version automatically. **iOS and macOS cannot** — Xcode requires macOS, so
+those targets use whatever Flutter is on your machine. That is the one place
+a mismatch can creep in, and it does not fail cleanly: building with a newer
+Flutter produces errors that look like bugs in our code (for example
+`CardTheme` vs `CardThemeData`, whose signature changed after 3.24).
+
+Use [FVM](https://fvm.app/) so your toolchain matches the project:
+
+```bash
+brew install fvm
+cd dead-drop
+fvm install     # reads .fvmrc
+fvm use         # activates 3.24.5 for this project
+```
+
+`make build-ios` and `make build-macos` then pick up `fvm` automatically and
+refuse to start if the active version does not match `.fvmrc`.
+
+Without FVM they fall back to the `flutter` on your `PATH`, and the same
+check still runs — so a mismatch is reported in seconds instead of after a
+five-minute Xcode build.
+
+### Upgrading
+
+Not a one-line change. `sodium_libs` is pinned to `2.2.1+6` because newer
+releases need a Dart SDK that Flutter 3.24.5 does not ship, so moving Flutter
+forward means migrating the cryptography layer (now two majors behind and
+discontinued upstream) along with several other majors. Treat it as its own
+piece of work with its own branch and review — see the tracking issue.
+
+---
+
 ## 4. How it works
 
 ### The image (`docker/Dockerfile`)
 
 A single Ubuntu 22.04 image with everything pinned:
 
-- **Flutter SDK 3.24.5** (same version as CI — see `FLUTTER_VERSION` in
-  `.github/workflows/build.yml`)
+- **Flutter SDK 3.24.5** (the version in `.fvmrc` — see
+  [Flutter version](#flutter-version) below)
 - **Linux desktop toolchain**: `clang`, `cmake`, `ninja-build`, `pkg-config`,
   `libgtk-3-dev` (+ `liblzma-dev`, `libstdc++-12-dev`)
 - **Android SDK**: command-line tools, platform 34, build-tools 34.0.0, JDK 17
