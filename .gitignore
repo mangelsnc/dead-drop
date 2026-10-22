@@ -22,3 +22,6 @@ spike/out_frames/
 .flutter-plugins-dependencies
 build/
 *.iml
+
+# FVM: local SDK symlink (.fvmrc IS versioned, this is not)
+.fvm/
