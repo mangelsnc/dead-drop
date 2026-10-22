@@ -28,6 +28,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # --- System dependencies -----------------------------------------------------
 # - Linux desktop toolchain: clang, cmake, ninja, pkg-config, GTK3 headers
 #   (+ lzma, cpp, stdc++ required by Flutter Linux desktop builds)
+#   (+ libsecret-1-dev required by flutter_secure_storage_linux)
 # - Android toolchain: JDK 17, unzip (for SDK packages)
 # - Utilities: git, curl, xz, CA certs
 # Single layer + full cleanup to keep image size down.
@@ -45,6 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgtk-3-dev \
         liblzma-dev \
         libstdc++-12-dev \
+        libsecret-1-dev \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && apt-get clean
 
