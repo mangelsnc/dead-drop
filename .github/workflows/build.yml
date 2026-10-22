@@ -148,6 +148,43 @@ jobs:
             deaddrop-macos-arm64.tar.gz
             deaddrop-macos-arm64.tar.gz.sha256
 
+  build-ios:
+    # Compile-only check. Distributing an .ipa needs an Apple signing
+    # certificate, which requires the paid Developer Program and is not
+    # available to GitHub-hosted runners — so this builds with --no-codesign.
+    # It produces nothing installable; the point is to catch iOS-specific
+    # breakage (plugin podspecs, Info.plist, Swift/ObjC glue) in CI rather
+    # than on the one machine in the team that has Xcode.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build iOS (unsigned)
+        working-directory: app
+        run: flutter build ios --release --no-codesign
+
+      # The camera permission string is the one iOS requirement that fails at
+      # runtime rather than at build time: without it the scanner dies the
+      # first time a user opens the receive screen, and the build stays green.
+      - name: Check camera usage description is present
+        run: |
+          if ! /usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" \
+               app/ios/Runner/Info.plist >/dev/null 2>&1; then
+            echo "::error file=app/ios/Runner/Info.plist::NSCameraUsageDescription is missing — the QR scanner will fail at runtime and App Store review rejects the build."
+            exit 1
+          fi
+          echo "✔ NSCameraUsageDescription present"
+
   release:
     # Runs only on version tags (pushed by release.yml). Publishes the GitHub
     # Release with the changelog (stored in the annotated tag message) as the
