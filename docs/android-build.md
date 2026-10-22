@@ -150,7 +150,14 @@ in the workflow.
 ### Notes
 
 - `key.properties` and `*.jks` are gitignored; CI writes them at build time
-  and deletes them in a final `if: always()` step.
+  and deletes them in a final `if: always()` step. The service account JSON
+  is written to the runner temp dir with mode 600 and removed in the same
+  step.
+- The upload runs `firebase appdistribution:distribute` from a
+  version-pinned `firebase-tools`, not a marketplace action. That step holds
+  a credential with App Distribution Admin rights, and a third-party action
+  referenced by a mutable tag (`@v1`) can be repointed by its owner at any
+  time. Bump the pinned version deliberately rather than tracking `latest`.
 - The app bundles no Firebase SDK, so no `google-services.json` is needed to
   build or upload. The copies previously committed to this repo were removed
   in #23.

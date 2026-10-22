@@ -210,32 +210,46 @@ jobs:
         working-directory: app
         run: flutter build apk --release
 
-      # Release notes: the merged commit subject, so testers can tell builds
-      # apart without opening GitHub.
-      - name: Compose release notes
-        id: notes
-        run: |
-          {
-            echo 'text<<RELEASE_NOTES_EOF'
-            echo "$(git log -1 --pretty=%s)"
-            echo ""
-            echo "Commit: $(git rev-parse --short HEAD)"
-            echo 'RELEASE_NOTES_EOF'
-          } >> "$GITHUB_OUTPUT"
-
+      # Uploaded with the Firebase CLI rather than a third-party action.
+      # This step handles the service account key, which carries App
+      # Distribution Admin rights; a marketplace action referenced by a
+      # mutable tag could be repointed by its owner at any time and would
+      # see that credential. The CLI is pinned to an exact version and comes
+      # from Google, so the trusted set here is npm plus Firebase itself.
+      #
+      # Release notes are the merged commit subject plus the short SHA, so
+      # testers can tell builds apart without opening GitHub.
       - name: Upload to Firebase App Distribution
-        uses: wzieba/Firebase-Distribution-Github-Action@v1
-        with:
-          appId: ${{ secrets.FIREBASE_APP_ID_ANDROID }}
-          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-          groups: testers
-          releaseNotes: ${{ steps.notes.outputs.text }}
-          file: app/build/app/outputs/flutter-apk/app-release.apk
+        env:
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID_ANDROID }}
+          SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          npm install -g firebase-tools@13.29.1
+
+          # Written to the runner temp dir, not the workspace, so it cannot
+          # be picked up by a later step that archives the build tree.
+          CREDS="${RUNNER_TEMP}/firebase-service-account.json"
+          umask 077
+          printf '%s' "$SERVICE_ACCOUNT_JSON" > "$CREDS"
+
+          printf '%s\n\nCommit: %s\n' \
+            "$(git log -1 --pretty=%s)" "$(git rev-parse --short HEAD)" \
+            > "${RUNNER_TEMP}/release-notes.txt"
+
+          GOOGLE_APPLICATION_CREDENTIALS="$CREDS" \
+          firebase appdistribution:distribute \
+            app/build/app/outputs/flutter-apk/app-release.apk \
+            --app "$FIREBASE_APP_ID" \
+            --groups testers \
+            --release-notes-file "${RUNNER_TEMP}/release-notes.txt"
 
       - name: Clean up signing material
         if: always()
         run: |
-          rm -f "${RUNNER_TEMP}/upload-keystore.jks" app/android/key.properties
+          rm -f "${RUNNER_TEMP}/upload-keystore.jks" \
+                "${RUNNER_TEMP}/firebase-service-account.json" \
+                app/android/key.properties
 
   release:
     # Runs only on version tags (pushed by release.yml). Publishes the GitHub
