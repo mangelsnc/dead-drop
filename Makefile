@@ -51,7 +51,18 @@ TTY := $(shell test -t 0 && echo "-it")
 # (.gitignore) since it describes local Docker state, not the source tree.
 STAMP := .make/image-$(subst :,-,$(IMAGE))
 
-.PHONY: help image image-force build-linux build-android build-ios build-macos test analyze clean shell doctor
+# The Flutter version every environment must agree on. Single source of truth
+# is .fvmrc; this reads it so the Makefile, the Docker image tag and CI cannot
+# drift apart.
+FLUTTER_VERSION := $(shell sed -n 's/.*"flutter"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .fvmrc)
+
+# Apple targets cannot run in Docker (Xcode needs macOS), so they use the
+# host toolchain — the one place where a contributor's own Flutter version
+# leaks into a build. Prefer FVM when it is installed so everyone compiles
+# with $(FLUTTER_VERSION); fall back to PATH otherwise, with a warning.
+HOST_FLUTTER := $(shell command -v fvm >/dev/null 2>&1 && echo "fvm flutter" || echo "flutter")
+
+.PHONY: help image image-force _check-host-flutter build-linux build-android build-ios build-macos test analyze clean shell doctor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -93,20 +104,22 @@ build-android: $(STAMP) ## Compile the Android APK (release)
 
 build-ios: ## iOS build — runs on HOST, not in Docker (requires macOS + Xcode + Flutter)
 	@echo "⚠️  iOS builds cannot run in Docker (Apple requires macOS + Xcode)."
-	@echo "   This will run on your Mac using your local Flutter installation."
-	@echo "   Make sure you have Flutter SDK installed and in your PATH."
+	@echo "   It runs on your Mac with the Flutter version pinned in .fvmrc,"
+	@echo "   via FVM when installed (brew install fvm). See docs/development.md."
 	@echo ""
 	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	cd $(APP_DIR) && flutter pub get && flutter build ios --release
+	@$(MAKE) --no-print-directory _check-host-flutter
+	cd $(APP_DIR) && $(HOST_FLUTTER) pub get && $(HOST_FLUTTER) build ios --release
 	@echo "✔ Output: $(APP_DIR)/build/ios/iphoneos/Runner.app"
 
 build-macos: ## macOS build — runs on HOST, not in Docker (requires macOS + Flutter)
 	@echo "⚠️  macOS builds cannot run in Docker (Apple requires macOS + Xcode)."
-	@echo "   This will run on your Mac using your local Flutter installation."
-	@echo "   Make sure you have Flutter SDK installed and in your PATH."
+	@echo "   It runs on your Mac with the Flutter version pinned in .fvmrc,"
+	@echo "   via FVM when installed (brew install fvm). See docs/development.md."
 	@echo ""
 	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	cd $(APP_DIR) && flutter pub get && flutter build macos --release
+	@$(MAKE) --no-print-directory _check-host-flutter
+	cd $(APP_DIR) && $(HOST_FLUTTER) pub get && $(HOST_FLUTTER) build macos --release
 	@echo "✔ Output: $(APP_DIR)/build/macos/Build/Products/Release/dead_drop.app"
 
 test: $(STAMP) ## Run the test suite
@@ -120,6 +133,24 @@ analyze: $(STAMP) ## Run static analysis (flutter analyze)
 		cd $(APP_DIR) && \
 		flutter pub get && \
 		flutter analyze"
+
+# Guard for the Apple targets: catches a host Flutter that does not match
+# .fvmrc before spending five minutes in Xcode only to fail on an API that
+# moved between releases (e.g. CardTheme -> CardThemeData after 3.24).
+_check-host-flutter:
+	@actual=$$($(HOST_FLUTTER) --version 2>/dev/null | sed -n '1s/Flutter \([0-9.]*\).*/\1/p'); \
+	if [ -z "$$actual" ]; then \
+		echo "✖ No Flutter found on PATH. Install FVM (brew install fvm)"; \
+		echo "  then run: fvm install $(FLUTTER_VERSION) && fvm use $(FLUTTER_VERSION)"; \
+		exit 1; \
+	elif [ "$$actual" != "$(FLUTTER_VERSION)" ]; then \
+		echo "✖ Flutter $$actual found, but this project pins $(FLUTTER_VERSION) (.fvmrc)."; \
+		echo "  Building with another version produces errors that look like code bugs."; \
+		echo "  Fix: brew install fvm && fvm install $(FLUTTER_VERSION) && fvm use $(FLUTTER_VERSION)"; \
+		exit 1; \
+	else \
+		echo "✔ Flutter $$actual matches .fvmrc"; \
+	fi
 
 clean: ## Remove build artifacts (host-side, no container needed)
 	rm -rf $(APP_DIR)/build
