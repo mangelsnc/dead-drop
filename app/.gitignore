@@ -42,3 +42,10 @@ coverage/
 # Firebase config (contains API keys — do NOT commit)
 ios/Runner/GoogleService-Info.plist
 android/app/google-services.json
+
+# Scaffold files that `flutter create` regenerates (it is run whenever a
+# platform directory is added back). Neither belongs in this project: the
+# counter smoke test refers to a MyApp that does not exist and breaks
+# `flutter test`, and the README is the generic template, not ours.
+README.md
+test/widget_test.dart

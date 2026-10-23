@@ -27,6 +27,15 @@ Flutter/flutter_export_environment.sh
 ServiceDefinitions.json
 Runner/GeneratedPluginRegistrant.*
 
+# Xcode build output. A failed iOS build leaves these behind; all
+# regenerated, none of it belongs in the repo.
+# (DerivedData is already covered above.)
+**/build/
+*.xcresult
+**/xcshareddata/WorkspaceSettings.xcsettings
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+
 # Exceptions to above rules.
 !default.mode1v3
 !default.mode2v3
