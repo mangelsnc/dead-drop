@@ -48,9 +48,12 @@ jobs:
 
       - name: Package
         run: |
+          # Six levels up from bundle/ is the repo root, which is where
+          # upload-artifact looks. Five lands in app/ and the artifact is
+          # silently skipped with "No files were found".
           cd app/build/linux/x64/release/bundle
-          tar czf ../../../../../deaddrop-linux-x64.tar.gz .
-          cd ../../../../../
+          tar czf "${GITHUB_WORKSPACE}/deaddrop-linux-x64.tar.gz" .
+          cd "${GITHUB_WORKSPACE}"
           sha256sum deaddrop-linux-x64.tar.gz > deaddrop-linux-x64.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
