@@ -159,6 +159,89 @@ void main() {
           unwrapDataKey(sodium, 'correct horse battery staple', roundTripped);
       expect(unwrapped, equals(dataKey));
     });
+
+    test(
+        'unpack on bytes truncated within the salt/nonce header throws '
+        'MalformedWrappedKeyException, not RangeError', () {
+      final dataKey = newDataKey(sodium);
+      final wrapped =
+          wrapDataKey(sodium, 'correct horse battery staple', dataKey);
+      final packed = wrapped.pack();
+
+      // The header is [salt len][salt][nonce len][nonce]; anything shorter
+      // than that cannot possibly be a well-formed WrappedKey. Once the
+      // header is complete, unpack can no longer tell a short-but-present
+      // ciphertext from a deliberately tiny one — that's caught downstream
+      // by the secretbox authentication check in unwrapDataKey, not here.
+      final headerLength = 1 + wrapped.salt.length + 1 + wrapped.nonce.length;
+
+      for (var cutAt = 0; cutAt < headerLength; cutAt++) {
+        final truncated = packed.sublist(0, cutAt);
+        expect(
+          () => WrappedKey.unpack(truncated),
+          throwsA(isA<MalformedWrappedKeyException>()),
+          reason: 'truncating to $cutAt bytes should fail cleanly',
+        );
+      }
+    });
+
+    test(
+        'unpack on bytes truncated to no ciphertext at all throws '
+        'MalformedWrappedKeyException', () {
+      final dataKey = newDataKey(sodium);
+      final wrapped =
+          wrapDataKey(sodium, 'correct horse battery staple', dataKey);
+      final packed = wrapped.pack();
+      final headerLength = 1 + wrapped.salt.length + 1 + wrapped.nonce.length;
+
+      expect(
+        () => WrappedKey.unpack(packed.sublist(0, headerLength)),
+        throwsA(isA<MalformedWrappedKeyException>()),
+      );
+    });
+
+    test(
+        'unpack on bytes truncated to a ciphertext shorter than a secretbox '
+        'MAC throws MalformedWrappedKeyException, not a bare RangeError', () {
+      final dataKey = newDataKey(sodium);
+      final wrapped =
+          wrapDataKey(sodium, 'correct horse battery staple', dataKey);
+      final packed = wrapped.pack();
+      final headerLength = 1 + wrapped.salt.length + 1 + wrapped.nonce.length;
+
+      // Exactly one byte of "ciphertext" — present, but far short of a
+      // secretbox MAC (16 bytes), which is what `secretBox.openEasy` itself
+      // would reject with a bare RangeError if unpack let it through.
+      expect(
+        () => WrappedKey.unpack(packed.sublist(0, headerLength + 1)),
+        throwsA(isA<MalformedWrappedKeyException>()),
+      );
+    });
+
+    test(
+        'unpack on bytes with exactly a MAC-sized ciphertext parses, but '
+        'the result fails to authenticate', () {
+      final dataKey = newDataKey(sodium);
+      final wrapped =
+          wrapDataKey(sodium, 'correct horse battery staple', dataKey);
+      final packed = wrapped.pack();
+      final headerLength = 1 + wrapped.salt.length + 1 + wrapped.nonce.length;
+      const macBytes = 16;
+
+      final truncated =
+          WrappedKey.unpack(packed.sublist(0, headerLength + macBytes));
+      expect(
+        unwrapDataKey(sodium, 'correct horse battery staple', truncated),
+        isNull,
+      );
+    });
+
+    test('unpack on empty bytes throws MalformedWrappedKeyException', () {
+      expect(
+        () => WrappedKey.unpack(Uint8List(0)),
+        throwsA(isA<MalformedWrappedKeyException>()),
+      );
+    });
   });
 
   group('newDataKey', () {

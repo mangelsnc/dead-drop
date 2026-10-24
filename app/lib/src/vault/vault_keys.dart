@@ -22,6 +22,16 @@ import 'pwhash.dart';
 /// used as a `crypto_secretbox` key when it encrypts file contents.
 const int _kDataKeyBytes = 32;
 
+/// `crypto_secretbox`'s MAC size, in bytes — a fixed libsodium constant
+/// (`crypto_secretbox_MACBYTES`), not configurable, hence hardcoded rather
+/// than read off a [SodiumSumo] instance (unavailable to the static
+/// [WrappedKey.unpack]). Any secretbox ciphertext, including a wrapped
+/// data key's, is at least this long; used by [WrappedKey.unpack] to reject
+/// a ciphertext too short to possibly be real before it ever reaches
+/// `secretBox.openEasy`, which otherwise throws a bare `RangeError` on such
+/// input instead of the library's usual [SodiumException].
+const int _kSecretBoxMacBytes = 16;
+
 /// A data key sealed under a passphrase-derived KEK.
 ///
 /// Holds everything needed to re-derive the KEK and open the seal — the
@@ -63,23 +73,85 @@ class WrappedKey {
   }
 
   /// Parses bytes produced by [pack] back into a [WrappedKey].
+  ///
+  /// Throws [MalformedWrappedKeyException] — never a bare [RangeError] — on
+  /// truncated or otherwise malformed input. This matters once the bytes
+  /// come from disk (Task 5): a corrupt slot file must fail in a shape the
+  /// caller can recognise and handle deliberately, not crash the way an
+  /// unrelated indexing bug would. It is deliberately a *different*
+  /// exception type from the wrong-passphrase path ([unwrapDataKey] returning
+  /// null): corruption and a wrong passphrase are different failures and
+  /// callers should not be tempted to collapse them into one message that
+  /// then either alarms a coerced user over a harmless disk error, or
+  /// quietly turns real corruption into what looks like "no such
+  /// environment". The exception carries no information about *which* slot
+  /// failed beyond what the caller already knows by construction (it is the
+  /// one asking to unpack this buffer), so it does not reveal anything about
+  /// the other slot.
   static WrappedKey unpack(Uint8List bytes) {
     var offset = 0;
 
-    final saltLen = bytes[offset];
+    final saltLen = _readByte(bytes, offset, 'salt length');
     offset += 1;
-    final salt = bytes.sublist(offset, offset + saltLen);
+    final salt = _readSlice(bytes, offset, saltLen, 'salt');
     offset += saltLen;
 
-    final nonceLen = bytes[offset];
+    final nonceLen = _readByte(bytes, offset, 'nonce length');
     offset += 1;
-    final nonce = bytes.sublist(offset, offset + nonceLen);
+    final nonce = _readSlice(bytes, offset, nonceLen, 'nonce');
     offset += nonceLen;
 
+    // The ciphertext runs to the end of the buffer; it must be at least a
+    // MAC's worth of bytes (a real WrappedKey's always is — see
+    // _kSecretBoxMacBytes) or this cannot be a genuine secretbox ciphertext.
+    // Checking this here, not just non-emptiness, matters because
+    // `secretBox.openEasy` throws a bare RangeError (not a SodiumException)
+    // on a too-short ciphertext — exactly the kind of crash this method
+    // exists to turn into a clean, typed failure instead.
+    if (bytes.length - offset < _kSecretBoxMacBytes) {
+      throw MalformedWrappedKeyException('ciphertext too short');
+    }
     final ciphertext = bytes.sublist(offset);
 
     return WrappedKey(salt: salt, nonce: nonce, ciphertext: ciphertext);
   }
+
+  static int _readByte(Uint8List bytes, int offset, String field) {
+    if (offset >= bytes.length) {
+      throw MalformedWrappedKeyException('truncated before $field');
+    }
+    return bytes[offset];
+  }
+
+  static Uint8List _readSlice(
+    Uint8List bytes,
+    int offset,
+    int length,
+    String field,
+  ) {
+    if (offset + length > bytes.length) {
+      throw MalformedWrappedKeyException('truncated $field');
+    }
+    return bytes.sublist(offset, offset + length);
+  }
+}
+
+/// Thrown by [WrappedKey.unpack] when the bytes are not a well-formed
+/// [WrappedKey] — truncated, or otherwise too short to contain the fields
+/// [WrappedKey.pack] writes.
+///
+/// Deliberately distinct from "wrong passphrase" ([unwrapDataKey] returning
+/// null): this means the bytes on disk are damaged, not that an
+/// authentication check failed. [message] is a short, generic description
+/// (e.g. "truncated salt") — never anything derived from the bytes
+/// themselves — so catching and logging it cannot leak slot contents.
+class MalformedWrappedKeyException implements Exception {
+  MalformedWrappedKeyException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'MalformedWrappedKeyException: $message';
 }
 
 /// Generates a fresh, random 32-byte data key.
