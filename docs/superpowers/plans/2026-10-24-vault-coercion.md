@@ -82,6 +82,42 @@ git add docs/superpowers/plans/2026-10-24-vault-coercion.md
 git commit -m "docs: record Argon2id spike findings"
 ```
 
+#### Findings (run 2026-10-24, `flutter_tester` in the dev container, x86_64 under Docker on Apple Silicon)
+
+**The plan is buildable as written. Proceed.**
+
+| Measurement | Result |
+|---|---|
+| Argon2id available on the pinned stack | Yes |
+| One derivation (ops=3, mem=64 MB) | 243–343 ms |
+| **Four sequential derivations** | **612 ms** (~153 ms each) |
+| Deterministic for the same password + salt | Yes |
+| Different salt → different key | Yes |
+
+Against the stop condition — *"if 4 derivations exceed ~2s or risk OOM, stop
+and report"* — 612 ms clears it comfortably. The parameters in Global
+Constraints stand unchanged.
+
+**Import and init differ from the rest of the app.** `pwhash` is sumo-only:
+
+```dart
+import 'package:sodium/sodium_sumo.dart';          // not sodium_libs.dart
+final sodium = await SodiumSumoInit.init2(loader); // not SodiumInit.init()
+```
+
+Task 7 must migrate `main()` to `SodiumSumoInit`. `sodium_libs` ships a
+`SodiumSumoUnavailable` exception, so the vault must degrade gracefully if
+sumo is missing at runtime — Send and Receive do not depend on it.
+
+**Per-derivation cost drops under repetition** (343 ms alone, 153 ms in a loop
+of four), presumably allocator warmth. Task 10's timing bound should be derived
+from steady-state measurements, not a single cold run.
+
+**Caveat:** measured on x86_64 emulation under Docker on Apple Silicon, which
+is not the target. A low-end Android device will be slower and has far less
+memory headroom. Re-measure on real hardware before Task 10 fixes its bound;
+4 × 64 MB concurrent allocation is still the risk worth watching.
+
 ---
 
 ### Task 1: Argon2id wrapper
