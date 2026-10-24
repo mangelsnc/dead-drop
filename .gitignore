@@ -28,3 +28,52 @@ build/
 
 # FVM: local SDK symlink (.fvmrc IS versioned, this is not)
 .fvm/
+
+# ---------------------------------------------------------------------------
+# Build artefacts — repo-wide safety net
+# ---------------------------------------------------------------------------
+# The per-platform .gitignore files under app/ are the primary rules. These
+# repeat the important ones at the root so an artefact is still ignored when a
+# build drops it somewhere unexpected — a failed Xcode build in particular
+# scatters files outside the directory it was invoked from, and `git add .`
+# then sweeps them in.
+
+# Xcode
+**/DerivedData/
+**/xcuserdata/
+*.xcresult
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+
+# CocoaPods (Podfile and Podfile.lock are committed; installed pods are not)
+**/Pods/
+
+# Flutter / Dart
+**/.dart_tool/
+**/ephemeral/
+**/flutter_assets/
+*.flx
+*.dill
+.flutter-versions
+
+# Gradle / Android
+**/.gradle/
+**/captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing material — these must NEVER be committed. The keystore belongs
+# outside this repository entirely; see docs/android-build.md.
+*.jks
+*.keystore
+*.p12
+*.p8
+*.mobileprovision
+*.cer
+**/key.properties
+
+# OS noise
+**/.DS_Store
+Thumbs.db
