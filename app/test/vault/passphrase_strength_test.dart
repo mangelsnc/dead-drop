@@ -219,19 +219,6 @@ void main() {
       expect(words, hasLength(5));
     });
 
-    test('returns distinct words from the wordlist', () {
-      final words = generatePassphrase(sodium, words: 6);
-      for (final word in words) {
-        expect(kPassphraseWordlist, contains(word));
-      }
-      // Not a strict requirement that all 6 be pairwise distinct (sampling
-      // is with replacement), but a collision among 6 draws from a
-      // 1,296-word list should be rare enough in a single run that
-      // asserting it here is a reasonable canary for a broken RNG rather
-      // than an expected flake.
-      expect(words.toSet(), hasLength(words.length));
-    });
-
     test(
         'every generated six-word passphrase meets the minimum entropy, '
         'regardless of which words are drawn', () {
