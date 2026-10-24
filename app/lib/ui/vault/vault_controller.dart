@@ -26,6 +26,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sodium/sodium_sumo.dart';
 
+import '../../src/vault/attempt_guard.dart';
 import '../../src/vault/vault_keys.dart';
 import '../../src/vault/vault_session.dart';
 import '../../src/vault/vault_store.dart';
@@ -93,12 +94,17 @@ class VaultState {
 /// backgrounded, independent of whatever screen happens to be on top.
 class VaultController extends StateNotifier<VaultState>
     with WidgetsBindingObserver {
-  VaultController(this._sodium, this._store) : super(const VaultState()) {
+  /// [attemptGuard] is injectable so tests can supply one over an
+  /// in-memory keychain; production uses the platform default.
+  VaultController(this._sodium, this._store, {AttemptGuard? attemptGuard})
+      : _attemptGuard = attemptGuard ?? AttemptGuard(),
+        super(const VaultState()) {
     WidgetsBinding.instance.addObserver(this);
   }
 
   final SodiumSumo? _sodium;
   final VaultStore? _store;
+  final AttemptGuard _attemptGuard;
 
   /// The data key for the currently-open environment. Cleared by [lock] —
   /// this is the one piece of key material this controller is responsible
@@ -144,12 +150,40 @@ class VaultController extends StateNotifier<VaultState>
       return false;
     }
 
+    // The penalty is served BEFORE the attempt, never after a failure. A
+    // pause that follows a wrong passphrase is itself observable — it tells
+    // an attacker with a stopwatch that the app recognised the failure.
+    // Waiting first leaks nothing: the wait is identical whatever is about
+    // to be typed, and identical whether or not a second environment exists.
+    final penalty = await _attemptGuard.penaltyBeforeNextAttempt();
+    if (penalty > Duration.zero) {
+      await Future<void>.delayed(penalty);
+    }
+
     final slots = await store.readSlots();
     final result = tryUnlock(sodium, passphrase, slots);
     if (!result.ok) {
+      final shouldSelfDestruct = await _attemptGuard.recordFailure();
+      if (shouldSelfDestruct) {
+        // Every slot, not just the one being guessed at: a surviving decoy
+        // would prove there had been something to erase.
+        for (var slot = 0; slot < kVaultEnvironmentSlots; slot++) {
+          await store.destroySlot(slot);
+        }
+        _dataKey = null;
+        state = state.copyWith(
+          unlocked: false,
+          clearSlot: true,
+          entries: const [],
+          error: 'Incorrect passphrase',
+        );
+        return false;
+      }
       state = state.copyWith(error: 'Incorrect passphrase');
       return false;
     }
+
+    await _attemptGuard.recordSuccess();
 
     final dataKey = result.dataKey!;
     final slotIndex = result.slotIndex!;
