@@ -35,6 +35,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  # Lets tests swap in an in-memory FlutterSecureStoragePlatform instead of
+  # hitting the real OS keychain over a platform channel that doesn't exist
+  # in the flutter_tester VM.
+  flutter_secure_storage_platform_interface: ^1.1.2
 
 flutter:
   uses-material-design: true
