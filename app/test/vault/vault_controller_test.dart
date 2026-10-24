@@ -229,7 +229,19 @@ void main() {
     await controller.createVault('correct horse battery staple');
     expect(controller.state.unlocked, isTrue);
 
-    controller.didChangeAppLifecycleState(AppLifecycleState.paused);
+    // Drive the real dispatch path rather than calling
+    // didChangeAppLifecycleState directly: WidgetsBinding.handleApp
+    // LifecycleStateChanged iterates its registered observer list and
+    // invokes didChangeAppLifecycleState on each one (see
+    // packages/flutter/lib/src/widgets/binding.dart). Going through the
+    // binding is what actually proves the controller's constructor-time
+    // `WidgetsBinding.instance.addObserver(this)` registered it — calling
+    // the method directly on the controller would pass even if
+    // registration were broken (wrong list, double-dispose, swapped
+    // binding), since it never touches the binding at all.
+    WidgetsBinding.instance.handleAppLifecycleStateChanged(
+      AppLifecycleState.paused,
+    );
 
     expect(controller.state.unlocked, isFalse);
     expect(controller.state.entries, isEmpty);
@@ -252,5 +264,37 @@ void main() {
     controller.lock();
     final ok = await controller.unlock('nonexistent decoy passphrase');
     expect(ok, isFalse);
+  });
+
+  test('createVault refuses to clobber an existing vault or its decoy',
+      () async {
+    final controller = buildController();
+    addTearDown(controller.dispose);
+    final store = VaultStore(tempDir, sodium);
+
+    await controller.createVault('correct horse battery staple');
+    await controller.addDecoy('decoy passphrase entirely different');
+
+    // A second createVault call on the same controller — e.g. a UI
+    // double-tap — must not overwrite slot 0 or wipe out the decoy in slot
+    // 1. (The guard is necessarily session-local: the on-disk slot files are
+    // indistinguishable whether or not they hold a real environment, by
+    // design — see vault_store.dart — so VaultState.exists, not a disk
+    // read, is what createVault can check here.)
+    await controller.createVault('a brand new different passphrase');
+
+    expect(controller.state.error, isNotNull);
+
+    final slots = await store.readSlots();
+    final realKey = tryUnlockFor(sodium, 'correct horse battery staple', slots);
+    final decoyKey =
+        tryUnlockFor(sodium, 'decoy passphrase entirely different', slots);
+    expect(realKey, isNotNull);
+    expect(decoyKey, isNotNull);
+
+    // The new passphrase must not have replaced either slot.
+    final result =
+        tryUnlock(sodium, 'a brand new different passphrase', slots.cast());
+    expect(result.ok, isFalse);
   });
 }

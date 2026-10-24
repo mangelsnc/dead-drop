@@ -188,7 +188,32 @@ class VaultController extends StateNotifier<VaultState>
   /// valid, if less protected, configuration; [addDecoy] can provision slot
   /// 1 later. Initialises the on-disk store first (idempotent) so this also
   /// works as "first run" setup.
+  ///
+  /// Refuses (via [VaultState.error]) when this controller already
+  /// considers a vault to exist ([VaultState.exists]), rather than silently
+  /// overwriting slot 0 — [VaultStore.writeSlots] replaces the whole slot
+  /// pair, so an unguarded second call (a UI double-tap, a future caller
+  /// bug) would clobber slot 0 and wipe out any decoy in slot 1 too.
+  ///
+  /// This guard is necessarily session-local, not disk-backed: by design
+  /// (see vault_store.dart), [VaultStore.readSlots] can never distinguish
+  /// an empty slot from an occupied one without the right passphrase — an
+  /// empty slot is written as an indistinguishable random filler
+  /// specifically so the on-disk layout never reveals slot occupancy. That
+  /// is the same property that makes the vault coercion-resistant, so nothing
+  /// server-side can authoritatively answer "is slot 0 already in use?"
+  /// Within a controller's lifetime, [VaultState.exists] is set the moment a
+  /// vault is created or unlocked and is therefore a reliable guard against
+  /// *this controller* clobbering its own vault; it cannot catch a second,
+  /// independent [VaultController] instance (e.g. a future caller that
+  /// built its own) calling [createVault] on the same store without ever
+  /// unlocking first.
   Future<void> createVault(String passphrase) async {
+    if (state.exists) {
+      state = state.copyWith(error: 'A vault already exists');
+      return;
+    }
+
     final sodium = _sodium;
     final store = _store;
     if (sodium == null || store == null) {
