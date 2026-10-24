@@ -110,7 +110,12 @@ void main() {
       final salt = newSalt(sodium);
       final a = deriveKek(sodium, 'correct horse battery staple', salt);
       final b = deriveKek(sodium, 'correct horse battery staple', salt);
-      expect(a, equals(b));
+      try {
+        expect(a.extractBytes(), equals(b.extractBytes()));
+      } finally {
+        a.dispose();
+        b.dispose();
+      }
     });
 
     test('differs when the salt differs', () {
@@ -118,20 +123,46 @@ void main() {
       final saltB = newSalt(sodium);
       final a = deriveKek(sodium, 'correct horse battery staple', saltA);
       final b = deriveKek(sodium, 'correct horse battery staple', saltB);
-      expect(a, isNot(equals(b)));
+      try {
+        expect(a.extractBytes(), isNot(equals(b.extractBytes())));
+      } finally {
+        a.dispose();
+        b.dispose();
+      }
     });
 
     test('differs when the passphrase differs', () {
       final salt = newSalt(sodium);
       final a = deriveKek(sodium, 'correct horse battery staple', salt);
       final b = deriveKek(sodium, 'correct horse battery staple!', salt);
-      expect(a, isNot(equals(b)));
+      try {
+        expect(a.extractBytes(), isNot(equals(b.extractBytes())));
+      } finally {
+        a.dispose();
+        b.dispose();
+      }
     });
 
-    test('returns 32 bytes', () {
+    test('returns a 32-byte SecureKey', () {
       final salt = newSalt(sodium);
       final key = deriveKek(sodium, 'correct horse battery staple', salt);
-      expect(key, hasLength(32));
+      try {
+        expect(key.length, 32);
+      } finally {
+        key.dispose();
+      }
+    });
+
+    test('returned key is usable and disposable', () {
+      // Covers the hardening fix: deriveKek returns a SecureKey (not raw
+      // bytes) so the KEK never sits unprotected in pageable heap memory.
+      // The caller must be able to read it via extractBytes() and dispose
+      // it without error.
+      final salt = newSalt(sodium);
+      final key = deriveKek(sodium, 'correct horse battery staple', salt);
+      expect(key, isA<SecureKey>());
+      expect(() => key.extractBytes(), returnsNormally);
+      expect(() => key.dispose(), returnsNormally);
     });
   });
 

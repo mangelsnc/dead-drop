@@ -53,7 +53,13 @@ const int _memLimit = 64 * 1024 * 1024;
 /// without storing it. [salt] should come from [newSalt] and be persisted
 /// alongside the environment it protects — never reused across
 /// environments or vaults.
-Uint8List deriveKek(SodiumSumo sodium, String passphrase, Uint8List salt) {
+///
+/// Returns a [SecureKey] rather than raw bytes so the KEK never
+/// materialises as a plain `Uint8List` sitting in pageable (swappable),
+/// never-zeroed heap memory — a real gap for a coercion-resistance
+/// feature. The caller takes ownership of the returned [SecureKey] and is
+/// responsible for disposing it.
+SecureKey deriveKek(SodiumSumo sodium, String passphrase, Uint8List salt) {
   // crypto_pwhash takes the password as Int8List (signed bytes), not
   // Uint8List. UTF-8 bytes are 0-255; reinterpreting the same buffer as
   // signed is a lossless bit-for-bit view, not a conversion.
@@ -61,7 +67,7 @@ Uint8List deriveKek(SodiumSumo sodium, String passphrase, Uint8List salt) {
   final password = Int8List.view(
       passwordBytes.buffer, passwordBytes.offsetInBytes, passwordBytes.length);
 
-  final key = sodium.crypto.pwhash(
+  return sodium.crypto.pwhash(
     outLen: _kekBytes,
     password: password,
     salt: salt,
@@ -69,11 +75,6 @@ Uint8List deriveKek(SodiumSumo sodium, String passphrase, Uint8List salt) {
     memLimit: _memLimit,
     alg: CryptoPwhashAlgorithm.argon2id13,
   );
-  try {
-    return key.extractBytes();
-  } finally {
-    key.dispose();
-  }
 }
 
 /// Generates a fresh, random salt for use with [deriveKek].

@@ -107,10 +107,10 @@ void main() {
   });
 
   group('wrapDataKey / unwrapDataKey', () {
-    test('wrap then unwrap with the same passphrase returns the data key',
-        () {
+    test('wrap then unwrap with the same passphrase returns the data key', () {
       final dataKey = newDataKey(sodium);
-      final wrapped = wrapDataKey(sodium, 'correct horse battery staple', dataKey);
+      final wrapped =
+          wrapDataKey(sodium, 'correct horse battery staple', dataKey);
 
       final unwrapped =
           unwrapDataKey(sodium, 'correct horse battery staple', wrapped);
@@ -120,12 +120,12 @@ void main() {
 
     test('unwrap with a wrong passphrase returns null, does not throw', () {
       final dataKey = newDataKey(sodium);
-      final wrapped = wrapDataKey(sodium, 'correct horse battery staple', dataKey);
+      final wrapped =
+          wrapDataKey(sodium, 'correct horse battery staple', dataKey);
 
       Uint8List? unwrapped;
       expect(
-        () => unwrapped =
-            unwrapDataKey(sodium, 'wrong passphrase', wrapped),
+        () => unwrapped = unwrapDataKey(sodium, 'wrong passphrase', wrapped),
         returnsNormally,
       );
       expect(unwrapped, isNull);
@@ -145,7 +145,8 @@ void main() {
   group('WrappedKey.pack / unpack', () {
     test('pack/unpack round-trips a WrappedKey', () {
       final dataKey = newDataKey(sodium);
-      final wrapped = wrapDataKey(sodium, 'correct horse battery staple', dataKey);
+      final wrapped =
+          wrapDataKey(sodium, 'correct horse battery staple', dataKey);
 
       final roundTripped = WrappedKey.unpack(wrapped.pack());
 
@@ -154,8 +155,8 @@ void main() {
       expect(roundTripped.ciphertext, equals(wrapped.ciphertext));
 
       // And the round-tripped WrappedKey must still unwrap correctly.
-      final unwrapped = unwrapDataKey(
-          sodium, 'correct horse battery staple', roundTripped);
+      final unwrapped =
+          unwrapDataKey(sodium, 'correct horse battery staple', roundTripped);
       expect(unwrapped, equals(dataKey));
     });
   });

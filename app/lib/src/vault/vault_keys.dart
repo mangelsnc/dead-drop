@@ -86,7 +86,8 @@ class WrappedKey {
 ///
 /// One data key per vault environment: it is the key files are actually
 /// encrypted under, and the only thing [wrapDataKey] protects.
-Uint8List newDataKey(SodiumSumo sodium) => sodium.randombytes.buf(_kDataKeyBytes);
+Uint8List newDataKey(SodiumSumo sodium) =>
+    sodium.randombytes.buf(_kDataKeyBytes);
 
 /// Seals [dataKey] under a KEK derived from [passphrase].
 ///
@@ -100,8 +101,7 @@ WrappedKey wrapDataKey(
   Uint8List dataKey,
 ) {
   final salt = newSalt(sodium);
-  final kekBytes = deriveKek(sodium, passphrase, salt);
-  final kek = SecureKey.fromList(sodium, kekBytes);
+  final kek = deriveKek(sodium, passphrase, salt);
   final nonce = sodium.randombytes.buf(sodium.crypto.secretBox.nonceBytes);
 
   try {
@@ -129,8 +129,7 @@ Uint8List? unwrapDataKey(
   String passphrase,
   WrappedKey wrapped,
 ) {
-  final kekBytes = deriveKek(sodium, passphrase, wrapped.salt);
-  final kek = SecureKey.fromList(sodium, kekBytes);
+  final kek = deriveKek(sodium, passphrase, wrapped.salt);
 
   try {
     return sodium.crypto.secretBox.openEasy(
