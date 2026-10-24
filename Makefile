@@ -40,6 +40,17 @@ DOCKER_RUN := docker run --rm --platform $(PLATFORM) \
 # but CI / scripted targets are not).
 TTY := $(shell test -t 0 && echo "-it")
 
+# Release signing keystore, when one is configured.
+#
+# app/android/key.properties holds an absolute host path, because the keystore
+# is deliberately kept OUTSIDE this public repository — a leaked signing key
+# cannot be revoked. The Android build runs in the container, which only
+# mounts the repo, so that path has to be bind-mounted in at the same location
+# or Gradle fails with "Keystore file ... not found for signing config".
+KEY_PROPERTIES := $(APP_DIR)/android/key.properties
+KEYSTORE_PATH  := $(shell sed -n 's/^storeFile=//p' $(KEY_PROPERTIES) 2>/dev/null)
+KEYSTORE_MOUNT := $(if $(wildcard $(KEYSTORE_PATH)),-v "$(KEYSTORE_PATH):$(KEYSTORE_PATH):ro",)
+
 # Stamp file tracking the built image. Every containerised target depends on
 # it, so a Dockerfile change (a new apt package, a toolchain bump) rebuilds the
 # image automatically instead of failing deep inside the build with a message
@@ -96,7 +107,13 @@ build-linux: $(STAMP) ## Compile the Linux desktop app (release)
 	@echo "✔ Output: $(APP_DIR)/build/linux/x64/release/bundle/"
 
 build-android: $(STAMP) ## Compile the Android APK (release)
-	$(DOCKER_RUN) $(IMAGE) bash -c "\
+	@if [ -f $(KEY_PROPERTIES) ] && [ -z "$(KEYSTORE_MOUNT)" ]; then \
+		echo "✖ $(KEY_PROPERTIES) points at a keystore that does not exist:"; \
+		echo "    $(KEYSTORE_PATH)"; \
+		echo "  Fix the storeFile path, or remove key.properties to build with debug keys."; \
+		exit 1; \
+	fi
+	$(DOCKER_RUN) $(KEYSTORE_MOUNT) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
 		flutter build apk --release"
