@@ -35,11 +35,12 @@ import 'passphrase_wordlist.dart';
 ///
 /// 60 bits is this feature's chosen floor: high enough that every weak
 /// example in the test suite (short PINs, dictionary words, composition-only
-/// "strong" passwords like `Password1!`) is rejected, while a four-word
-/// generated passphrase (see [generatePassphrase]) already clears it with
-/// margin and a five-word one clears it comfortably. At 60 bits, an
-/// offline attacker limited to even 10^12 guesses/second needs, on
-/// average, decades to exhaust the space — see
+/// "strong" passwords like `Password1!`) is rejected, while the default
+/// six-word generated passphrase (see [generatePassphrase]) clears it with
+/// margin (~62.0 bits at the bundled wordlist's ~10.34 bits/word — five
+/// words, ~51.7 bits, would not clear it, which is why the default is six).
+/// At 60 bits, an offline attacker limited to even 10^12 guesses/second
+/// needs, on average, decades to exhaust the space — see
 /// docs/superpowers/plans/2026-10-24-vault-coercion.md for the full
 /// reasoning. Changing this value is a spec change, not a tuning knob.
 const double kMinimumEntropyBits = 60;
@@ -278,7 +279,7 @@ double _scoreToken(String token, List<String> notes) {
   }
 
   if (kPassphraseWordlist.contains(lower)) {
-    // A word drawn from the bundled 40,000-word list (e.g. via
+    // A word drawn from the bundled EFF short wordlist (e.g. via
     // generatePassphrase) is a genuinely different case from "password" or
     // "dragon": an attacker who assumes this wordlist still has to search
     // all of it, so the honest cost is log2(wordlist length) — not the
@@ -325,12 +326,18 @@ double _log2(double x) => x <= 0 ? 0 : math.log(x) / math.ln2;
 /// `dart:math`, whose default generator is not cryptographically secure
 /// and must never choose anything that guards vault contents.
 ///
+/// Defaults to 6 words, not 5: the bundled EFF short wordlist gives
+/// ~10.34 bits/word, so 6 words (~62.0 bits) clears [kMinimumEntropyBits]
+/// (60 bits) with margin while 5 words (~51.7 bits) would not — and
+/// generating a passphrase the app's own strength check then rejects would
+/// be a defect, not a style choice.
+///
 /// Rejection sampling avoids modulo bias: naively using
 /// `randomIndex % wordlist.length` would make low indices very slightly
 /// more likely whenever the wordlist size does not evenly divide the
 /// random range, which is a real (if small) entropy leak in a function
 /// whose entire job is to maximise entropy.
-List<String> generatePassphrase(SodiumSumo sodium, {int words = 5}) {
+List<String> generatePassphrase(SodiumSumo sodium, {int words = 6}) {
   if (words <= 0) {
     throw ArgumentError.value(words, 'words', 'must be positive');
   }

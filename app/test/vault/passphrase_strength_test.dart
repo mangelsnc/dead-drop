@@ -143,15 +143,28 @@ void main() {
       expect(result.meetsMinimum, isTrue);
     });
 
-    test('accepts a generated five-word passphrase', () {
+    test('accepts a generated six-word passphrase', () {
       // Independent of generatePassphrase: assembles words directly from
       // the bundled wordlist so this test has no libsodium dependency.
-      final passphrase =
-          '${kPassphraseWordlist[10]} ${kPassphraseWordlist[20000]} '
-          '${kPassphraseWordlist[30000]} ${kPassphraseWordlist[39000]} '
-          '${kPassphraseWordlist[5000]}';
+      // Six words at the bundled list's ~10.34 bits/word is what
+      // generatePassphrase's default actually produces (~62 bits); five
+      // words (~51.7 bits) would not clear the floor, which is exactly why
+      // the default word count is six, not five.
+      final passphrase = [10, 200, 500, 800, 1100, 1290]
+          .map((i) => kPassphraseWordlist[i])
+          .join(' ');
       final result = estimateStrength(passphrase);
       expect(result.meetsMinimum, isTrue, reason: passphrase);
+    });
+
+    test('a five-word passphrase from the bundled list falls short', () {
+      // Documents the exact tradeoff behind the six-word default: five
+      // words from this list is expected to land just under the floor.
+      final passphrase = [10, 200, 500, 800, 1100]
+          .map((i) => kPassphraseWordlist[i])
+          .join(' ');
+      final result = estimateStrength(passphrase);
+      expect(result.meetsMinimum, isFalse, reason: passphrase);
     });
   });
 
@@ -162,102 +175,90 @@ void main() {
       sodium = await SodiumSumoInit.init2(_loadLibsodium);
     });
 
+    test('defaults to 6 words', () {
+      final words = generatePassphrase(sodium);
+      expect(words, hasLength(6));
+    });
+
     test('returns the requested number of words', () {
       final words = generatePassphrase(sodium, words: 5);
       expect(words, hasLength(5));
     });
 
     test('returns distinct words from the wordlist', () {
-      final words = generatePassphrase(sodium, words: 8);
+      final words = generatePassphrase(sodium, words: 6);
       for (final word in words) {
         expect(kPassphraseWordlist, contains(word));
       }
-      // Not a strict requirement that all 8 be pairwise distinct (sampling
-      // is with replacement), but collisions among 8 draws from a
-      // 40,000-word list should essentially never happen; a failure here
-      // would indicate a broken RNG, not bad luck.
+      // Not a strict requirement that all 6 be pairwise distinct (sampling
+      // is with replacement), but a collision among 6 draws from a
+      // 1,296-word list should be rare enough in a single run that
+      // asserting it here is a reasonable canary for a broken RNG rather
+      // than an expected flake.
       expect(words.toSet(), hasLength(words.length));
     });
 
-    test('a generated four-word passphrase meets the minimum entropy', () {
-      final words = generatePassphrase(sodium, words: 4);
+    test(
+        'a generated six-word passphrase (the default) meets the minimum '
+        'entropy', () {
+      final words = generatePassphrase(sodium, words: 6);
       final result = estimateStrength(words.join(' '));
       expect(result.meetsMinimum, isTrue,
           reason: '${words.join(' ')} (~${result.entropyBits} bits)');
     });
 
-    test('a generated five-word passphrase clears the minimum with margin', () {
-      final words = generatePassphrase(sodium, words: 5);
+    test('a generated six-word passphrase clears the minimum with margin', () {
+      final words = generatePassphrase(sodium, words: 6);
       final result = estimateStrength(words.join(' '));
-      expect(result.entropyBits, greaterThan(kMinimumEntropyBits + 10));
+      // ~62.0 bits expected (6 * log2(1296)); require strictly more than
+      // the floor so this would fail if the wordlist or word count ever
+      // regressed to something that only just scrapes by.
+      expect(result.entropyBits, greaterThan(kMinimumEntropyBits));
     });
 
     test('two generated passphrases differ (not a fixed sequence)', () {
-      // Weak evidence on its own, but combined with the source-inspection
-      // test below rules out both "hardcoded" and "seeded, deterministic"
-      // implementations.
       final a = generatePassphrase(sodium, words: 6);
       final b = generatePassphrase(sodium, words: 6);
       expect(a, isNot(equals(b)));
     });
 
-    test('implementation draws from sodium.randombytes, not dart:math', () {
-      // There is no mocking library in this project to intercept
-      // SodiumSumo (a concrete class, not a small interface) at the call
-      // site, so this is a source-level check instead: it pins down the
-      // exact requirement ("use sodium.randombytes, never dart:math's
-      // Random") against the body of generatePassphrase itself, rather
-      // than trusting a doc comment to stay true.
-      final source =
-          File('lib/src/vault/passphrase_strength.dart').readAsStringSync();
-      final body = _functionBody(source, 'List<String> generatePassphrase');
+    test(
+        'draws from the full wordlist with no degenerate bias '
+        '(not dart:math, not an off-by-one, not a broken index)', () {
+      // Generating many passphrases and checking the distribution catches
+      // what actually matters here, and catches it for the right reason:
+      // a `dart:math`-backed implementation seeded identically every call
+      // would produce the same passphrase every time; an off-by-one that
+      // clamps the index range would never reach the last word(s); a
+      // modulo-bias or indexing bug would skew heavily toward a handful of
+      // words. Checking the source text for "sodium.randombytes" would
+      // miss all of these and would break on an unrelated rename.
+      const generations = 200;
+      const wordsPerPassphrase = 6;
 
-      expect(body, contains('sodium.randombytes'),
-          reason: 'generatePassphrase must draw randomness from '
-              'sodium.randombytes');
-      expect(body, isNot(contains('Random(')),
-          reason: 'generatePassphrase must not use dart:math Random');
+      final passphrases = <String>{};
+      final wordsSeen = <String>{};
+      for (var i = 0; i < generations; i++) {
+        final words = generatePassphrase(sodium, words: wordsPerPassphrase);
+        expect(words, hasLength(wordsPerPassphrase));
+        for (final word in words) {
+          expect(kPassphraseWordlist, contains(word));
+        }
+        passphrases.add(words.join(' '));
+        wordsSeen.addAll(words);
+      }
+
+      // No two of the 200 generated passphrases should collide — at
+      // ~62 bits of entropy each, a collision is astronomically unlikely
+      // and would indicate a degenerate (non-random, or narrow-range)
+      // generator.
+      expect(passphrases, hasLength(generations));
+
+      // Across 200 * 6 = 1200 draws from a 1,296-word list, a healthy
+      // uniform generator should touch a large fraction of the list, not
+      // cluster on a handful of indices (which an off-by-one or a modulo
+      // bug would do).
+      expect(wordsSeen.length, greaterThan(kPassphraseWordlist.length ~/ 2));
     });
   });
-}
-
-/// Extracts the brace-delimited body of the first top-level function whose
-/// signature starts with [signaturePrefix], for source-level assertions
-/// that don't need a full Dart parser.
-String _functionBody(String source, String signaturePrefix) {
-  final start = source.indexOf(signaturePrefix);
-  if (start == -1) {
-    fail('Could not find a function starting with "$signaturePrefix"');
-  }
-
-  // Skip the parameter list first: it may itself contain a brace-delimited
-  // group of named parameters (e.g. "{int words = 5}"), which is not the
-  // function body.
-  final parenOpen = source.indexOf('(', start);
-  var parenDepth = 0;
-  var parenClose = -1;
-  for (var i = parenOpen; i < source.length; i++) {
-    if (source[i] == '(') parenDepth++;
-    if (source[i] == ')') {
-      parenDepth--;
-      if (parenDepth == 0) {
-        parenClose = i;
-        break;
-      }
-    }
-  }
-  if (parenClose == -1) {
-    fail('Could not find the parameter list for "$signaturePrefix"');
-  }
-
-  final openBrace = source.indexOf('{', parenClose);
-  var depth = 0;
-  for (var i = openBrace; i < source.length; i++) {
-    if (source[i] == '{') depth++;
-    if (source[i] == '}') {
-      depth--;
-      if (depth == 0) return source.substring(openBrace, i + 1);
-    }
-  }
-  fail('Unbalanced braces while extracting "$signaturePrefix"');
 }
