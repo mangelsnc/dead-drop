@@ -25,14 +25,42 @@ final sodiumProvider = Provider<Sodium>((ref) {
 });
 
 /// Global identity store provider (persistent Ed25519 signing identity).
+///
+/// Scoped to whichever vault environment is currently unlocked
+/// ([VaultState.slot]) so Send always signs with — and the identity card
+/// always displays — the fingerprint belonging to the open environment, not
+/// the real one regardless of what the user unlocked. This is the fix for
+/// the coercion hole: Task 6 made [IdentityStore] scopeable, but nothing
+/// read [vaultControllerProvider] to pick a slot, so the real fingerprint
+/// kept leaking out even with the decoy open.
+///
+/// `ref.watch` (not `ref.read`) on [vaultControllerProvider] is load-bearing:
+/// it makes this provider — and therefore every provider that watches it,
+/// including [sendProvider]/[receiveProvider] and the pages that watch this
+/// one directly — rebuild on every lock/unlock, handing out a *new*
+/// [IdentityStore] instance. A fresh instance matters because `IdentityStore`
+/// caches the loaded identity in a `_cached` field per instance; reusing the
+/// same instance across a slot change would keep serving the previous
+/// environment's cached identity even though the storage key is correct.
+/// When no vault is unlocked, `slot` is null, which reproduces today's
+/// unscoped, unsuffixed-key behaviour exactly — existing installs that never
+/// touch the vault see no change.
 final identityStoreProvider = Provider<IdentityStore>((ref) {
   final sodium = ref.watch(sodiumProvider);
-  return IdentityStore(sodium);
+  final slot = ref.watch(vaultControllerProvider.select((s) => s.slot));
+  return IdentityStore(sodium, environmentSlot: slot);
 });
 
 /// Global TOFU store provider (known sender fingerprints).
+///
+/// Scoped the same way and for the same reason as [identityStoreProvider]:
+/// without this, opening the decoy would show the real environment's known
+/// senders, which is as much a tell to an attacker as the identity leak. See
+/// [identityStoreProvider] for why `ref.watch` and a fresh instance per slot
+/// change both matter.
 final tofuStoreProvider = Provider<TofuStore>((ref) {
-  return TofuStore();
+  final slot = ref.watch(vaultControllerProvider.select((s) => s.slot));
+  return TofuStore(environmentSlot: slot);
 });
 
 Future<void> main() async {
