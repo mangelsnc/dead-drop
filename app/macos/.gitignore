@@ -5,3 +5,23 @@
 # Xcode-related
 **/dgph
 **/xcuserdata/
+
+# Xcode build output and local state. A failed macOS build leaves a lot of
+# this behind, and it is all regenerated — never commit any of it.
+**/DerivedData/
+**/build/
+**/ephemeral/
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+**/*.xcodeproj/project.xcworkspace/xcuserdata/
+**/xcshareddata/WorkspaceSettings.xcsettings
+**/xcshareddata/IDEWorkspaceChecks.plist
+*.xcresult
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+
+# CocoaPods: Podfile and Podfile.lock ARE committed (they pin pod versions);
+# the installed pods and the generated resources are not.
+Podfile.lock.bak
+**/Pods/
