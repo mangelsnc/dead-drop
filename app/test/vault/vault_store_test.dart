@@ -407,6 +407,49 @@ void main() {
         await freshDir.delete(recursive: true);
       }
     });
+
+    test(
+        'init() sweeps orphaned .tmp- files left by an interrupted write, '
+        'so a crashed vault is indistinguishable from one that never '
+        'crashed', () async {
+      // A vault that completed normally: put one entry, never crashed.
+      final cleanDir =
+          await Directory.systemTemp.createTemp('vault_store_clean_');
+      final cleanStore = VaultStore(cleanDir, sodium);
+      await cleanStore.init();
+      final dataKey = newDataKey(sodium);
+      await cleanStore.put(dataKey, 0, 'a.txt', Uint8List.fromList([1]));
+
+      // A vault that crashed mid-write: same entry, plus an orphaned temp
+      // file left behind as if _writeAtomic's rename never happened.
+      final crashedDir =
+          await Directory.systemTemp.createTemp('vault_store_crashed_');
+      final crashedStore = VaultStore(crashedDir, sodium);
+      await crashedStore.init();
+      await crashedStore.put(dataKey, 0, 'a.txt', Uint8List.fromList([1]));
+      final orphan = File(
+          '${crashedDir.path}/entries/deadbeefdeadbeefdeadbeef.tmp-leftover');
+      await orphan.writeAsBytes(Uint8List.fromList([9, 9, 9]), flush: true);
+      expect(await orphan.exists(), isTrue);
+
+      try {
+        // Re-running init() (as the vault would on next launch) must sweep
+        // the orphan away.
+        await crashedStore.init();
+        expect(await orphan.exists(), isFalse);
+
+        // And now the two vaults must have the same *shape* — same
+        // directories, same file count per directory, same slot file sizes
+        // — so a crash leaves no permanent, visible trace. Exact entry
+        // filenames are random per store and deliberately not compared.
+        final cleanShape = await _directoryShape(cleanDir);
+        final crashedShape = await _directoryShape(crashedDir);
+        expect(crashedShape, equals(cleanShape));
+      } finally {
+        await cleanDir.delete(recursive: true);
+        await crashedDir.delete(recursive: true);
+      }
+    });
   });
 
   group('WrappedKey corruption via disk', () {
@@ -453,4 +496,25 @@ Future<List<String>> _relativePaths(Directory dir) async {
   }
   out.sort();
   return out;
+}
+
+/// Summarises [dir]'s shape without depending on entry filenames (which are
+/// random per store and therefore never comparable across two independent
+/// stores): for each immediate subdirectory, the file count and the sorted
+/// list of file sizes found in it. Two stores with the same shape are
+/// indistinguishable to an observer who can see the filesystem but not
+/// decrypt anything in it.
+Future<Map<String, List<int>>> _directoryShape(Directory dir) async {
+  final shape = <String, List<int>>{};
+  await for (final entity in dir.list(followLinks: false)) {
+    if (entity is! Directory) continue;
+    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final sizes = <int>[];
+    await for (final file in entity.list(followLinks: false)) {
+      if (file is File) sizes.add(await file.length());
+    }
+    sizes.sort();
+    shape[name] = sizes;
+  }
+  return shape;
 }

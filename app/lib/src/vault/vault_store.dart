@@ -163,6 +163,19 @@ class VaultStore {
   ///
   /// Safe to call on an existing store: does not touch files that already
   /// exist.
+  ///
+  /// Also sweeps any orphaned `.tmp-*` files left behind by a write that
+  /// crashed between [_writeAtomic]'s temp-file write and its rename. Those
+  /// orphans are harmless to confidentiality on their own — a stray temp
+  /// file carries no plaintext and (being slot-agnostic, see
+  /// [_writeAtomic]) says nothing about which environment was mid-write —
+  /// but the vault's guarantee is about what the filesystem *shows*, not
+  /// only about what decrypts: a `.tmp-` file sitting in `entries/` is a
+  /// permanent, visible mark that some write was once interrupted, making a
+  /// vault that has crashed mid-write distinguishable from one that never
+  /// has. Swept here rather than in [list] or [get] — on every read would
+  /// be wasted work for a condition [init] already clears once per process
+  /// lifetime (or app launch), and widens the surface for no benefit.
   Future<void> init() async {
     await _slotsDir.create(recursive: true);
     await _entriesDir.create(recursive: true);
@@ -171,6 +184,27 @@ class VaultStore {
       final file = _slotFile(i);
       if (!await file.exists()) {
         await _writeAtomic(file, _emptySlotFiller());
+      }
+    }
+
+    await _sweepOrphanedTempFiles();
+  }
+
+  /// Deletes any leftover `.tmp-*` files under [_slotsDir] and
+  /// [_entriesDir] — see [init]'s doc comment for why this matters beyond
+  /// tidiness.
+  Future<void> _sweepOrphanedTempFiles() async {
+    for (final dir in [_slotsDir, _entriesDir]) {
+      if (!await dir.exists()) continue;
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        if (!entity.uri.pathSegments.last.contains('.tmp-')) continue;
+        try {
+          await entity.delete();
+        } on FileSystemException {
+          // Already gone (e.g. a concurrent init()) — fine, the end state
+          // ("no orphaned temp file") is what we wanted.
+        }
       }
     }
   }
