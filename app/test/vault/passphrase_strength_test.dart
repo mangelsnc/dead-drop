@@ -136,6 +136,40 @@ void main() {
       expect(estimateStrength('aaaaaaaaaaaa').meetsMinimum, isFalse);
     });
 
+    test('rejects an ascending alphabet walk', () {
+      expect(
+          estimateStrength('abcdefghijklmnopqrstuvwxyz').meetsMinimum, isFalse);
+    });
+
+    test('rejects a descending alphabet walk', () {
+      expect(
+          estimateStrength('zyxwvutsrqponmlkjihgfedcba').meetsMinimum, isFalse);
+    });
+
+    test('rejects unbroken-lowercase sentence passphrases', () {
+      // Regression test for a critical defect: _tokenize only splits on
+      // character-class changes, so a passphrase typed as one continuous
+      // lowercase run (no spaces, digits or punctuation) used to be a
+      // single token that matched neither _commonWeakWords nor
+      // kPassphraseWordlist as a *whole string*, and fell through to the
+      // per-character branch — scoring "thisismypassword" as if it were
+      // random text, at ~4.7 bits/char. This is the `Password1!` lesson
+      // one level up, and it matters more: "use a long sentence" is advice
+      // people actually follow. _scoreLetterRun's greedy word segmenter is
+      // what's supposed to catch these now.
+      for (final weak in [
+        'thisismypassword',
+        'iloveyouforever',
+        'myvaultismine',
+        'nooneisabovethelaw',
+        'freedomofthepress',
+      ]) {
+        final result = estimateStrength(weak);
+        expect(result.meetsMinimum, isFalse,
+            reason: '$weak (~${result.entropyBits} bits)');
+      }
+    });
+
     test('accepts a long, unpredictable random string', () {
       // 24 chars drawn from a mixed charset is far above the floor even
       // under this estimator's conservative per-character accounting.
@@ -199,12 +233,27 @@ void main() {
     });
 
     test(
-        'a generated six-word passphrase (the default) meets the minimum '
-        'entropy', () {
-      final words = generatePassphrase(sodium, words: 6);
-      final result = estimateStrength(words.join(' '));
-      expect(result.meetsMinimum, isTrue,
-          reason: '${words.join(' ')} (~${result.entropyBits} bits)');
+        'every generated six-word passphrase meets the minimum entropy, '
+        'regardless of which words are drawn', () {
+      // Regression coverage for a real near-miss during review: a word
+      // that happens to be both in kPassphraseWordlist (generation) and
+      // kCommonWordsForDetection (a broad, everyday-word list used to
+      // catch dictionary words typed as part of a sentence) must still be
+      // charged the full EFF-list rate when scoring a generated
+      // passphrase — about a quarter of the bundled EFF words are also
+      // ordinary English words, so if even one word in a 6-word
+      // passphrase were charged the cheaper "common word" rate instead,
+      // entropy could fall under the 60-bit floor the estimator itself
+      // enforces. Generating a large sample and checking every one (not
+      // just a single lucky/unlucky draw) is what actually exercises
+      // that: a single-sample test could pass or fail depending on which
+      // words happened to come out.
+      for (var i = 0; i < 100; i++) {
+        final words = generatePassphrase(sodium, words: 6);
+        final result = estimateStrength(words.join(' '));
+        expect(result.meetsMinimum, isTrue,
+            reason: '${words.join(' ')} (~${result.entropyBits} bits)');
+      }
     });
 
     test('a generated six-word passphrase clears the minimum with margin', () {

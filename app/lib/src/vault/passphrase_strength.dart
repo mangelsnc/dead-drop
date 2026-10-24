@@ -11,10 +11,13 @@
 ///    see it — not how many composition rules it satisfies. `Password1!`
 ///    satisfies every "uppercase + digit + symbol + 10 chars" rule and is
 ///    still one of the first passphrases a real attacker tries; a naive
-///    composition check would accept it. We instead charge reduced entropy
-///    for dictionary words, keyboard runs, character repeats and
-///    digit/symbol suffixes — the shapes real humans and real crackers both
-///    gravitate to.
+///    composition check would accept it. Likewise, a passphrase typed as a
+///    plain sentence ("freedomofthepress") has no composition at all to
+///    flag but is just as predictable. We instead charge reduced entropy
+///    for dictionary words — found anywhere inside an unbroken run of
+///    letters, not just when the whole token is one known word — keyboard
+///    and alphabet runs, character repeats, and digit/symbol suffixes: the
+///    shapes real humans and real crackers both gravitate to.
 /// 2. [generatePassphrase] generates a passphrase the estimator can score
 ///    honestly: words drawn uniformly at random (via libsodium's CSPRNG,
 ///    never `dart:math`) from [kPassphraseWordlist], Diceware-style.
@@ -100,6 +103,11 @@ const double _maxSuffixBits = 6;
 /// Common keyboard-adjacency runs, lower-cased. Checked as substrings so
 /// "qwertyuiop", "asdfgh" style passphrases are caught regardless of exact
 /// length typed.
+///
+/// Plain alphabet walks ("abcdef...", "...zyxwv") are *not* listed here —
+/// they are checked separately in [_containsAlphabetRun] because they can
+/// start at any letter and run any length, which a fixed substring list
+/// cannot express.
 const List<String> _keyboardRuns = [
   'qwertyuiop',
   'qwerty',
@@ -123,19 +131,40 @@ const List<String> _keyboardRuns = [
   '54321',
 ];
 
-/// A short list of extremely common passphrases/words that are weak even
-/// though they are not in [kPassphraseWordlist] (that list favours longer,
-/// less common words so it yields good *generation* entropy) and that are
-/// not caught by [_keyboardRuns] or digit-only detection. Pulled in
-/// specifically because the task's weak examples include "deaddrop" (the
-/// product's own name — the single most predictable word a user of this
-/// app could choose) and common password-manager-rejected choices.
+/// Shortest run length that counts as an alphabet walk (e.g. "abcd" or
+/// "zyxw"). Below this, short ascending/descending runs ("ab", "xy") are
+/// common enough inside genuine words that flagging them would be noisy
+/// without meaningfully helping an attacker.
+const int _minAlphabetRunLength = 4;
+
+/// The lowest entropy a run of [_minAlphabetRunLength] consecutive
+/// unmatched letters can have before we additionally check whether it's an
+/// alphabet walk — see [_scoreToken].
+const double _alphabetRunBits = 4;
+
+/// A short list of extremely common whole passphrases/words that are weak
+/// even though they are not in [kPassphraseWordlist] (that list favours
+/// longer, less common words so it yields good *generation* entropy) and
+/// are not general-purpose enough to belong in
+/// [kCommonWordsForDetection]. Pulled in specifically because the task's
+/// weak examples include "deaddrop" — the product's own name, the single
+/// most predictable word a user of this app could choose — plus a handful
+/// of the passwords every leaked-password-list study puts at the top.
+///
+/// Fragments that only existed to patch around the old "whole token only"
+/// matching ("dead", "drop", "casa", "micasa") were removed: "dead"/"drop"
+/// were never real passphrase-strength signals on their own (they existed
+/// only to catch half of "deaddrop", which whole-token matching — and now
+/// segmentation too — catches directly against "deaddrop" itself), and
+/// "casa"/"micasa" were a Spanish-specific patch for one example
+/// (`MiCasa2024`) that is still rejected without them: `_tokenize` splits
+/// it into "Mi", "Casa", "2024", and both letter chunks already score low
+/// enough on plain per-character entropy (neither is in any bundled
+/// English-word list) that the digit suffix cap can't rescue it.
 const List<String> _commonWeakWords = [
   'password',
   'passphrase',
   'deaddrop',
-  'dead',
-  'drop',
   'letmein',
   'admin',
   'welcome',
@@ -144,9 +173,39 @@ const List<String> _commonWeakWords = [
   'master',
   'login',
   'qwerty',
-  'casa',
-  'micasa',
 ];
+
+/// [kPassphraseWordlist] as a [Set], for O(1) "could this word have come
+/// from generatePassphrase?" checks during segmentation (see
+/// [_scoreLetterRun]) instead of the O(n) scan a [List] would need.
+final Set<String> _eflWordlistSet = kPassphraseWordlist.toSet();
+
+/// Combined dictionary used by [_scoreLetterRun] to recognise words
+/// *inside* an unbroken run of letters, not just a whole token. Built once
+/// from all three word sources: the small generation-oriented
+/// [kPassphraseWordlist], the broad detection-oriented
+/// [kCommonWordsForDetection], and the hand-picked [_commonWeakWords]. A
+/// [Set] so membership checks (performed for every substring tried during
+/// segmentation) are O(1).
+final Set<String> _segmentationDictionary = {
+  ..._eflWordlistSet,
+  ...kCommonWordsForDetection,
+  ..._commonWeakWords,
+};
+
+/// Longest word length worth trying during segmentation, derived from the
+/// dictionary itself so this never silently misses a longer bundled word.
+final int _maxDictionaryWordLength = _segmentationDictionary.isEmpty
+    ? 0
+    : _segmentationDictionary.map((w) => w.length).reduce(math.max);
+
+/// Shortest word length [_scoreLetterRun]'s segmenter will match. Two-letter
+/// "words" in a frequency-ranked word list are overwhelmingly noise
+/// (abbreviations, scanning artefacts) rather than genuine low-entropy
+/// picks, and matching them would let a segmenter claim credit for
+/// essentially nothing (e.g. treating "ab" as a recognised word inside an
+/// alphabet walk).
+const int _minSegmentWordLength = 3;
 
 /// Estimates how many bits of entropy [passphrase] actually has against a
 /// realistic attacker, and whether that meets [kMinimumEntropyBits].
@@ -173,24 +232,24 @@ StrengthResult estimateStrength(String passphrase) {
 
   final tokens = _tokenize(passphrase);
 
-  // Multiple repeated instances of the exact same token (e.g. "abcabc",
-  // "haha") should not each earn full credit — a cracker who guesses the
-  // repeated unit tries the whole string in one guess. Score each distinct
-  // token (case-insensitively) exactly once.
-  final seen = <String>{};
+  // Every token is scored independently, including tokens that repeat
+  // elsewhere in the passphrase (e.g. the same word chosen twice by
+  // generatePassphrase, or "ab" appearing twice in "ababab"). This is
+  // deliberate: a dictionary word or a random chunk at one position is an
+  // independent draw from an attacker's perspective, and knowing position
+  // N is "growl" tells a cracker nothing about position M — so each
+  // occurrence still costs its own search. (An earlier version of this
+  // function deduplicated repeated tokens to avoid over-crediting
+  // genuinely structural repeats like "aaaa"; those are already caught
+  // separately by the repeated-character check in [_scoreToken], so the
+  // extra token-level dedup was removed after it was found to
+  // under-credit generatePassphrase output whenever the CSPRNG happened
+  // to draw the same word twice.)
   double entropy = 0;
   final notes = <String>[];
-  var hadDuplicateToken = false;
 
   for (final token in tokens) {
-    if (!seen.add(token.toLowerCase())) {
-      hadDuplicateToken = true;
-      continue;
-    }
     entropy += _scoreToken(token, notes);
-  }
-  if (hadDuplicateToken) {
-    notes.add('repeated segments contribute only once');
   }
 
   final meetsMinimum = entropy >= kMinimumEntropyBits;
@@ -260,6 +319,21 @@ double _scoreToken(String token, List<String> notes) {
   // check runs first.
   final isDigits = RegExp(r'^[0-9]+$').hasMatch(token);
   final isSymbols = RegExp(r'^[^a-zA-Z0-9]+$').hasMatch(token);
+  final isLetters = RegExp(r'^[a-zA-Z]+$').hasMatch(token);
+
+  if (token.trim().isEmpty) {
+    // Whitespace-only token (the separator between words in e.g. a
+    // generatePassphrase passphrase, or any human-typed "word word word"
+    // passphrase). A space between words is a free, expected structural
+    // choice, not a secret an attacker has to guess — a dictionary/Diceware
+    // cracker already assumes words are space-separated. Charging it as
+    // generic symbol entropy would inflate every multi-word passphrase's
+    // score by a few bits per gap for no real security reason, which
+    // matters here: it previously masked a real accounting bug (see the
+    // five-word regression test) by adding unearned entropy on top of the
+    // genuine per-word cost.
+    return 0;
+  }
 
   for (final run in _keyboardRuns) {
     if (lower.contains(run)) {
@@ -268,24 +342,28 @@ double _scoreToken(String token, List<String> notes) {
     }
   }
 
+  if (isLetters && _containsAlphabetRun(lower)) {
+    notes.add('"$token" contains an alphabet sequence');
+    return _alphabetRunBits;
+  }
+
   if (RegExp(r'^(.)\1*$').hasMatch(token) && token.length > 1) {
     notes.add('"$token" is a repeated character');
     return _repeatBits;
   }
 
-  if (_commonWeakWords.contains(lower)) {
-    notes.add('"$token" is a common weak word');
-    return _dictionaryWordBits;
-  }
-
-  if (kPassphraseWordlist.contains(lower)) {
-    // A word drawn from the bundled EFF short wordlist (e.g. via
-    // generatePassphrase) is a genuinely different case from "password" or
-    // "dragon": an attacker who assumes this wordlist still has to search
-    // all of it, so the honest cost is log2(wordlist length) — not the
-    // tiny flat charge given to the handful of words everyone tries first.
-    notes.add('"$token" is a dictionary word');
-    return _log2(kPassphraseWordlist.length.toDouble());
+  if (isLetters) {
+    // Letters-only: segment the whole run against the combined dictionary
+    // instead of only checking whether the *entire* token is one known
+    // word. Typed as one continuous run (no punctuation/case/digit
+    // boundaries for _tokenize to split on), a phrase like
+    // "thisismypassword" or "freedomofthepress" is a single token here —
+    // without segmentation it would fall straight through to the
+    // per-character branch below and be scored as if it were random,
+    // which is exactly the `Password1!` mistake one level up: a passphrase
+    // built entirely from predictable dictionary words must not score as
+    // high as truly random text of the same length.
+    return _scoreLetterRun(token, notes);
   }
 
   if (isDigits || isSymbols) {
@@ -300,9 +378,95 @@ double _scoreToken(String token, List<String> notes) {
     return capped;
   }
 
-  // Not recognised as a word, run, or repeat: treat as an unpredictable
-  // string and charge per-character entropy based on the character classes
-  // actually used (a conservative stand-in for a full Markov/zxcvbn model).
+  // Mixed token (e.g. letters + digits with no boundary _tokenize caught,
+  // which shouldn't normally happen but is handled defensively): treat as
+  // unpredictable and charge per-character entropy based on the character
+  // classes actually used.
+  return _perCharacterBits(token) * token.length;
+}
+
+/// Scores a letters-only [token] by greedily segmenting it into known
+/// dictionary words (longest match first) and charging the unmatched
+/// leftover characters at plain per-character entropy.
+///
+/// Matches against [_segmentationDictionary] win over nothing at all: a
+/// matched word is charged log2([kPassphraseWordlist] length) whenever the
+/// matched substring is actually *in* [kPassphraseWordlist] — i.e.
+/// whenever it's a word [generatePassphrase] could have produced — and
+/// [_dictionaryWordBits] (a cheaper flat charge) otherwise, while every
+/// character that cannot be attributed to a known word keeps its full
+/// per-character cost.
+///
+/// The "is it in kPassphraseWordlist" check, not "is it common", is what
+/// has to decide the rate. About a quarter of the EFF list's words are
+/// also everyday English words ("drive", "same", "rock", ...), so charging
+/// the cheaper common-word rate whenever a word happens to be common would
+/// make a generated passphrase's entropy depend on which words the CSPRNG
+/// happened to pick — and with 6 words at ~10.34 bits each and only ~2
+/// bits of margin over [kMinimumEntropyBits], even a single word getting
+/// the cheaper ~8-bit rate could push a genuinely-random 6-word passphrase
+/// below the floor generatePassphrase is supposed to guarantee. Keying the
+/// rate on wordlist membership instead means every [kPassphraseWordlist]
+/// word always costs the same, regardless of whether a human or the
+/// CSPRNG chose it, so generatePassphrase's output is never penalised —
+/// while a sentence built from ordinary words that never cross into
+/// [kPassphraseWordlist] (e.g. "the", "one", "above", "law") still gets
+/// the cheap rate that reflects how early a real cracker tries them.
+///
+/// A passphrase that is entirely recognised words (any mix of the
+/// dictionaries) is charged only for those words, however long it is; a
+/// passphrase with no recognisable words falls back to exactly the
+/// per-character scoring a letters-only token without this segmentation
+/// step would have received.
+double _scoreLetterRun(String token, List<String> notes) {
+  final lower = token.toLowerCase();
+  final n = lower.length;
+  var i = 0;
+  var bits = 0.0;
+  var unmatchedChars = 0;
+  var matchedWords = 0;
+  final eflWordBits = _log2(kPassphraseWordlist.length.toDouble());
+
+  while (i < n) {
+    String? match;
+    final maxLen = math.min(_maxDictionaryWordLength, n - i);
+    for (var len = maxLen; len >= _minSegmentWordLength; len--) {
+      final candidate = lower.substring(i, i + len);
+      if (_segmentationDictionary.contains(candidate)) {
+        match = candidate;
+        break;
+      }
+    }
+
+    if (match != null) {
+      matchedWords++;
+      bits +=
+          _eflWordlistSet.contains(match) ? eflWordBits : _dictionaryWordBits;
+      i += match.length;
+    } else {
+      unmatchedChars++;
+      i++;
+    }
+  }
+
+  if (unmatchedChars > 0) {
+    bits += unmatchedChars * _perCharacterBits(token);
+  }
+
+  if (matchedWords > 0) {
+    notes.add(matchedWords == 1
+        ? '"$token" contains a dictionary word'
+        : '"$token" is made of $matchedWords dictionary words');
+  }
+
+  return bits;
+}
+
+/// Per-character entropy for [token], based on which character classes it
+/// actually uses (upper/lower letters, digits, symbols) — a conservative
+/// stand-in for a full Markov/zxcvbn model, used for whatever text isn't
+/// attributable to a recognised word, run, or pattern.
+double _perCharacterBits(String token) {
   final hasLower = RegExp(r'[a-z]').hasMatch(token);
   final hasUpper = RegExp(r'[A-Z]').hasMatch(token);
   final hasDigit = RegExp(r'[0-9]').hasMatch(token);
@@ -315,8 +479,27 @@ double _scoreToken(String token, List<String> notes) {
   if (hasSymbol) charsetSize += 33;
   if (charsetSize == 0) charsetSize = 1;
 
-  final perCharBits = _log2(charsetSize.toDouble());
-  return token.length * perCharBits;
+  return _log2(charsetSize.toDouble());
+}
+
+/// Whether lower-cased [lower] contains an ascending or descending run of
+/// [_minAlphabetRunLength] or more consecutive alphabet letters (e.g.
+/// "abcd", "zyxw") anywhere inside it. Unlike [_keyboardRuns] (a fixed
+/// list of substrings), an alphabet walk can start at any letter, so it
+/// needs an actual scan rather than a substring check.
+bool _containsAlphabetRun(String lower) {
+  var ascRun = 1;
+  var descRun = 1;
+  for (var i = 1; i < lower.length; i++) {
+    final prev = lower.codeUnitAt(i - 1);
+    final curr = lower.codeUnitAt(i);
+    ascRun = (curr == prev + 1) ? ascRun + 1 : 1;
+    descRun = (curr == prev - 1) ? descRun + 1 : 1;
+    if (ascRun >= _minAlphabetRunLength || descRun >= _minAlphabetRunLength) {
+      return true;
+    }
+  }
+  return false;
 }
 
 double _log2(double x) => x <= 0 ? 0 : math.log(x) / math.ln2;
