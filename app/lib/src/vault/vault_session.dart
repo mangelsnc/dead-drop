@@ -66,6 +66,20 @@ typedef UnwrapDataKey = Uint8List? Function(
 /// `secretBox.openEasy` has a well-formed buffer to reject; being random,
 /// it never authenticates, so the failure it produces is indistinguishable
 /// from a wrong passphrase on a real slot.
+///
+/// Cached lazily (process-global) rather than regenerated on every call: the
+/// one-time `randombytes.buf` cost of building it is microseconds against
+/// Argon2id's tens of milliseconds, and — unlike the derivation count this
+/// file exists to equalise — that one-time cost correlates only with
+/// "is this the process's first unlock touching an empty slot", never with
+/// passphrase correctness or which environment is real, so it leaks nothing
+/// an attacker can use. Caching also means the dummy is stable for the
+/// lifetime of the process, which is convenient but incidental.
+///
+/// Being mutable top-level state, it is also shared across every test in
+/// this isolate. No current test inspects the dummy's bytes (only
+/// derivation counts), so that is harmless today; a future test that does
+/// would need a way to reset it between cases.
 WrappedKey? _dummySlot;
 
 WrappedKey _dummySlotFor(SodiumSumo sodium) {
