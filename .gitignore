@@ -23,6 +23,25 @@ spike/out_frames/
 build/
 *.iml
 
+# ---------------------------------------------------------------------------
+# Firebase / Google services credentials — NEVER commit
+# ---------------------------------------------------------------------------
+# These files identify the Firebase project and carry its API keys. They are
+# supplied to CI from secrets and written at build time; a copy committed here
+# would stay in the git history of a public repository for good.
+#
+# app/.gitignore already ignores both at the two paths the build actually uses.
+# These are the repo-wide net: they catch a copy dropped anywhere else, which
+# is the case the path-specific rules miss.
+#
+# The Firebase integration is itself temporary — it exists only to distribute
+# test builds and is to be removed before submission, since the challenge
+# requires the app to make no network calls. Until then these rules stand.
+google-services.json
+GoogleService-Info.plist
+**/google-services.json
+**/GoogleService-Info.plist
+
 # Local Docker image stamps (see Makefile)
 .make/
 
