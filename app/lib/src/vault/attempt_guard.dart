@@ -86,10 +86,21 @@ const FlutterSecureStorage _defaultStorage = FlutterSecureStorage(
 class AttemptGuard {
   /// [storage] is injectable so tests can supply an in-memory backend;
   /// production uses the platform keychain.
-  AttemptGuard({FlutterSecureStorage? storage})
-      : _storage = storage ?? _defaultStorage;
+  ///
+  /// [penaltyStep] exists so a test that must cross [kSelfDestructThreshold]
+  /// can do so without serving the real delays — eleven attempts at the
+  /// production curve is nearly four minutes of genuine waiting. Overriding
+  /// it changes only how long the caller waits, never whether self-destruct
+  /// fires, so a test that sets it to zero still exercises the real
+  /// counting and wipe logic.
+  AttemptGuard({
+    FlutterSecureStorage? storage,
+    Duration? penaltyStep,
+  })  : _storage = storage ?? _defaultStorage,
+        _penaltyStep = penaltyStep ?? kPenaltyStep;
 
   final FlutterSecureStorage _storage;
+  final Duration _penaltyStep;
 
   /// How long the caller must wait before the next attempt is allowed.
   ///
@@ -100,7 +111,7 @@ class AttemptGuard {
     if (failures < kFreeAttempts) return Duration.zero;
 
     final steps = failures - kFreeAttempts + 1;
-    final penalty = kPenaltyStep * steps;
+    final penalty = _penaltyStep * steps;
     return penalty > kMaxPenalty ? kMaxPenalty : penalty;
   }
 

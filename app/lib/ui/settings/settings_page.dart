@@ -22,17 +22,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../theme.dart';
+import '../../src/vault/attempt_guard.dart';
 import '../vault/vault_controller.dart';
 import '../vault/vault_setup_page.dart';
-
-/// Storage key for the self-destruct preference. Written whether on or off
-/// (see [_SelfDestructTile]) so the key's mere presence is not itself an
-/// artefact revealing the vault has ever been configured — the same
-/// anti-artefact discipline [VaultStore] and the Task 8b attempt counter
-/// follow. Global, not scoped to a slot: self-destruct, like the attempt
-/// counter it will drive in Task 8b, must not be per-environment, or its
-/// state would reveal which environment was targeted.
-const _kSelfDestructStorageKey = 'deaddrop_self_destruct_enabled';
 
 const _secureStorage = FlutterSecureStorage(
   lOptions: LinuxOptions(),
@@ -151,7 +143,7 @@ class _SelfDestructTileState extends State<_SelfDestructTile> {
   }
 
   Future<void> _load() async {
-    final stored = await _secureStorage.read(key: _kSelfDestructStorageKey);
+    final stored = await _secureStorage.read(key: kSelfDestructStorageKey);
     if (!mounted) return;
     setState(() {
       _enabled = stored == 'true';
@@ -161,9 +153,9 @@ class _SelfDestructTileState extends State<_SelfDestructTile> {
 
   Future<void> _set(bool value) async {
     setState(() => _enabled = value);
-    // Always write, on or off — see _kSelfDestructStorageKey's doc comment.
+    // Always write, on or off — see kSelfDestructStorageKey's doc comment.
     await _secureStorage.write(
-      key: _kSelfDestructStorageKey,
+      key: kSelfDestructStorageKey,
       value: value ? 'true' : 'false',
     );
   }

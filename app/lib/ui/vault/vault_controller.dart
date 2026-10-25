@@ -106,6 +106,35 @@ class VaultController extends StateNotifier<VaultState>
   final VaultStore? _store;
   final AttemptGuard _attemptGuard;
 
+  /// An in-flight self-destruct, or null. Held so a later [unlock] can wait
+  /// for it rather than reading half-destroyed slots, and so tests can await
+  /// it deterministically.
+  Future<void>? _wipe;
+
+  /// Whether a self-destruct is still running. Tests await [_wipe] through
+  /// [debugWipe]; production code never needs this.
+  @visibleForTesting
+  Future<void>? get debugWipe => _wipe;
+
+  /// Destroys every slot. A surviving decoy would prove there had been
+  /// something to erase, so this never destroys just the slot under attack.
+  Future<void> _destroyEverySlot(VaultStore store) async {
+    for (var slot = 0; slot < kVaultEnvironmentSlots; slot++) {
+      try {
+        await store.destroySlot(slot);
+      } catch (_) {
+        // Keep going. Destroying the remaining slots matters more than
+        // reporting a failure on one: a surviving decoy is exactly what
+        // this is meant to prevent, and there is nobody to report to —
+        // the caller returned before this started, by design.
+        //
+        // A slot that survives because the process died mid-wipe is a real
+        // residual risk, documented in docs/security.md rather than papered
+        // over: self-destruct discards keys, it does not guarantee erasure.
+      }
+    }
+  }
+
   /// The data key for the currently-open environment. Cleared by [lock] —
   /// this is the one piece of key material this controller is responsible
   /// for zeroing out of reach the moment the environment should no longer
@@ -155,6 +184,12 @@ class VaultController extends StateNotifier<VaultState>
     // an attacker with a stopwatch that the app recognised the failure.
     // Waiting first leaks nothing: the wait is identical whatever is about
     // to be typed, and identical whether or not a second environment exists.
+    // A self-destruct started by an earlier attempt runs in the background
+    // so it cannot be timed (see below). Wait for it here: reading slots
+    // mid-wipe could see one destroyed and one not.
+    final wipe = _wipe;
+    if (wipe != null) await wipe;
+
     final penalty = await _attemptGuard.penaltyBeforeNextAttempt();
     if (penalty > Duration.zero) {
       await Future<void>.delayed(penalty);
@@ -165,11 +200,18 @@ class VaultController extends StateNotifier<VaultState>
     if (!result.ok) {
       final shouldSelfDestruct = await _attemptGuard.recordFailure();
       if (shouldSelfDestruct) {
-        // Every slot, not just the one being guessed at: a surviving decoy
-        // would prove there had been something to erase.
-        for (var slot = 0; slot < kVaultEnvironmentSlots; slot++) {
-          await store.destroySlot(slot);
-        }
+        // Started, deliberately NOT awaited. Destroying the slots is several
+        // atomic file writes; awaiting them here would make the attempt that
+        // triggers the wipe measurably slower than an ordinary wrong
+        // passphrase, and an attacker with a stopwatch would know which
+        // attempt was the wipe. Both failure paths must cost the same from
+        // the caller's side, so this one returns on the same work as the
+        // other — one storage write — and the wipe completes behind it.
+        //
+        // _wipe is retained so a later unlock awaits it before reading the
+        // slots (see the top of this method); the wipe always completes,
+        // and it cannot race a subsequent attempt.
+        _wipe = _destroyEverySlot(store);
         _dataKey = null;
         state = state.copyWith(
           unlocked: false,
@@ -288,6 +330,35 @@ class VaultController extends StateNotifier<VaultState>
     final dataKey = newDataKey(sodium);
     final wrapped = wrapDataKey(sodium, passphrase, dataKey);
     await store.writeSlots([slots[0], wrapped]);
+  }
+
+  /// Seals [bytes] under [name] into the currently-open environment.
+  ///
+  /// This is the only way callers outside this file ever get bytes into the
+  /// vault — [VaultStore.put] needs the raw data key, which this controller
+  /// deliberately never exposes on [VaultState] (see [_dataKey]'s doc
+  /// comment). Keeping the put here, rather than handing the key to the
+  /// caller, means the receive flow (and any future caller) never has to
+  /// hold the key itself even transiently.
+  ///
+  /// Returns null if the vault is locked — callers (e.g. the receive page)
+  /// are expected to get it unlocked first and not call this otherwise; this
+  /// does not attempt to unlock on the caller's behalf, since that would
+  /// require a passphrase this method has no way to ask for.
+  ///
+  /// Refreshes [VaultState.entries] on success so a caller that navigates to
+  /// the vault screen afterwards sees the new entry without a separate list
+  /// round-trip.
+  Future<VaultEntry?> saveFile(String name, Uint8List bytes) async {
+    final store = _store;
+    final dataKey = _dataKey;
+    final slot = state.slot;
+    if (store == null || dataKey == null || slot == null) return null;
+
+    final entry = await store.put(dataKey, slot, name, bytes);
+    final entries = await store.list(dataKey, slot);
+    state = state.copyWith(entries: entries);
+    return entry;
   }
 
   @override

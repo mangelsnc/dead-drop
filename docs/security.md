@@ -7,7 +7,7 @@ This document explains **what DeadDrop protects, against whom, and what it does 
 
 Honesty about limits is as important as the guarantees. A privacy tool that promises the impossible is a dangerous tool.
 
-> ⚠️ **Implementation status (2026-10-21):** DeadDrop is in active development. **Transfer encryption is implemented and working. The decoy PIN, at-rest encryption and self-destruct are NOT implemented yet** — they are marked 📋 *Planned* wherever they appear below. Do not rely on any planned feature for your safety.
+> ⚠️ **Implementation status (2026-10-25):** DeadDrop is in active development. **Transfer encryption, the vault (at-rest encryption), the decoy environment and self-destruct are now implemented.** Self-destruct is **off by default** — it does nothing unless you turn it on yourself in Settings. This work has been exercised only by the automated test suite, on desktop hardware; it has **not been tested on a real phone or tablet**. Read the limits in this document — especially the passphrase and self-destruct sections — before relying on any of it, and particularly before a border crossing or any situation where you might be searched.
 
 ---
 
@@ -23,11 +23,13 @@ When you pass a file with DeadDrop, the content travels protected end to end: it
 
 DeadDrop does not use the internet, WiFi, Bluetooth or cables. The file travels through light: from the screen to the camera. That means **there is no metadata on any server**: no company and no network observer can know that the transfer happened, who took part, or when. It is not that the trail is hidden — it is that it does not exist.
 
-### 3. Your device during a forced search 📋 Planned — no protection today
+### 3. Your device during a forced search ✅ Implemented (vault is optional; not tested on real devices)
 
-> ⚠️ **Not yet implemented.** The **decoy PIN** and **self-destruct** described here are planned features. **Today the app has no PIN at all**: whoever opens it sees everything in it, and received files are stored as ordinary files, protected only by your operating system (user account, disk encryption such as FileVault/BitLocker/LUKS if enabled).
+DeadDrop has a **vault**: a passphrase-protected place to store received files, separate from your device's ordinary file storage. Files you choose to save into the vault are encrypted at rest. You can also set up a **decoy passphrase**: a second, independent environment inside the same vault, protected by a different passphrase. Opening the app and entering the real passphrase shows your real files; entering the decoy passphrase shows only whatever you have put in the decoy. Nothing about the app's behaviour, timing, or interface reveals that a decoy exists, or that you have one, to someone who only has the decoy passphrase.
 
-When implemented, with the **decoy PIN** configured, if you are forced to open the app you will be able to show fake, credible content while your real files remain invisible. And with **self-destruct** enabled, several failed PIN attempts will irreversibly erase the protected content.
+**You must set this up before you need it.** The vault is a feature you opt into, not something that protects you automatically: a file saved to your device outside the vault (e.g. through your OS file picker rather than "save to vault") is not protected by any of this. A decoy you never populated with credible content is not convincing — the app does not generate decoy content for you; you have to put your own files into it.
+
+**Self-destruct is available and off by default.** If you turn it on in Settings, 10 consecutive failed passphrase attempts will discard the keys protecting both the real and the decoy environment, making their contents permanently unrecoverable. Turning it on is a real trade-off — read "Self-destruct: what it actually does" in the technical section below before enabling it; in particular, it can be triggered deliberately by an attacker who simply keeps guessing, and it does not erase the files themselves, only the keys.
 
 ### 4. File integrity ✅ Implemented
 
@@ -37,25 +39,38 @@ DeadDrop verifies that what arrives is exactly what was sent. If even a single b
 
 This is just as important. DeadDrop does **not** protect you from:
 
-- **An already-compromised device.** If your computer has a virus or malware installed (a trojan, a keylogger), that malware can read your files before you send them or after you receive them. DeadDrop protects the channel; it does not cure a sick device.
+- **An already-compromised device.** If your computer has a virus or malware installed (a trojan, a keylogger), that malware can read your files before you send them or after you receive them — including inside an unlocked vault. DeadDrop protects the channel and, once unlocked, the vault's own storage; it does not cure a sick device.
 - **Cameras in the room.** If someone physically records the sender's screen *and also* compromises the receiving device, they could combine both. Against physical surveillance of the place, the defence is choosing the place well.
 - **The other person revealing the file.** Once received, the file is in the recipient's hands. DeadDrop cannot stop that person from sharing, printing or handing it over. Trust the recipient as you would when handing them a physical envelope.
 - **Your own behaviour.** If you talk about the transfer on a tapped phone, if you arrange to meet the recipient over watched channels, or if you carry the device to a checkpoint announced in your own email, no app can help you. Security is a chain: DeadDrop is the handover link; the other links are yours.
-- **Anyone opening the app on your device today.** Until the PIN, at-rest encryption and decoy features ship, assume everything stored in DeadDrop is visible to anyone with access to your unlocked device. When the decoy PIN exists, it will only work if you have configured it *beforehand* and if its content is credible.
+- **Files you never put in the vault.** Anything saved outside the vault (e.g. through your OS's own file picker instead of "save to vault") is an ordinary file, protected only by your operating system (user account, disk encryption such as FileVault/BitLocker/LUKS if enabled). The vault only protects what you deliberately store inside it.
+- **A decoy you have not prepared.** The decoy only works if you set it up *beforehand* with content you have chosen, and keep it credible. There is no built-in fake content — an empty or thin decoy is itself suspicious.
+- **Someone forcing you to reveal the real passphrase.** If an attacker knows a decoy might exist and is willing to keep pressuring you past the first passphrase, no technical measure can stop them from eventually getting the real one. The decoy buys you a plausible stopping point, not an unbreakable one.
+- **Your passphrase being weaker than it looks.** A phrase that scores as "strong" by length and character variety can still be an easy guess if it is a well-known quote or saying — see "A note on passphrase strength" below.
+- **An attacker who copies your device's storage and attacks it offline.** The app's rate limiting only slows someone typing passphrases into the running app. Someone who images your storage and attacks the copy on their own hardware is not slowed by it at all — your passphrase's actual length and randomness is the only thing protecting you from that attacker. Use a generated passphrase rather than one you make up yourself.
+- **Self-destruct erasing the files from the storage medium.** Self-destruct discards the keys that protect your files, not the files' bytes. On the flash storage phones and SSDs use, the app cannot guarantee that discarded data is physically gone — see the technical section.
+- **A generated passphrase you copy to the clipboard.** The app lets you copy a generated passphrase so you can save it somewhere, which is convenient but puts it, in plaintext, on your operating system's ordinary clipboard. That clipboard may sync across your other devices (e.g. a universal/cloud clipboard) or be readable by other apps on the same device. Clear your clipboard, or avoid copying the passphrase, if that exposure matters for your situation.
 
 ## Common-sense advice
 
-- Until the decoy PIN ships: if physical coercion is a realistic scenario for you, use DeadDrop only for the transfer itself and protect your device with your operating system's tools (disk encryption, strong unlock code).
-- When the decoy PIN ships: set it up **before** you need it, not the day before a trip, and keep the decoy content credible and up to date.
+- Set up the vault, and the decoy if you want one, **before** you need them, not the day before a trip — and keep the decoy's content credible and current.
+- Prefer the app's **generated passphrase** over typing your own. A memorable sentence you make up yourself is often weaker than it feels (see below); a generated passphrase gives you a concrete guarantee instead.
+- If you enable self-destruct, understand first that it can be triggered on purpose by an attacker who just keeps guessing, and that it discards keys, not files — read the technical section before turning it on.
 - Turn on airplane mode on both devices during the transfer if you want a visible, demonstrable guarantee that there is no network.
 - Verify your downloads with the published checksums (see below).
 - DeadDrop is a tool for in-person handover. For remote communication, combine it with other tools (Signal, Tor) that solve that other problem.
+
+## A note on passphrase strength
+
+The app estimates how strong a passphrase is as you type it, but that estimate has a real blind spot: it has no way to know that a phrase is *famous*. A well-known line like "tobeornottobethatisthequestion" scores roughly 88 bits by the estimator's own arithmetic — comfortably "strong" — while an attacker who simply tries well-known quotes and sayings first might only need to try somewhere in the range of 20-27 bits' worth of guesses to land on it. The estimator measures character-level unpredictability; it does not and cannot measure how many other people might type the same words. This is exactly why the app offers to **generate** a passphrase for you by default: a generated passphrase's strength is a mathematical guarantee (every word drawn uniformly at random from a fixed list), not an estimate. If you choose to type your own phrase instead, treat the strength meter as a floor, not a promise.
 
 ---
 
 # Part 2 — Technical version (for auditors)
 
 > **Status:** this section describes the security design of the MVP. Each row of the tables below carries an explicit implementation status: ✅ *Implemented* means working code exists in `app/lib/` today; 📋 *Planned* means a documented design goal with **no implementation**. The concrete parameters will be frozen with the implementation and any change will be documented here. The code is the final reference; this document is the map.
+>
+> The vault, decoy environment and self-destruct described below have been verified only by the automated test suite (`app/test/vault/`), run on desktop hardware under emulation. **None of it has been run on a real phone or tablet yet**, despite the vault/coercion feature's platform priority being mobile-first (`docs/technical-spec.md` §5.1) — that gap is open and should be closed before anyone relies on this under real coercion.
 
 ## Threat model
 
@@ -66,8 +81,8 @@ DeadDrop is designed against these adversaries:
 | **Network observer** (ISP, state, company) | Sees and logs all network traffic of both devices | There is no traffic: the channel is optical (screen → camera). Absence of emission verifiable with a spectrum analyser. | ✅ Implemented |
 | **RF proximity observer** | Captures Bluetooth/WiFi/radio in the room | No radio in use. | ✅ Implemented |
 | **Optical interceptor** | Records the sender's screen with a camera for the entire transfer | The payload travels E2E encrypted (see below): the recording only produces ciphertext. | ✅ Implemented |
-| **Adversary with physical access to the device** | Searches the device, installs the app, inspects it | Data at rest encrypted with a key derived from the PIN (Argon2id). Decoy PIN → plausible deniability. Optional self-destruct after N attempts. | 📋 **Planned — no protection today.** Received files are stored unencrypted. |
-| **Adversary who coerces the user** | Forces the user to unlock the app | The decoy PIN opens a decoy space indistinguishable from the real one at the app-behaviour level. | 📋 **Planned — no protection today.** There is no PIN and no decoy space. |
+| **Adversary with physical access to the device** | Searches the device, installs the app, inspects it | Files saved into the vault are encrypted at rest with a key derived from a passphrase (Argon2id). Optional self-destruct discards the wrapped keys after N failed attempts. | ✅ **Implemented for files stored in the vault.** Files saved outside the vault (via the OS file picker rather than "save to vault") are not protected by DeadDrop and rely entirely on OS-level protection. |
+| **Adversary who coerces the user** | Forces the user to unlock the app | The decoy passphrase opens a second, independently-keyed environment indistinguishable from the real one in behaviour and unlock timing. | ✅ **Implemented**, with the limits below: the decoy must be populated by the user beforehand (no auto-generated content), a determined attacker can still coerce the real passphrase specifically, and this has not been tested on a real phone or tablet. |
 
 Out of scope (explicitly declared):
 
@@ -92,17 +107,31 @@ Project rule: **libsodium with default parameters. Zero home-grown cryptography.
 | Payload encryption | XSalsa20-Poly1305, AEAD with per-chunk authentication | ✅ Implemented |
 | Session manifest signature | Ed25519 over the session header | ✅ Implemented |
 | File integrity hash | BLAKE2b-256 (`crypto_generichash`), end-to-end manifest check | ✅ Implemented |
-| Key derivation from PIN (data at rest) | Argon2id (`crypto_pwhash`) with at least interactive parameters | 📋 Planned |
-| Data at rest | Database encrypted with a key derived from the PIN; the decoy space and the real space use keys derived from different PINs, with no artefact revealing the existence of two spaces | 📋 Planned |
-| Self-destruct | Erasure of the wrapped key + overwriting of the encrypted store (app-level secure erase; the limits of flash wear-levelling will be documented honestly) | 📋 Planned |
+| Key derivation from passphrase (data at rest) | Argon2id (`crypto_pwhash`), libsodium's interactive parameter set | ✅ Implemented (`app/lib/src/vault/pwhash.dart`) |
+| Data at rest | Each environment's files are encrypted under its own data key; that data key is itself sealed ("wrapped") with `crypto_secretbox` under a key derived from that environment's passphrase. The real and decoy environments use independently-derived keys, share one on-disk store, and nothing in file names, directory structure, file count or file sizes reveals whether a decoy exists | ✅ Implemented (`app/lib/src/vault/vault_keys.dart`, `vault_store.dart`) |
+| Self-destruct | Discards the wrapped data keys for both environments after 10 consecutive failed unlock attempts, when the user has explicitly enabled it. Does **not** overwrite the encrypted file contents on disk — see "Self-destruct: what it actually does" below for why, and its limits | ✅ Implemented, off by default (`app/lib/src/vault/attempt_guard.dart`) |
 
-## Plausible deniability — properties (planned)
+## Plausible deniability — properties
 
-> ⚠️ This section describes the **design goal** for the decoy PIN feature. None of it is implemented today.
+- **Same binary, same unlock flow for both passphrases.** `tryUnlock` (`app/lib/src/vault/vault_session.dart`) always performs exactly one Argon2id derivation per environment slot — real, decoy, or empty — and never returns early once it finds a match. An empty slot (no decoy configured) is derived against using a fixed dummy ciphertext, so its cost is identical to a filled one. `app/test/vault/vault_session_test.dart` proves the derivation count is constant across outcomes; `app/test/vault/timing_test.dart` proves the resulting wall-clock time is indistinguishable, bounding the spread between real/decoy/wrong-passphrase medians to under 80ms under this project's pinned toolchain (see that file for the measurement and how the bound was chosen).
+- **The rate-limiting delay precedes every attempt, never follows a failure.** A pause that only appears after a wrong passphrase would itself be a tell. `AttemptGuard` waits before the attempt, identically regardless of what is about to be typed.
+- **The decoy space is a real, independently-keyed encrypted environment**, not a detectable "hidden mode" — whatever the user stores in it is as genuinely protected as the real environment.
+- **The app stores no indicator that two spaces exist.** The failed-attempt counter's storage key exists whether or not a vault does at all, and is written on both success and failure, so its mere presence (or the act of writing to it) never signals anything.
+- **What is not covered:** the decoy's *content* must still look credible, and that is entirely on the user — see "A note on passphrase strength" and the decoy-content limits above. Indistinguishable unlock behaviour does not make an empty or implausible decoy convincing.
 
-- Same binary, same unlock flow for both PINs: no difference in behaviour, timing or interface reveals which PIN was entered.
-- The decoy space is a real encrypted space with its own key: it is not a detectable "hidden mode".
-- The app stores no indicator that two spaces exist.
+## Self-destruct: what it actually does
+
+Self-destruct is **off by default**. If enabled, 10 consecutive failed unlock attempts cause the app to discard both environments' wrapped data keys (`VaultController._destroyEverySlot`, which always destroys *both* slots — a surviving decoy would itself prove there had been something to erase).
+
+Read this before turning it on:
+
+- **It discards keys; it does not erase files.** The encrypted file contents are left on disk. Without the wrapped key, they are computationally unrecoverable to anyone without the passphrase — but the bytes themselves are not overwritten.
+- **On flash storage with wear-levelling (the case for essentially all phones, SSDs, and most modern storage), erasure cannot be promised even if the app tried to overwrite the data.** The flash controller may have already moved the physical blocks elsewhere, leaving old copies behind that the app has no way to address or overwrite. This is a known, structural limit of flash storage, not a shortcut this implementation took.
+- **A wipe interrupted mid-flight (power loss, app kill) can leave one slot destroyed and the other intact.** The code keeps attempting every slot even if one fails, but it cannot guarantee both complete if the process dies partway through.
+- **An attacker can trigger it deliberately.** Self-destruct cannot tell a locked-out owner apart from an attacker who simply keeps entering wrong passphrases on purpose to destroy the evidence before it can be examined further. There is no way to add that distinction without giving the counter information it structurally cannot have.
+- **Rate limiting (and therefore self-destruct) only binds an attacker working through the running app.** Someone who copies the device's storage and attacks it offline, on their own hardware, never encounters the attempt counter at all — they can try passphrases as fast as their hardware allows, indefinitely, with no risk of triggering a wipe. Self-destruct is not a defence against that attacker; passphrase entropy is (see "A note on passphrase strength" above).
+
+If any of this is unacceptable for your situation, leave self-destruct off and rely on passphrase strength alone — a strong passphrase is secure against an offline attacker whether or not self-destruct is enabled, while self-destruct carries a real risk of accidental, irreversible data loss and no benefit against that same offline attacker.
 
 ## Build verifiability
 
@@ -117,4 +146,4 @@ If you find a security issue, **do not open a public issue**. Contact us through
 
 ---
 
-*Last updated: 2026-10-21 — added per-row implementation status (implemented vs. planned) throughout. This document is versioned with the project.*
+*Last updated: 2026-10-25 — the vault, decoy environment and self-destruct moved from planned to implemented; documented their actual shipped shape (user-supplied decoy content, passphrase rather than PIN, self-destruct off by default) and the limits that come with it (flash erasure, deliberate triggering, clipboard exposure, phrase predictability, offline attack, not yet tested on real devices). This document is versioned with the project.*
