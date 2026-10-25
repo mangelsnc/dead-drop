@@ -2,29 +2,30 @@
 
 This guide takes you by the hand from the moment you open the app for the first time until you complete your first transfer. **You don't need to know anything about technology.** If you can take a photo with your phone or copy a file on your computer, you can use DeadDrop.
 
-> **Note:** screenshots will be added when the app is available. Each step describes exactly what you will see.
+> **Note:** this guide is written to be followed without pictures — each step says exactly what you will see on screen.
 
 ---
 
-## What works today vs. what's planned
+## What works today, and what does not
 
 DeadDrop is in **active development** (MVP target: February 2027). To avoid any misunderstanding that could affect your safety, here is the exact status of every feature mentioned in this guide:
 
-**✅ Works today (v0.1):**
+**✅ Works today:**
 
 - Air-gapped file transfer via animated QR codes (screen → camera, no network).
 - End-to-end encryption of the transfer: only the receiving device can read the file.
 - File integrity check: the app verifies the file arrived identical to the original.
 - Resume after interruption: the codes repeat in a loop and the transfer continues where it left off.
+- **The vault** — an optional, passphrase-protected place to keep received files, encrypted at rest.
+- **A decoy environment** — a second passphrase that opens a different, independent space.
+- **Self-destruct** — off by default; when you turn it on, ten wrong passphrases in a row discard the keys to both environments.
 
-**📋 Planned — NOT yet implemented:**
+**📋 Not yet:**
 
-- **Access PIN** — the app does not currently ask for or use any PIN.
-- **Decoy PIN** (duress mode) — there is no second PIN and no decoy environment.
-- **At-rest encryption** — received files are saved as ordinary files, protected only by your operating system (user account, disk encryption such as FileVault/BitLocker/LUKS if you enabled it).
-- **Self-destruct** — no automatic erasure exists.
+- **Scanning with the camera on Linux and Windows.** The desktop builds have no scanner, so there you type or paste the other device's key instead. Android, iOS and macOS scan normally.
+- **An external audit.** Nobody independent has reviewed this code.
 
-> ⚠️ **Do not rely on any planned feature for your safety.** If someone may coerce you into unlocking your device, assume that today everything stored in DeadDrop is visible to whoever opens the app. This guide will be updated the day each feature ships.
+> ⚠️ **Three things to understand before you rely on the vault.** It is **opt-in**: a file you save outside it has no protection from DeadDrop. The decoy holds **whatever you put in it** — the app invents nothing, and an empty decoy is not convincing. And self-destruct **discards keys, it does not erase files**; on the flash storage phones use, nobody can promise the bytes are physically gone. The limits are spelled out in [docs/security.md](security.md).
 
 ---
 
@@ -47,7 +48,7 @@ When you open the app you will see a screen with two large buttons:
 - **"Send a file"**
 - **"Receive a file"**
 
-The app opens directly — **no account, no PIN, no setup**. (An access PIN to protect the app is a planned feature; see "What works today vs. what's planned" above.)
+The app opens directly — **no account, no login, no setup**. The vault, if you set one up, asks for its passphrase only when you open it; the rest of the app does not.
 
 ### Step 2 — On the SENDING device
 
@@ -84,44 +85,68 @@ If the transfer stalls at a percentage, no problem: the codes repeat in a loop, 
 
 ---
 
-## The decoy PIN (planned feature)
+## The vault and the decoy
 
-> ⚠️ **Not yet implemented.** The decoy PIN is a **planned feature** for a future version of DeadDrop. It does **not exist** in the current version — there is no PIN, no Settings → Decoy PIN screen, and no decoy space. Do not rely on it. This section is kept so you can understand the design and prepare; it will become a how-to when the feature ships.
+The vault is an optional, passphrase-protected place to keep files you have
+received. Files you save into it are encrypted at rest. You can also set up a
+**decoy**: a second passphrase that opens a different, independent space.
 
-DeadDrop will let you have **two PINs**:
+What is it for? The situation where someone **forces** you to unlock the app: a
+checkpoint, a search, a threat. You enter the decoy passphrase and the vault
+opens completely normally, showing the files you left there for that case. There
+is no "hidden mode" screen, no warning, nothing that reveals other content
+exists — and opening either one takes exactly the same time, so a stopwatch
+tells them apart no better than the screen does.
 
-- Your **real PIN**: opens the app with your real files.
-- Your **decoy PIN**: opens the app with fake content you prepared in advance.
+### Setting it up
 
-What is it for? For the situation where someone **forces** you to unlock the app: a checkpoint, a search, a threat. You enter the decoy PIN and the app opens completely normally, showing the files you left there for that case. There is no "hidden mode" screen, no suspicious message, nothing that reveals that other content exists. The app behaves exactly the same as with the real PIN.
+1. Go to **Settings → Set up vault** and choose a passphrase.
+2. The app offers you six random words. **Use them.** Six words are about 62
+   bits of entropy; the app will not accept anything under 60. A six-digit PIN
+   falls in under a minute to someone holding a copy of your storage, which is
+   why this asks for words rather than digits.
+3. Go to **Settings → Set up decoy** and choose a *different* passphrase.
+4. **Put real-looking files in the decoy.** The app invents nothing. An empty
+   decoy is not a decoy — spend five minutes on this.
+5. From then on, each passphrase opens its own space.
 
-### How it will work
+When you receive a file, the result screen offers **Device** and **Vault**. The
+Vault button only appears once a vault exists: a greyed-out button would itself
+tell someone the feature is set up.
 
-1. Open DeadDrop with your real PIN.
-2. Go to **Settings → Decoy PIN**.
-3. Choose a PIN different from the real one (not obvious, not similar).
-4. **Prepare the decoy content:** the app lets you add files to the decoy space. Choose credible, bland files: holiday photos, unimportant documents, notes. A completely empty space would raise suspicions, so spend five minutes on this.
-5. From that moment on, each PIN opens its own space. No one who doesn't know both PINs can know that two exist.
+### Rules worth following
 
-### Golden rules for the decoy PIN (once it exists)
-
-- **Never write it down** next to the real PIN or in the same place.
-- **Keep the decoy content alive:** if your "holiday photos" are three years old and there is nothing recent, it looks strange. Add a file now and then.
-- **Rehearse:** enter the decoy PIN once in a while to see exactly what another person would see. It must look like your real app.
+- **Never write the two passphrases down together**, or near each other.
+- **Keep the decoy alive.** If its newest file is three years old, it looks
+  staged. Add something now and then.
+- **Rehearse.** Open the decoy occasionally and look at exactly what a stranger
+  would see. It has to look like your whole app.
+- **The vault is opt-in.** A file saved to the device instead of the vault has
+  no protection from DeadDrop — only whatever your operating system gives it.
 
 ---
 
-## Self-destruct (planned feature)
+## Self-destruct
 
-> ⚠️ **Not yet implemented.** Self-destruct is a **planned feature** and does **not exist** in the current version. Nothing in DeadDrop erases content today.
+Off by default. When you turn it on in **Settings → Self-destruct**, ten wrong
+passphrases in a row discard the keys protecting **both** environments — the
+real one and the decoy. A surviving decoy would prove there had been something
+to erase, so it does not survive either.
 
-When it ships, DeadDrop will be able to securely erase all protected content if someone enters the wrong PIN too many times in a row:
+**Read this before turning it on.**
 
-1. Go to **Settings → Self-destruct**.
-2. Turn it on and choose the number of failed attempts (for example, 5).
-3. From then on, if someone exceeds that number of attempts, the protected content is irreversibly erased.
+- **It is irreversible.** Forget your passphrase and the files are gone.
+- **An attacker can trigger it on purpose** by simply guessing wrong ten times.
+  Whether that is good or bad depends on your situation: it destroys evidence,
+  and it also destroys your files.
+- **It discards keys; it does not erase files.** On the flash storage phones and
+  SSDs use, the app cannot guarantee the old bytes are physically gone. What it
+  guarantees is that the keys to read them are.
 
-**Important warning (for when it ships):** this feature will be irreversible. If you turn it on and forget your PIN, you will lose your files forever. It will be off by default and we only recommend enabling it if your situation justifies it.
+Wrong attempts are also slowed down — a few seconds, growing to a minute. That
+helps against someone poking at your phone; it does nothing against someone who
+copies the storage and attacks it offline. Your passphrase is what defends you
+there, which is why the app insists on six words.
 
 ---
 
