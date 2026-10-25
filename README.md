@@ -84,7 +84,7 @@ Download the installer for your system from the [Releases](../../releases) page 
 3. On the **receiving** device: tap **"Receive a file"** and point the camera at the other screen.
 4. You'll see a progress bar on both. When finished, the receiver taps **"Save"** and chooses where.
 
-That's it. The [full user guide](docs/user-guide.md) walks through every step with screenshots, what to do if the camera struggles to read, and an up-to-date list of [what works today vs. what's planned](docs/user-guide.md#what-works-today-vs-whats-planned).
+That's it. The [full user guide](docs/user-guide.md) walks through every step, what to do if the camera struggles to read, and an up-to-date list of [what works today and what does not](docs/user-guide.md#what-works-today-and-what-does-not).
 
 ---
 

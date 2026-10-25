@@ -48,11 +48,11 @@ On the internet: nothing, because there is no internet. On the devices: the app 
 
 ### What happens if I'm forced to unlock the app?
 
-**Today: nothing protects you here yet.** The **decoy PIN** — a second PIN that would open the app showing fake, credible content you prepared in advance — is a **planned feature and is not implemented**. The current version has no PIN at all: whoever opens the app sees everything in it. If physical coercion is a realistic scenario for you, do not store sensitive files in DeadDrop yet; use it only for the transfer and protect the device with your operating system's tools (disk encryption, strong unlock code). Follow the roadmap in the [user guide](user-guide.md#what-works-today-vs-whats-planned).
+**The vault is what protects you here, and you have to set it up first.** A second passphrase opens a **decoy**: a different, independent space holding whatever you put there in advance. Opening either one takes the same time, and nothing on screen reveals that a second exists. Three honest limits: it is opt-in, so a file saved outside it has no protection from DeadDrop; the decoy holds only what you put in it, and an empty one is not convincing; and optional self-destruct discards keys rather than erasing files. Details in the [user guide](user-guide.md#the-vault-and-the-decoy) and [docs/security.md](security.md).
 
 ### What happens if I lose my device or it gets stolen?
 
-**Today:** files you received with DeadDrop are stored as ordinary files wherever you saved them. They are protected only by your device's own security (user account, disk encryption such as FileVault/BitLocker/LUKS if enabled). DeadDrop's own **PIN protection, at-rest encryption and self-destruct are planned features and do not exist yet** — there is currently no PIN to enter and nothing that erases content after failed attempts.
+**It depends where you saved them.** When a transfer finishes you choose: the device, or the vault. Saved to the device, a file is an ordinary file, protected only by your operating system (user account, disk encryption such as FileVault/BitLocker/LUKS if you enabled it). Saved to the vault, it is encrypted at rest with a key derived from your passphrase (Argon2id), and only that passphrase opens it. Self-destruct is available too, off unless you turn it on.
 
 ### What if I forget my PIN?
 
