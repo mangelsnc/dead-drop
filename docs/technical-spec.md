@@ -425,27 +425,25 @@ The handshake is **asynchronous and one-way**: the sender shows a QR, the receiv
 - **Forward secrecy:** ephemeral keys are deleted after the transfer. A later device compromise reveals nothing.
 - **Authentication:** the Ed25519 signature proves the sender's identity (if the receiver knows the sender's long-term public key).
 
-### 3.4 PIN derivation (for duress mode)
+### 3.4 Passphrase derivation (for duress mode)
 
-When the user sets a PIN (real or decoy), the app derives an encryption key from it using **Argon2id**:
+**Implemented**, with one change from the original design: the vault is unlocked by a **passphrase**, not a PIN. A PIN's search space is too small to be the sole barrier against an attacker who copies the device storage and attacks it offline (see §4.2) — rate limiting only binds an attacker working through the running app, never one working against a copied store. A passphrase, generated or user-supplied, is the only thing standing between that attacker and the data.
+
+When the user sets a passphrase (real or decoy), the app derives a key-encryption key (KEK) from it using **Argon2id** (`crypto_pwhash`, libsodium's "interactive" parameter set):
 
 ```
-encryption_key = Argon2id(
-    password = PIN,
+kek = Argon2id(
+    password = passphrase,
     salt = random(16 bytes, stored),
-    time_cost = 3,
-    memory_cost = 64 MB,
-    parallelism = 4,
+    opslimit = crypto_pwhash_OPSLIMIT_INTERACTIVE,
+    memlimit = crypto_pwhash_MEMLIMIT_INTERACTIVE,
     output_length = 32 bytes
 )
 ```
 
-**Parameters justification:**
-- **Time cost 3:** ~0.5 seconds on a mid-range phone (2026 hardware). Slow enough to frustrate brute force, fast enough to not annoy the user.
-- **Memory cost 64 MB:** makes GPU/ASIC attacks expensive (Argon2id's memory hardness is its key property).
-- **Parallelism 4:** uses multiple cores for speed without reducing security.
+See `app/lib/src/vault/pwhash.dart` for the exact call.
 
-**Critical requirement:** deriving the key from the decoy PIN must take **exactly as long** as from the real PIN. Same Argon2id parameters, same iteration count. If one is faster, an attacker with a stopwatch knows there are two modes.
+**Critical requirement, implemented:** unlocking with the decoy passphrase takes the same amount of work as unlocking with the real one, a wrong one, or an empty slot. This is not achieved by tuning Argon2id's parameters to be identical (they already are — there is only one parameter set) but by `tryUnlock` (`app/lib/src/vault/vault_session.dart`) always performing exactly one Argon2id derivation per environment slot, never short-circuiting on the first match. An empty slot is derived against too, using a fixed dummy ciphertext, so a vault with no decoy configured costs exactly what one with a decoy costs. `app/test/vault/vault_session_test.dart` proves the derivation count is constant by injecting a counting wrapper; `app/test/vault/timing_test.dart` proves the resulting wall-clock cost is indistinguishable by measuring it directly. See docs/security.md for the measured bound and its limits.
 
 ### 3.5 Random number generation
 
@@ -476,16 +474,18 @@ No custom RNG, no seeding from weak sources (time, PID, etc.).
 - Protection against a sophisticated forensic analyst with unlimited time (if they image the device and analyze it for days, they may find anomalies)
 - Protection against the user being forced to reveal the real PIN under torture (no technical solution exists for this)
 
-### 4.2 Two-PIN model
+### 4.2 Two-passphrase model
 
-The user configures **two PINs**:
-- **Real PIN** (minimum 6 digits): unlocks the real environment with the user's actual files
-- **Decoy PIN** (minimum 4 digits): unlocks a fake environment with plausible decoy files
+**Implemented**, with the PIN-minimums design replaced by a single entropy floor, for the reason given in §3.4: a short PIN cannot resist an attacker who has copied the device storage, no matter how the two environments are otherwise designed. The user configures **two passphrases**:
+- **Real passphrase**: unlocks the real environment with the user's actual files
+- **Decoy passphrase** (optional): unlocks a fake environment with the user's own substitute files
+
+Both must independently clear `kMinimumEntropyBits = 60` (`app/lib/src/vault/passphrase_strength.dart`) — there is no separate, lower bar for the decoy. The app offers to **generate** a passphrase (six words drawn uniformly at random from the 1296-word EFF short wordlist via libsodium's CSPRNG, ~62.0 bits, `generatePassphrase`) as the default path, and accepts a user-typed one only if `estimateStrength` scores it at or above the floor. Generation is the default, not merely an option, because the estimator cannot detect phrase predictability — see docs/security.md's limits section for why a passphrase that *scores* well may still be weak in practice.
 
 **Key properties:**
-- **Indistinguishable:** the app looks and behaves identically with either PIN. No visual difference, no hint, no indicator.
-- **Plausible deniability:** there is no way to prove a second environment exists. The app doesn't know how many environments exist — it tries to decrypt with the entered PIN; if it works, it opens that environment.
-- **Separate storage:** each environment has its own encrypted file tree, encrypted with a key derived from its PIN.
+- **Indistinguishable:** the app looks and behaves identically with either passphrase. No visual difference, no hint, no indicator.
+- **Plausible deniability:** there is no way to prove a second environment exists. The app doesn't know how many environments exist — it tries to unwrap each slot with the entered passphrase; if one authenticates, that environment opens.
+- **Separate storage:** each environment has its own data key, wrapped under a KEK derived from its own passphrase (`app/lib/src/vault/vault_keys.dart`). File contents and metadata share one on-disk store (`app/lib/src/vault/vault_store.dart`) so that directory structure, file count and file sizes never reveal which, or how many, environments exist.
 
 ### 4.3 Environment separation
 
@@ -519,22 +519,14 @@ The user configures **two PINs**:
 
 ### 4.4 Decoy environment content
 
-The decoy environment must be **boringly normal**. If it looks fake, it's useless.
+**Implemented, user-supplied rather than app-generated.** The original design called for the app to auto-generate decoy content (stock photos, template PDFs, a fabricated history). That did not ship: the implementation instead starts the decoy environment empty, exactly like the real one, and leaves populating it entirely to the user — they put whatever files they choose into it via the same "save to vault" flow used for the real environment (see the vault UI, `app/lib/ui/vault/`). There is no built-in stock-image library, no fabricated send/receive history, and no attempt by the app to judge or generate "boring" content.
 
-**Auto-generated decoy content (recommended):**
-- 3-5 generic photos (landscapes, food, pets — from a built-in library of stock images)
-- 2-3 PDFs (a cooking recipe, a gym schedule, a generic invoice template)
-- 1-2 text notes (shopping list, reminder)
-- A fake but coherent send/receive history (timestamps, file names, sizes)
+This is a narrower feature than originally specified, not an equivalent one reached a different way:
+- **The user is fully responsible for the decoy's credibility.** An empty or obviously-sparse decoy is itself a tell; the app does nothing to prevent that.
+- **No fake history is synthesized.** The decoy's send/receive activity (if any) is only what the user has actually done inside it.
+- **Functional and coherent by construction, not by design effort:** since decoy files are real files the user chose and saved through the same path as real-environment files, they are inherently previewable, sendable, and internally consistent — there is no separate "fake content" code path that could give the trick away by behaving differently.
 
-**Manual decoy content (advanced):**
-- The user selects their own decoy files from their device
-- Useful for personalization, but requires more effort
-
-**Critical properties:**
-- **Functional:** decoy files can be previewed, sent, and deleted. A file that "can't be opened" gives the trick away.
-- **Coherent:** file names, sizes, and timestamps must be internally consistent (e.g., a photo from "last summer" shouldn't have a creation date of tomorrow).
-- **Boring:** no interesting content. Vacation photos, recipes, gym schedules. Nothing that would make an attacker suspicious or curious.
+**Critical property retained:** the decoy environment is implemented as a real, independently-keyed environment (§4.2, §4.3), not a cosmetic "demo mode" — whatever the user stores in it is as genuinely encrypted as the real environment's contents.
 
 ### 4.5 Behavioral indistinguishability
 
@@ -588,15 +580,19 @@ If the attacker navigates to Settings:
 - The existence of a second environment
 - Any hint that the decoy PIN is not the real PIN
 
-### 4.8 Self-destruct (optional, v2)
+### 4.8 Self-destruct
 
-**Feature:** after N failed PIN attempts (e.g., 10), the app wipes both environments.
+**Implemented, off by default.** After `kSelfDestructThreshold` (10) consecutive failed unlock attempts, and only if the user has explicitly turned the feature on in Settings, the app discards both environments' **wrapped keys** (`app/lib/src/vault/attempt_guard.dart`, `VaultController._destroyEverySlot` in `app/lib/ui/vault/vault_controller.dart`).
 
-**UX decision (from the duress-mode design):**
-- Failed attempts count toward a **global counter** (not per-environment)
-- If self-destruct fires, **wipe both environments** (a surviving decoy would reveal there was something to erase)
+**What it actually destroys:** self-destruct deletes the small, fixed-size `WrappedKey` structures that seal each environment's data key — it does **not** overwrite or securely erase the (much larger) encrypted file contents on disk. This is a deliberate trade from the key-hierarchy design (§3.2/§4.2): without the data key, the sealed file contents are computationally unrecoverable, so discarding the wrapped keys is cryptographically equivalent to erasure for any attacker without the passphrase. It is not equivalent to erasure in the physical sense — see docs/security.md for the limits this implies on flash storage with wear-levelling, and for what happens if the device loses power mid-wipe.
 
-**Status:** v2 feature, not in the MVP. Requires careful UX design to avoid accidental triggers.
+**UX decisions, implemented as designed:**
+- Failed attempts count toward a **global counter** (not per-environment) — `AttemptGuard`, keyed by `kAttemptCounterStorageKey`.
+- If self-destruct fires, **both environments' slots are destroyed**, never just the one under attack — a surviving decoy would reveal there had been something to erase.
+- The counter's storage key exists whether or not a vault does, and is written on success as well as failure, so its presence alone never signals that a vault exists or that an attempt was made.
+- The wipe runs **unawaited** by the attempt that triggers it: that attempt returns in the same time as an ordinary wrong-passphrase failure (one storage write), so the attempt that crosses the threshold is not itself measurably slower than any other failure. A later unlock call waits for any in-flight wipe before reading slots.
+
+**Residual risk, not mitigated:** an attacker can trigger self-destruct deliberately, by entering wrong passphrases on purpose, the same way an owner would trigger it by accident. There is no way to distinguish "the device's owner locked themselves out" from "an attacker is trying to destroy the evidence" — the counter is deliberately blind to intent, because making it otherwise would require information (which attempts are genuine) the app cannot have.
 
 ---
 
@@ -613,6 +609,12 @@ If the attacker navigates to Settings:
 | **iOS** | P1 (post-MVP) | Stretch goal | iOS 14+, if time allows |
 
 **MVP focus:** Windows, macOS, Linux (desktop). Mobile is a stretch goal — the core use case (journalist with a laptop) is desktop-first.
+
+**Platform priority is inverted for the vault/coercion feature specifically.** The table above is the project's general MVP priority and is unchanged for the transfer feature. For the vault, decoy environment and self-destruct described in §4, Android and iOS are the primary targets and desktop follows — recorded here as a deliberate, documented departure from this section's own general priority, not an oversight. Two reasons:
+- **Threat fit:** the coercion scenario this feature defends against (a border checkpoint, a police search, an abusive partner) is a phone-in-hand scenario. The phone is also the natural device for a camera-and-screen transfer in the first place.
+- **Secure-storage quality:** on Linux, a wrapped key held in GNOME Keyring or KDE Wallet is a visibly named secret-storage entry — itself an artefact that a filesystem search can find, which is exactly what the anti-goals in §4 forbid. iOS Keychain and Android Keystore do not expose an equivalent visible entry. The desktop artefact problem is real and unresolved; it blocks the vault feature from shipping safely on desktop, not from shipping on mobile.
+
+This inversion applies only to the vault/coercion feature. It does not change the transfer protocol's own platform priority.
 
 ### 5.2 Technology stack
 
