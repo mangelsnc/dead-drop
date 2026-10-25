@@ -11,6 +11,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/chunking.dart';
 import '../../src/crypto.dart';
+import '../../src/screen_wake.dart';
 import '../../src/emitter.dart';
 import '../../src/handshake.dart';
 import '../../src/identity_store.dart';
@@ -173,7 +174,12 @@ class SendNotifier extends StateNotifier<SendState> {
   }
 
   void setChunkSize(int size) {
-    if (state.isEmitting) return; // locked during a transfer
+    // Changing the chunk size mid-transfer cannot be applied to a running
+    // emission — the receiver's decoder is built around the chunk count in
+    // the bootstrap header — so stop instead of silently ignoring the user.
+    // They can then restart with the new value without re-pairing, which is
+    // the whole point: finding the right parameters is trial and error.
+    if (state.isEmitting) stopEmitting();
     // Re-validate the picked file against the new chunk size so the error
     // appears / clears immediately as the user moves the slider.
     final bytes = state.fileBytes;
@@ -236,18 +242,33 @@ class SendNotifier extends StateNotifier<SendState> {
       currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
       clearSendError: true,
     );
+    // The screen must not dim while it is the transmission medium.
+    unawaited(keepScreenAwake());
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
     _timer = Timer(const Duration(seconds: 4), _startDataPhase);
   }
 
+  /// Stops the emission, keeping the picked file and the receiver key so the
+  /// user can adjust parameters and start again without re-scanning.
   void stopEmitting() {
     _stopTimer();
+    unawaited(allowScreenSleep());
     state = state.copyWith(
       isEmitting: false,
       showingBootstrap: false,
       currentQrData: null,
+      framesEmitted: 0,
     );
+  }
+
+  /// Stops and immediately starts again, rebuilding the emitter so the
+  /// current fps, chunk size and EC level apply. The session gets a new
+  /// file_id, so the receiver — which filters frames by that id — treats it
+  /// as a fresh transfer and ignores whatever it had collected.
+  Future<void> restartEmitting() async {
+    stopEmitting();
+    await startEmitting();
   }
 
   void _startDataPhase() {
@@ -281,6 +302,10 @@ class SendNotifier extends StateNotifier<SendState> {
   @override
   void dispose() {
     _stopTimer();
+    // A wakelock outliving the notifier would keep the screen on for the
+    // rest of the app's life, draining a device whose owner may have no way
+    // to charge it.
+    unawaited(allowScreenSleep());
     super.dispose();
   }
 }
@@ -1161,15 +1186,35 @@ class _SendingScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              // Stop button
-              FilledButton.icon(
-                onPressed: notifier.stopEmitting,
-                icon: const Icon(Icons.stop),
-                label: const Text('Stop transfer'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 56),
-                  backgroundColor: DeadDropColors.error,
-                ),
+              // Restart and Stop. Restart exists because finding workable
+              // fps and chunk-size values is trial and error, and without
+              // it the only way to apply a new value was to close the app
+              // and re-pair with the receiver.
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: notifier.restartEmitting,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Restart'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 56),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: notifier.stopEmitting,
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 56),
+                        backgroundColor: DeadDropColors.error,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
