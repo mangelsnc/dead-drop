@@ -1,0 +1,31 @@
+# Test configuration.
+#
+# The `timing` tag marks tests that measure wall-clock duration — currently
+# test/vault/timing_test.dart, which proves that unlocking the real
+# environment, unlocking the decoy, and failing outright all cost the same.
+# That property is what stops an attacker with a stopwatch learning a decoy
+# exists, so the test matters; it is just not measurable everywhere.
+#
+# It needs a quiet machine running native code. The project's Docker image
+# is linux/amd64, which on an Apple Silicon host runs under emulation, and
+# there the measurement is dominated by emulator jitter: observed spreads of
+# 74% and 81% with no regression present, in runs where the *wrong*-passphrase
+# path came out slowest — something a real short-circuit cannot cause, since
+# it would speed up a matching path, never a non-matching one.
+#
+# So it is excluded from the default run and executed as its own serial pass
+# where the measurement means something:
+#
+#     make test          # everything except timing
+#     make test-timing   # the timing pass, serial
+#
+# CI runs both, and the Linux job runs on native x86_64, so a real
+# short-circuit is still caught before merge. Verified by mutation: adding
+# an early return to tryUnlock when a slot matches produces a 102% spread
+# against the 25% bound.
+#
+# The exclusion lives on the command line rather than in an `exclude_tags`
+# here, because that key also applies to a `--tags timing` run and cannot be
+# cleared from the command line — which would make the second pass impossible.
+tags:
+  timing:

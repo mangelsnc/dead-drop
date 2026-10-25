@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
@@ -288,26 +287,30 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
 
     try {
-      // FilePicker.saveFile() is desktop-only: on Android and iOS it has no
-      // native "save as" dialog to show and returns null, which the previous
-      // code silently treated as "user cancelled" — so the button did
-      // nothing at all on a phone, with no error. Mobile gets the app's
-      // documents directory instead, and the UI reports where the file went.
-      final String path;
-      if (Platform.isAndroid || Platform.isIOS) {
-        final dir = await getApplicationDocumentsDirectory();
-        path = await _uniquePathIn(dir, name);
-      } else {
-        final chosen = await FilePicker.platform.saveFile(
-          dialogTitle: 'Save received file',
-          fileName: name,
-        );
-        if (chosen == null) return; // genuinely cancelled
-        path = chosen;
-      }
+      // The user picks the destination on every platform, including mobile.
+      //
+      // On Android and iOS `saveFile` requires `bytes` and throws an
+      // ArgumentError without them; it then hands the bytes to the platform
+      // and writes the file itself. An earlier fix read that failure as
+      // "saveFile is desktop-only" and fell back to the app's private
+      // documents directory, which made the button work but chose the
+      // destination for the user — the file landed somewhere they could not
+      // reach from a file manager. Passing the bytes gets the system
+      // document picker, so any folder they can write to is available.
+      //
+      // On desktop `saveFile` returns a path and writes nothing, so we write
+      // the bytes ourselves. Hence the two branches.
+      final chosen = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save received file',
+        fileName: name,
+        bytes: Platform.isAndroid || Platform.isIOS ? bytes : null,
+      );
+      if (chosen == null) return; // cancelled
 
-      await File(path).writeAsBytes(bytes);
-      state = state.copyWith(savedPath: path);
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        await File(chosen).writeAsBytes(bytes);
+      }
+      state = state.copyWith(savedPath: chosen);
     } catch (e) {
       // A failed save must say so. Swallowing it leaves the user believing
       // a file they may have crossed a border for is on disk when it is not.
@@ -337,23 +340,6 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final entry = await vaultController.saveFile(name, state.fileBytes!);
     if (entry == null) return;
     state = state.copyWith(savedToVault: true);
-  }
-
-  /// Returns a path inside [dir] for [name] that does not already exist,
-  /// suffixing "-1", "-2" and so on. Receiving two files with the same name
-  /// must not silently overwrite the first.
-  Future<String> _uniquePathIn(Directory dir, String name) async {
-    final dot = name.lastIndexOf('.');
-    final stem = dot > 0 ? name.substring(0, dot) : name;
-    final ext = dot > 0 ? name.substring(dot) : '';
-
-    var candidate = '${dir.path}/$name';
-    var n = 1;
-    while (await File(candidate).exists()) {
-      candidate = '${dir.path}/$stem-$n$ext';
-      n++;
-    }
-    return candidate;
   }
 
   /// Clears everything about the current transfer, keeping this device's
@@ -387,6 +373,31 @@ class ReceivePage extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<ReceivePage> createState() => _ReceivePageState();
+}
+
+/// Renders a save destination in a form a person can act on.
+///
+/// Desktop returns a real filesystem path, which is already readable and is
+/// shown unchanged. Android's Storage Access Framework instead returns a
+/// content URI such as
+/// `content://com.android.providers.downloads.documents/document/raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Freport.pdf`,
+/// which tells the user nothing. Where such a URI embeds a readable path,
+/// that path is shown; otherwise the decoded document identifier is, which
+/// at least names the folder and file.
+@visibleForTesting
+String displayPath(String raw) {
+  if (!raw.startsWith('content://')) return raw;
+
+  final decoded = Uri.decodeComponent(raw);
+  // SAF document ids look like "raw:/storage/emulated/0/Download/x.pdf" or
+  // "primary:Download/x.pdf"; both carry the part worth showing after the
+  // last colon.
+  final marker = decoded.lastIndexOf(':');
+  if (marker != -1 && marker + 1 < decoded.length) {
+    final tail = decoded.substring(marker + 1);
+    if (tail.contains('/')) return tail;
+  }
+  return decoded;
 }
 
 class _ReceivePageState extends ConsumerState<ReceivePage> {
@@ -694,13 +705,13 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                             ),
                             if (state.savedPath != null) ...[
                               const SizedBox(height: 4),
-                              // The full path is shown rather than just the
-                              // filename: on mobile the file lands in the
-                              // app's documents directory, and a user who is
-                              // not told where it went cannot find it. Wraps
-                              // rather than truncating for the same reason.
+                              // Selectable and wrapping rather than
+                              // truncated: this is the only record of where
+                              // a file the user may have taken real risks
+                              // for actually went, and they may need to
+                              // copy it.
                               SelectableText(
-                                'Saved to: ${state.savedPath}',
+                                'Saved to: ${displayPath(state.savedPath!)}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],

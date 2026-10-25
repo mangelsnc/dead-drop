@@ -40,7 +40,18 @@ jobs:
 
       - name: Test
         working-directory: app
-        run: flutter test
+        run: flutter test --exclude-tags timing
+
+      # The wall-clock timing tests run only here. They prove the vault's
+      # constant-cost unlock, which needs a quiet machine running native
+      # code: this runner is native x86_64, while the project's Docker image
+      # is emulated on an Apple Silicon developer machine, and the macOS
+      # runner is shared and too noisy to measure on. Serial, so the
+      # stopwatch does not share CPU with other suites.
+      # See app/dart_test.yaml.
+      - name: Test (wall-clock timing, serial)
+        working-directory: app
+        run: flutter test --tags timing --concurrency 1
 
       - name: Build release
         working-directory: app
@@ -87,7 +98,7 @@ jobs:
 
       - name: Test
         working-directory: app
-        run: flutter test
+        run: flutter test --exclude-tags timing
 
       - name: Build release
         working-directory: app
@@ -131,7 +142,7 @@ jobs:
 
       - name: Test
         working-directory: app
-        run: flutter test
+        run: flutter test --exclude-tags timing
 
       - name: Build release
         working-directory: app
