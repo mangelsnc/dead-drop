@@ -14,6 +14,7 @@ import '../../src/handshake.dart';
 import '../../src/receiver.dart';
 import '../../src/screen_wake.dart';
 import '../../src/tofu_store.dart';
+import '../../src/qr_scanning.dart';
 import '../../src/transport.dart';
 import '../../src/utils.dart';
 import '../../main.dart';
@@ -541,7 +542,39 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (!state.isScanning && state.fileBytes == null)
+                  // Where no scanner exists, say so plainly instead of
+                  // offering a button that opens a camera view and then
+                  // reports "No camera detected" — which blames the user's
+                  // hardware for a gap in ours.
+                  if (!canScanQr)
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: DeadDropColors.warning.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: DeadDropColors.warning.withOpacity(0.4),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.info_outline,
+                              color: DeadDropColors.warning, size: 22),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              scanUnavailableReason!,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(color: DeadDropColors.warning),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (!state.isScanning && state.fileBytes == null)
                     FilledButton.icon(
                       onPressed: () {
                         notifier.startScanning();

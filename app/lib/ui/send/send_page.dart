@@ -12,6 +12,7 @@ import 'package:sodium_libs/sodium_libs.dart';
 import '../../src/chunking.dart';
 import '../../src/crypto.dart';
 import '../../src/screen_wake.dart';
+import '../../src/qr_scanning.dart';
 import '../../src/emitter.dart';
 import '../../src/file_metadata.dart';
 import '../../src/handshake.dart';
@@ -852,13 +853,6 @@ class _MetadataRow extends StatelessWidget {
 // Receiver key section (scan QR + manual fallback)
 // ---------------------------------------------------------------------------
 
-/// Whether this platform can scan a QR code at all.
-///
-/// `mobile_scanner` 5.2.3 ships implementations for android, ios, macos and
-/// web only — there is no Linux or Windows scanner. Where this is false the
-/// scan button is not offered (it could only fail) and manual entry is the
-/// primary path rather than a disclosed fallback.
-bool get _canScanQr => Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
 
 class _ReceiverKeySection extends StatelessWidget {
   const _ReceiverKeySection({
@@ -923,7 +917,7 @@ class _ReceiverKeySection extends StatelessWidget {
           // on Linux and Windows the button could never do anything —
           // offering it sends the user to a camera screen that cannot work
           // and tells them nothing about why.
-          if (_canScanQr) ...[
+          if (canScanQr) ...[
             const Text(
               'Ask the receiver to show their QR code, then scan it.',
               style: TextStyle(color: DeadDropColors.textSecondary),
@@ -1099,7 +1093,7 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
   /// Windows `mobile_scanner` has no implementation at all, so typing or
   /// pasting the key is not an "advanced fallback" there — it is the only
   /// way to load one, and hiding it behind a disclosure is a trap.
-  late bool _expanded = !_canScanQr;
+  late bool _expanded = !canScanQr;
   final _controller = TextEditingController();
   String? _error;
 
@@ -1128,7 +1122,7 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
         const Divider(),
         const SizedBox(height: 8),
         Text(
-          _canScanQr ? 'Manual entry (advanced)' : 'Enter the key',
+          canScanQr ? 'Manual entry (advanced)' : 'Enter the key',
           style: Theme.of(context).textTheme.labelMedium,
         ),
         const SizedBox(height: 8),
