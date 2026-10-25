@@ -16,6 +16,12 @@ dependencies:
   # Crypto (libsodium bindings). Pinned to 2.2.1+6 exactly: 2.2.1+8 bumps
   # sodium to ^3.0.0 which requires a newer Dart SDK than Flutter 3.24.5 ships.
   sodium_libs: 2.2.1+6
+  # Argon2id (crypto_pwhash) for the vault's passphrase-derived key. `pwhash`
+  # is SUMO-ONLY — not exposed by sodium_libs's plain Sodium — so the vault
+  # imports package:sodium/sodium_sumo.dart directly (app/lib/src/vault/pwhash.dart).
+  # Moved here from dev_dependencies: lib/ code now depends on it directly,
+  # not just tests. Version matches what sodium_libs 2.2.1+6 depends on.
+  sodium: ^2.3.1
   # File picking
   file_picker: ^8.1.2
   # Path utilities
@@ -29,10 +35,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-  # Direct import in tests: SodiumInit.init2() loads the native libsodium
-  # binary manually (flutter_tester does not link the plugin's binaries).
-  # Matches the sodium version sodium_libs 2.2.1+6 depends on.
-  sodium: ^2.3.1
+  # Lets tests swap in an in-memory FlutterSecureStoragePlatform instead of
+  # hitting the real OS keychain over a platform channel that doesn't exist
+  # in the flutter_tester VM.
+  flutter_secure_storage_platform_interface: ^1.1.2
 
 flutter:
   uses-material-design: true
