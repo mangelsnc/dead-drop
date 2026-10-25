@@ -7,7 +7,7 @@ This document explains **what DeadDrop protects, against whom, and what it does 
 
 Honesty about limits is as important as the guarantees. A privacy tool that promises the impossible is a dangerous tool.
 
-> ⚠️ **Implementation status (2026-10-25):** DeadDrop is in active development. **Transfer encryption, the vault (at-rest encryption), the decoy environment and self-destruct are now implemented.** Self-destruct is **off by default** — it does nothing unless you turn it on yourself in Settings. This work has been exercised only by the automated test suite, on desktop hardware; it has **not been tested on a real phone or tablet**. Read the limits in this document — especially the passphrase and self-destruct sections — before relying on any of it, and particularly before a border crossing or any situation where you might be searched.
+> ⚠️ **Implementation status (2026-10-25):** DeadDrop is in active development. **Transfer encryption, the vault (at-rest encryption), the decoy environment and self-destruct are now implemented.** Self-destruct is **off by default** — it does nothing unless you turn it on yourself in Settings. This work has been exercised by the automated test suite and by hand on Android and Linux devices; it has **not yet been tested on iOS or macOS**. Read the limits in this document — especially the passphrase and self-destruct sections — before relying on any of it, and particularly before a border crossing or any situation where you might be searched.
 
 ---
 
@@ -23,7 +23,7 @@ When you pass a file with DeadDrop, the content travels protected end to end: it
 
 DeadDrop does not use the internet, WiFi, Bluetooth or cables. The file travels through light: from the screen to the camera. That means **there is no metadata on any server**: no company and no network observer can know that the transfer happened, who took part, or when. It is not that the trail is hidden — it is that it does not exist.
 
-### 3. Your device during a forced search ✅ Implemented (vault is optional; not tested on real devices)
+### 3. Your device during a forced search ✅ Implemented (vault is optional; iOS/macOS untested)
 
 DeadDrop has a **vault**: a passphrase-protected place to store received files, separate from your device's ordinary file storage. Files you choose to save into the vault are encrypted at rest. You can also set up a **decoy passphrase**: a second, independent environment inside the same vault, protected by a different passphrase. Opening the app and entering the real passphrase shows your real files; entering the decoy passphrase shows only whatever you have put in the decoy. Nothing about the app's behaviour, timing, or interface reveals that a decoy exists, or that you have one, to someone who only has the decoy passphrase.
 
@@ -70,7 +70,9 @@ The app estimates how strong a passphrase is as you type it, but that estimate h
 
 > **Status:** this section describes the security design of the MVP. Each row of the tables below carries an explicit implementation status: ✅ *Implemented* means working code exists in `app/lib/` today; 📋 *Planned* means a documented design goal with **no implementation**. The concrete parameters will be frozen with the implementation and any change will be documented here. The code is the final reference; this document is the map.
 >
-> The vault, decoy environment and self-destruct described below have been verified only by the automated test suite (`app/test/vault/`), run on desktop hardware under emulation. **None of it has been run on a real phone or tablet yet**, despite the vault/coercion feature's platform priority being mobile-first (`docs/technical-spec.md` §5.1) — that gap is open and should be closed before anyone relies on this under real coercion.
+> The vault, decoy environment and self-destruct described below are covered by the automated test suite (`app/test/vault/`), which runs on desktop hardware under emulation, and have been exercised by hand on Android and Linux devices. **They have not yet been run on iOS or macOS** — that gap is open and should be closed before anyone relies on this under real coercion on an Apple device.
+>
+> Hand-testing is not the same as an audit. No independent party has reviewed this code.
 
 ## Threat model
 
@@ -82,7 +84,7 @@ DeadDrop is designed against these adversaries:
 | **RF proximity observer** | Captures Bluetooth/WiFi/radio in the room | No radio in use. | ✅ Implemented |
 | **Optical interceptor** | Records the sender's screen with a camera for the entire transfer | The payload travels E2E encrypted (see below): the recording only produces ciphertext. | ✅ Implemented |
 | **Adversary with physical access to the device** | Searches the device, installs the app, inspects it | Files saved into the vault are encrypted at rest with a key derived from a passphrase (Argon2id). Optional self-destruct discards the wrapped keys after N failed attempts. | ✅ **Implemented for files stored in the vault.** Files saved outside the vault (via the OS file picker rather than "save to vault") are not protected by DeadDrop and rely entirely on OS-level protection. |
-| **Adversary who coerces the user** | Forces the user to unlock the app | The decoy passphrase opens a second, independently-keyed environment indistinguishable from the real one in behaviour and unlock timing. | ✅ **Implemented**, with the limits below: the decoy must be populated by the user beforehand (no auto-generated content), a determined attacker can still coerce the real passphrase specifically, and this has not been tested on a real phone or tablet. |
+| **Adversary who coerces the user** | Forces the user to unlock the app | The decoy passphrase opens a second, independently-keyed environment indistinguishable from the real one in behaviour and unlock timing. | ✅ **Implemented**, with the limits below: the decoy must be populated by the user beforehand (no auto-generated content), a determined attacker can still coerce the real passphrase specifically, and this has not yet been tested on iOS or macOS. |
 
 Out of scope (explicitly declared):
 
@@ -146,4 +148,4 @@ If you find a security issue, **do not open a public issue**. Contact us through
 
 ---
 
-*Last updated: 2026-10-25 — the vault, decoy environment and self-destruct moved from planned to implemented; documented their actual shipped shape (user-supplied decoy content, passphrase rather than PIN, self-destruct off by default) and the limits that come with it (flash erasure, deliberate triggering, clipboard exposure, phrase predictability, offline attack, not yet tested on real devices). This document is versioned with the project.*
+*Last updated: 2026-10-25 — the vault, decoy environment and self-destruct moved from planned to implemented; documented their actual shipped shape (user-supplied decoy content, passphrase rather than PIN, self-destruct off by default) and the limits that come with it (flash erasure, deliberate triggering, clipboard exposure, phrase predictability, offline attack, iOS/macOS untested). This document is versioned with the project.*
