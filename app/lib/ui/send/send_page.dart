@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -19,6 +19,7 @@ import '../../src/identity_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
+import '../responsive.dart';
 
 /// State for the send flow.
 class SendState {
@@ -109,13 +110,14 @@ class SendState {
     bool? showingBootstrap,
     String? sendError,
     bool clearSendError = false,
+    bool clearReceiverPk = false,
   }) {
     return SendState(
       fileName: fileName ?? this.fileName,
       fileBytes: fileBytes ?? this.fileBytes,
       fileExtension: fileExtension ?? this.fileExtension,
       filePath: filePath ?? this.filePath,
-      receiverPk: receiverPk ?? this.receiverPk,
+      receiverPk: clearReceiverPk ? null : (receiverPk ?? this.receiverPk),
       emitter: emitter ?? this.emitter,
       identity: identity ?? this.identity,
       chunkSize: chunkSize ?? this.chunkSize,
@@ -126,8 +128,7 @@ class SendState {
       totalFrames: totalFrames ?? this.totalFrames,
       currentQrData: currentQrData ?? this.currentQrData,
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
-      sendError:
-          clearSendError ? null : (sendError ?? this.sendError),
+      sendError: clearSendError ? null : (sendError ?? this.sendError),
     );
   }
 }
@@ -172,6 +173,16 @@ class SendNotifier extends StateNotifier<SendState> {
 
   void setReceiverPk(Uint8List pk) {
     state = state.copyWith(receiverPk: pk);
+  }
+
+  /// Forgets the loaded receiver key, returning step 2 to its initial state.
+  ///
+  /// Needed because a wrong key is otherwise a dead end: the loaded-key card
+  /// offered only "Rescan", and on a platform with no camera (Linux and
+  /// Windows have no mobile_scanner implementation) rescanning cannot
+  /// succeed, so the only way out was to restart the app.
+  void clearReceiverPk() {
+    state = state.copyWith(clearReceiverPk: true);
   }
 
   void setChunkSize(int size) {
@@ -352,65 +363,82 @@ class SendPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('Send a file')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── Step 1: Select file ──────────────────────────────
-            _StepCard(
-              step: 1,
-              title: 'Choose a file',
-              isComplete: state.fileBytes != null,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (state.fileName != null) ...[
-                    _FileInfoTile(
-                      fileName: state.fileName!,
-                      fileSize: state.fileBytes!.length,
-                      fileExtension: state.fileExtension,
-                      filePath: state.filePath,
-                      fileBytes: state.fileBytes,
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  FilledButton.tonalIcon(
-                    onPressed: notifier.pickFile,
-                    icon: const Icon(Icons.folder_open),
-                    label: Text(
-                      state.fileName == null ? 'Choose file' : 'Change file',
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 52),
+        child: ContentWidthLimit(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Steps 1 and 2 are the actions; configuration and identity are
+              // supporting material. On a desktop window they sit side by
+              // side rather than stacking into a column that scrolls while
+              // two thirds of the window stays empty. On a phone the same
+              // widgets stack in this order.
+              TwoColumnLayout(
+                start: [
+                  // ── Step 1: Select file ──────────────────────────────
+                  _StepCard(
+                    step: 1,
+                    title: 'Choose a file',
+                    isComplete: state.fileBytes != null,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (state.fileName != null) ...[
+                          _FileInfoTile(
+                            fileName: state.fileName!,
+                            fileSize: state.fileBytes!.length,
+                            fileExtension: state.fileExtension,
+                            filePath: state.filePath,
+                            fileBytes: state.fileBytes,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        FilledButton.tonalIcon(
+                          onPressed: notifier.pickFile,
+                          icon: const Icon(Icons.folder_open),
+                          label: Text(
+                            state.fileName == null
+                                ? 'Choose file'
+                                : 'Change file',
+                          ),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 52),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+
+                  // ── Step 2: Scan receiver key ────────────────────────
+                  _StepCard(
+                    step: 2,
+                    title: 'Scan receiver\'s QR',
+                    isComplete: state.receiverPk != null,
+                    child: _ReceiverKeySection(
+                      state: state,
+                      notifier: notifier,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                end: [
+                  // ── Step 3: Configure (collapsible) ──────────────
+                  _ConfigSection(state: state, notifier: notifier),
+                  const SizedBox(height: 16),
+
+                  // ── Identity fingerprint ─────────────────────────
+                  const _IdentityFingerprintCard(),
+                  const SizedBox(height: 16),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 8),
 
-            // ── Step 2: Scan receiver key ────────────────────────
-            _StepCard(
-              step: 2,
-              title: 'Scan receiver\'s QR',
-              isComplete: state.receiverPk != null,
-              child: _ReceiverKeySection(
-                state: state,
-                notifier: notifier,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Step 3: Configure (collapsible) ──────────────────
-            _ConfigSection(state: state, notifier: notifier),
-            const SizedBox(height: 16),
-
-            // ── Identity fingerprint ─────────────────────────────
-            const _IdentityFingerprintCard(),
-            const SizedBox(height: 24),
-
-            // ── Step 4: Start ────────────────────────────────────
-            _StartSection(state: state, notifier: notifier),
-          ],
+              // Full width in both layouts: this is the one action that acts
+              // on everything above it, and it should not look like it
+              // belongs to either column.
+              _StartSection(state: state, notifier: notifier),
+            ],
+          ),
         ),
       ),
     );
@@ -454,9 +482,14 @@ class _StepCard extends StatelessWidget {
                       : Text('$step'),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
+                // Expanded, not a bare Text: in the two-column desktop
+                // layout a card gets roughly half the window, and a title
+                // at its natural size overflows the row.
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ],
             ),
@@ -766,9 +799,8 @@ class _InfoButton extends StatelessWidget {
           child: Icon(
             Icons.info_outline,
             size: 18,
-            color: expanded
-                ? DeadDropColors.accent
-                : DeadDropColors.textSecondary,
+            color:
+                expanded ? DeadDropColors.accent : DeadDropColors.textSecondary,
           ),
         ),
       ),
@@ -820,6 +852,14 @@ class _MetadataRow extends StatelessWidget {
 // Receiver key section (scan QR + manual fallback)
 // ---------------------------------------------------------------------------
 
+/// Whether this platform can scan a QR code at all.
+///
+/// `mobile_scanner` 5.2.3 ships implementations for android, ios, macos and
+/// web only — there is no Linux or Windows scanner. Where this is false the
+/// scan button is not offered (it could only fail) and manual entry is the
+/// primary path rather than a disclosed fallback.
+bool get _canScanQr => Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+
 class _ReceiverKeySection extends StatelessWidget {
   const _ReceiverKeySection({
     required this.state,
@@ -845,8 +885,7 @@ class _ReceiverKeySection extends StatelessWidget {
             ),
             child: Row(
               children: [
-                const Icon(Icons.check_circle,
-                    color: DeadDropColors.success),
+                const Icon(Icons.check_circle, color: DeadDropColors.success),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -866,28 +905,44 @@ class _ReceiverKeySection extends StatelessWidget {
                     ],
                   ),
                 ),
+                // "Change", not only "Rescan": a key that loaded but is the
+                // wrong one must not be a dead end. Rescanning is impossible
+                // where there is no camera, so this returns step 2 to its
+                // initial state, where scanning and manual entry are both
+                // available again.
                 TextButton(
-                  onPressed: () => _scanReceiverKey(context),
-                  child: const Text('Rescan'),
+                  onPressed: notifier.clearReceiverPk,
+                  child: const Text('Change'),
                 ),
               ],
             ),
           ),
         ] else ...[
-          // Scan button
-          const Text(
-            'Ask the receiver to show their QR code, then scan it.',
-            style: TextStyle(color: DeadDropColors.textSecondary),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: () => _scanReceiverKey(context),
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Scan receiver\'s QR'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(double.infinity, 52),
+          // Scanning is only offered where a scanner exists. mobile_scanner
+          // 5.2.3 ships android, ios, macos and web implementations only, so
+          // on Linux and Windows the button could never do anything —
+          // offering it sends the user to a camera screen that cannot work
+          // and tells them nothing about why.
+          if (_canScanQr) ...[
+            const Text(
+              'Ask the receiver to show their QR code, then scan it.',
+              style: TextStyle(color: DeadDropColors.textSecondary),
             ),
-          ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => _scanReceiverKey(context),
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Scan receiver\'s QR'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 52),
+              ),
+            ),
+          ] else
+            const Text(
+              'Ask the receiver for their public key and paste it below. '
+              'Scanning is not available on this platform yet.',
+              style: TextStyle(color: DeadDropColors.textSecondary),
+            ),
           // Advanced: manual hex input
           const SizedBox(height: 8),
           _ManualKeyInput(onKeyLoaded: notifier.setReceiverPk),
@@ -991,8 +1046,7 @@ class _KeyScanPageState extends State<_KeyScanPage> {
             alignment: Alignment.bottomCenter,
             child: Container(
               margin: const EdgeInsets.all(24),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.6),
                 borderRadius: BorderRadius.circular(8),
@@ -1041,8 +1095,19 @@ class _ManualKeyInput extends StatefulWidget {
 }
 
 class _ManualKeyInputState extends State<_ManualKeyInput> {
-  bool _expanded = false;
+  /// Starts expanded where there is no camera to scan with. On Linux and
+  /// Windows `mobile_scanner` has no implementation at all, so typing or
+  /// pasting the key is not an "advanced fallback" there — it is the only
+  /// way to load one, and hiding it behind a disclosure is a trap.
+  late bool _expanded = !_canScanQr;
+  final _controller = TextEditingController();
   String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1063,16 +1128,26 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
         const Divider(),
         const SizedBox(height: 8),
         Text(
-          'Manual entry (advanced)',
+          _canScanQr ? 'Manual entry (advanced)' : 'Enter the key',
           style: Theme.of(context).textTheme.labelMedium,
         ),
         const SizedBox(height: 8),
         TextField(
+          controller: _controller,
           decoration: InputDecoration(
             labelText: 'Public key (hex)',
             hintText: '64 hex characters',
             border: const OutlineInputBorder(),
             errorText: _error,
+            // Pasting matters more than typing: the key reaches the sender
+            // through some other channel, so it is almost always already on
+            // the clipboard. Sixty-four hex characters is not something to
+            // retype by hand.
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.content_paste, size: 20),
+              tooltip: 'Paste',
+              onPressed: _pasteFromClipboard,
+            ),
           ),
           style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
           maxLength: 64,
@@ -1080,6 +1155,17 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
         ),
       ],
     );
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty) {
+      setState(() => _error = 'Clipboard is empty');
+      return;
+    }
+    _controller.text = text;
+    _validate(text);
   }
 
   void _validate(String value) {
