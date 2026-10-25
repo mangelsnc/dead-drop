@@ -98,11 +98,7 @@ class Identity {
   ///
   /// Returns the first 16 hex characters of the Ed25519 public key —
   /// enough for visual out-of-band comparison without being unwieldy.
-  String get fingerprint {
-    final hex =
-        verifyKey.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    return hex.substring(0, 16);
-  }
+  String get fingerprint => fingerprintOf(verifyKey);
 
   Uint8List sign(Sodium sodium, Uint8List data) {
     return sodium.crypto.sign.detached(

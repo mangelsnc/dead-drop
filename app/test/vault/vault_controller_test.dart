@@ -179,6 +179,7 @@ void main() {
 
   late SodiumSumo sodium;
   late Directory tempDir;
+  late _FakeSecureStorage keychain;
 
   setUpAll(() async {
     sodium = await SodiumSumoInit.init2(_loadLibsodium);
@@ -186,6 +187,18 @@ void main() {
 
   setUp(() {
     tempDir = Directory.systemTemp.createTempSync('vault_controller_test_');
+
+    // A fresh in-memory keychain per test.
+    //
+    // `FlutterSecureStoragePlatform.instance` is a global. AttemptGuard
+    // reads the failed-attempt counter through it, so a test that leaves
+    // the counter at the self-destruct threshold makes every later test in
+    // this file serve the capped 60s penalty and time out. Installing a new
+    // fake here — rather than only in the one test that needs it — keeps
+    // each test independent, and keeps all of them off the host keychain,
+    // which no test has any business writing to.
+    keychain = _FakeSecureStorage();
+    FlutterSecureStoragePlatform.instance = keychain;
   });
 
   tearDown(() {
@@ -205,8 +218,6 @@ void main() {
     // The most safety-critical behaviour in the feature, and the one that
     // had no coverage: a surviving decoy would prove to an attacker that
     // there had been something to erase.
-    final keychain = _FakeSecureStorage();
-    FlutterSecureStoragePlatform.instance = keychain;
     keychain.data[kSelfDestructStorageKey] = 'true';
 
     final store = VaultStore(tempDir, sodium);

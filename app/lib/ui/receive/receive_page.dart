@@ -6,14 +6,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/crypto.dart';
 import '../../src/handshake.dart';
 import '../../src/receiver.dart';
+import '../../src/screen_wake.dart';
 import '../../src/tofu_store.dart';
 import '../../src/transport.dart';
+import '../../src/utils.dart';
 import '../../main.dart';
 import '../theme.dart';
 import '../vault/vault_controller.dart';
@@ -34,6 +37,7 @@ class ReceiveState {
     this.error,
     this.senderFingerprint,
     this.isNewSender = false,
+    this.pendingSender,
   });
 
   final ReceiverKeypair? receiverKeypair;
@@ -58,13 +62,26 @@ class ReceiveState {
   /// Ed25519 public key), extracted from the verified session header.
   final String? senderFingerprint;
 
-  /// True when this sender fingerprint has never been seen before (TOFU).
-  /// The UI shows a warning prompting out-of-band verification.
+  /// True when this sender fingerprint had never been seen before (TOFU)
+  /// and the user accepted it during this session. Kept so the UI can keep
+  /// showing the "verify out of band" hint for the rest of the transfer.
   final bool isNewSender;
+
+  /// A verified session from an unrecognised sender, held until the user
+  /// accepts or rejects the fingerprint.
+  ///
+  /// TOFU only means anything if a human looks at the fingerprint the first
+  /// time: trust established automatically is not trust. While this is set
+  /// the session is NOT armed — [receiver] stays null, incoming data frames
+  /// are ignored, and nothing has been written to the TOFU store.
+  final PendingSender? pendingSender;
 
   double get progress => totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
 
   bool get sessionActive => receiver != null;
+
+  /// True while an unrecognised sender is waiting for the user's decision.
+  bool get awaitingSenderApproval => pendingSender != null;
 
   ReceiveState copyWith({
     ReceiverKeypair? receiverKeypair,
@@ -80,6 +97,10 @@ class ReceiveState {
     String? error,
     String? senderFingerprint,
     bool? isNewSender,
+    PendingSender? pendingSender,
+    // copyWith's `??` idiom cannot express "set this back to null", and
+    // clearing the pending sender is exactly what accept/reject must do.
+    bool clearPendingSender = false,
   }) {
     return ReceiveState(
       receiverKeypair: receiverKeypair ?? this.receiverKeypair,
@@ -95,8 +116,19 @@ class ReceiveState {
       error: error,
       senderFingerprint: senderFingerprint ?? this.senderFingerprint,
       isNewSender: isNewSender ?? this.isNewSender,
+      pendingSender:
+          clearPendingSender ? null : (pendingSender ?? this.pendingSender),
     );
   }
+}
+
+/// A session whose signature verified but whose sender is unknown to this
+/// device, waiting on the user's accept/reject decision.
+class PendingSender {
+  const PendingSender({required this.receiver, required this.fingerprint});
+
+  final Receiver receiver;
+  final String fingerprint;
 }
 
 class ReceiveNotifier extends StateNotifier<ReceiveState> {
@@ -113,10 +145,13 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
 
   void startScanning() {
     state = state.copyWith(isScanning: true, error: null);
+    // The camera is useless if the screen sleeps mid-transfer.
+    unawaited(keepScreenAwake());
   }
 
   void stopScanning() {
     state = state.copyWith(isScanning: false);
+    unawaited(allowScreenSleep());
   }
 
   /// Entry point for every QR string the camera picks up. Foreign QRs are
@@ -153,18 +188,27 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
       await receiver.startSession(data);
 
       // Extract the sender's identity fingerprint from the verified header.
-      final senderKey = receiver.session!.header.senderVerifyKey;
-      final fingerprint = senderKey
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .substring(0, 16);
+      // Same derivation the sender shows in its own identity card — both
+      // sides must render an identical string or the comparison the user is
+      // asked to make is meaningless.
+      final fingerprint =
+          fingerprintOf(receiver.session!.header.senderVerifyKey);
 
       // TOFU check: have we seen this sender before?
       final known = await _tofuStore.isKnown(fingerprint);
       if (!known) {
-        // First time seeing this sender — flag for UI warning.
-        // The user should verify the fingerprint out-of-band.
-        await _tofuStore.markKnown(fingerprint);
+        // An unrecognised sender is held here, NOT armed. The fingerprint is
+        // only written to the TOFU store once the user accepts it in
+        // acceptPendingSender() — otherwise the first contact would be
+        // trusted automatically and every later transfer from an impostor
+        // would show up as an already-known sender.
+        state = state.copyWith(
+          pendingSender:
+              PendingSender(receiver: receiver, fingerprint: fingerprint),
+          senderFingerprint: fingerprint,
+          error: null,
+        );
+        return;
       }
 
       state = state.copyWith(
@@ -172,11 +216,37 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         totalChunks: receiver.session!.header.chunkCount,
         error: null,
         senderFingerprint: fingerprint,
-        isNewSender: !known,
+        isNewSender: false,
       );
     } on DeadDropCryptoError catch (e) {
       state = state.copyWith(error: 'Session rejected: ${e.message}');
     }
+  }
+
+  /// The user confirmed the fingerprint out of band: remember the sender and
+  /// arm the held session so data frames start decoding.
+  Future<void> acceptPendingSender() async {
+    final pending = state.pendingSender;
+    if (pending == null) return;
+
+    await _tofuStore.markKnown(pending.fingerprint);
+    state = state.copyWith(
+      receiver: pending.receiver,
+      totalChunks: pending.receiver.session!.header.chunkCount,
+      isNewSender: true,
+      clearPendingSender: true,
+      error: null,
+    );
+  }
+
+  /// The user rejected the sender: drop the session without recording any
+  /// trust, and keep scanning.
+  void rejectPendingSender() {
+    if (state.pendingSender == null) return;
+    state = state.copyWith(
+      clearPendingSender: true,
+      error: 'Sender rejected — the transfer was not accepted.',
+    );
   }
 
   void _processDataFrame(Uint8List data) {
@@ -211,16 +281,38 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   }
 
   Future<void> saveFile() async {
-    if (state.fileBytes == null) return;
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: 'Save received file',
-      fileName: state.fileName ??
-          'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}',
-    );
-    if (path == null) return;
-    final file = File(path);
-    await file.writeAsBytes(state.fileBytes!);
-    state = state.copyWith(savedPath: path);
+    final bytes = state.fileBytes;
+    if (bytes == null) return;
+
+    final name = state.fileName ??
+        'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
+
+    try {
+      // FilePicker.saveFile() is desktop-only: on Android and iOS it has no
+      // native "save as" dialog to show and returns null, which the previous
+      // code silently treated as "user cancelled" — so the button did
+      // nothing at all on a phone, with no error. Mobile gets the app's
+      // documents directory instead, and the UI reports where the file went.
+      final String path;
+      if (Platform.isAndroid || Platform.isIOS) {
+        final dir = await getApplicationDocumentsDirectory();
+        path = await _uniquePathIn(dir, name);
+      } else {
+        final chosen = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save received file',
+          fileName: name,
+        );
+        if (chosen == null) return; // genuinely cancelled
+        path = chosen;
+      }
+
+      await File(path).writeAsBytes(bytes);
+      state = state.copyWith(savedPath: path);
+    } catch (e) {
+      // A failed save must say so. Swallowing it leaves the user believing
+      // a file they may have crossed a border for is on disk when it is not.
+      state = state.copyWith(error: 'Could not save the file: $e');
+    }
   }
 
   /// Seals the received bytes directly into the open vault environment via
@@ -247,8 +339,39 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     state = state.copyWith(savedToVault: true);
   }
 
+  /// Returns a path inside [dir] for [name] that does not already exist,
+  /// suffixing "-1", "-2" and so on. Receiving two files with the same name
+  /// must not silently overwrite the first.
+  Future<String> _uniquePathIn(Directory dir, String name) async {
+    final dot = name.lastIndexOf('.');
+    final stem = dot > 0 ? name.substring(0, dot) : name;
+    final ext = dot > 0 ? name.substring(dot) : '';
+
+    var candidate = '${dir.path}/$name';
+    var n = 1;
+    while (await File(candidate).exists()) {
+      candidate = '${dir.path}/$stem-$n$ext';
+      n++;
+    }
+    return candidate;
+  }
+
+  /// Clears everything about the current transfer, keeping this device's
+  /// receiver keypair so the sender does not have to re-scan the handshake
+  /// QR. Use when a transfer is going badly and the sender is going to
+  /// restart with different parameters.
   void reset() {
     state = ReceiveState(receiverKeypair: state.receiverKeypair);
+  }
+
+  /// Abandons a transfer that is partway through.
+  ///
+  /// Separate from [reset] only so the UI can offer it with honest wording:
+  /// the partially-decoded chunks are discarded, and because the sender
+  /// mints a new file_id when it restarts, nothing collected so far could
+  /// have been reused anyway.
+  void cancelTransfer() {
+    reset();
   }
 }
 
@@ -464,8 +587,17 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             ),
             const SizedBox(height: 16),
 
+            // ── Unknown sender: decision required before decoding ────
+            if (state.awaitingSenderApproval) ...[
+              _UnknownSenderPrompt(
+                fingerprint: state.pendingSender!.fingerprint,
+                onAccept: notifier.acceptPendingSender,
+                onReject: notifier.rejectPendingSender,
+              ),
+              const SizedBox(height: 16),
+            ]
             // ── Sender identity (shown after bootstrap) ──────────
-            if (state.senderFingerprint != null) ...[
+            else if (state.senderFingerprint != null) ...[
               _SenderIdentityCard(
                 fingerprint: state.senderFingerprint!,
                 isNewSender: state.isNewSender,
@@ -499,6 +631,35 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       '(${state.framesReceived} frames scanned)',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                    // Cancel is offered only while a transfer is still
+                    // running: a slow one usually means the sender needs to
+                    // change fps or chunk size, and without this the only
+                    // way out was to close the app and re-pair.
+                    if (state.fileBytes == null) ...[
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          notifier.cancelTransfer();
+                          _stopScanner();
+                        },
+                        icon: const Icon(Icons.close),
+                        label: const Text('Cancel transfer'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 48),
+                          foregroundColor: DeadDropColors.error,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Cancelling keeps your key, so the sender does not '
+                          'have to scan it again.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: DeadDropColors.textSecondary,
+                              ),
+                        ),
+                      ),
+                    ],
                     if (state.fileBytes != null) ...[
                       const SizedBox(height: 16),
                       Container(
@@ -533,7 +694,12 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                             ),
                             if (state.savedPath != null) ...[
                               const SizedBox(height: 4),
-                              Text(
+                              // The full path is shown rather than just the
+                              // filename: on mobile the file lands in the
+                              // app's documents directory, and a user who is
+                              // not told where it went cannot find it. Wraps
+                              // rather than truncating for the same reason.
+                              SelectableText(
                                 'Saved to: ${state.savedPath}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
@@ -546,6 +712,10 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               ),
                             ],
                             const SizedBox(height: 12),
+                            // Each button takes half the width rather than
+                            // its intrinsic size: on a phone the two labels
+                            // plus icons overflow a bare Row, which pushed
+                            // "New transfer" out of place.
                             Row(
                               children: [
                                 // Each button is Expanded rather than
@@ -818,6 +988,98 @@ class _PublicKeyTextView extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Unknown sender prompt (blocks the transfer until the user decides)
+// ---------------------------------------------------------------------------
+
+/// Asks the user to confirm an unrecognised sender before any data is
+/// decoded.
+///
+/// This is the moment TOFU depends on: the fingerprint is only remembered
+/// once a human has compared it with the sender out of band. Deciding
+/// automatically here would make every later transfer from an impostor look
+/// like a familiar sender.
+///
+/// The copy deliberately avoids "public key", "fingerprint of the Ed25519
+/// identity" and similar: the user is asked to compare a code with the
+/// person in front of them, which is the whole action.
+class _UnknownSenderPrompt extends StatelessWidget {
+  const _UnknownSenderPrompt({
+    required this.fingerprint,
+    required this.onAccept,
+    required this.onReject,
+  });
+
+  final String fingerprint;
+  final VoidCallback onAccept;
+  final VoidCallback onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.help_outline, color: DeadDropColors.warning),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Is this who you expect?',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'You have not received from this device before. Ask the person '
+              'sending the file to read out the code shown on their screen '
+              'and check that it matches:',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: SelectableText(
+                fingerprint,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 18,
+                  letterSpacing: 2,
+                  color: DeadDropColors.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onReject,
+                    icon: const Icon(Icons.close),
+                    label: const Text("Codes don't match"),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: onAccept,
+                    icon: const Icon(Icons.check),
+                    label: const Text('Codes match'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -11,7 +11,9 @@ import 'package:sodium_libs/sodium_libs.dart';
 
 import '../../src/chunking.dart';
 import '../../src/crypto.dart';
+import '../../src/screen_wake.dart';
 import '../../src/emitter.dart';
+import '../../src/file_metadata.dart';
 import '../../src/handshake.dart';
 import '../../src/identity_store.dart';
 import '../../src/transport.dart';
@@ -173,7 +175,12 @@ class SendNotifier extends StateNotifier<SendState> {
   }
 
   void setChunkSize(int size) {
-    if (state.isEmitting) return; // locked during a transfer
+    // Changing the chunk size mid-transfer cannot be applied to a running
+    // emission — the receiver's decoder is built around the chunk count in
+    // the bootstrap header — so stop instead of silently ignoring the user.
+    // They can then restart with the new value without re-pairing, which is
+    // the whole point: finding the right parameters is trial and error.
+    if (state.isEmitting) stopEmitting();
     // Re-validate the picked file against the new chunk size so the error
     // appears / clears immediately as the user moves the slider.
     final bytes = state.fileBytes;
@@ -236,18 +243,33 @@ class SendNotifier extends StateNotifier<SendState> {
       currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
       clearSendError: true,
     );
+    // The screen must not dim while it is the transmission medium.
+    unawaited(keepScreenAwake());
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
     _timer = Timer(const Duration(seconds: 4), _startDataPhase);
   }
 
+  /// Stops the emission, keeping the picked file and the receiver key so the
+  /// user can adjust parameters and start again without re-scanning.
   void stopEmitting() {
     _stopTimer();
+    unawaited(allowScreenSleep());
     state = state.copyWith(
       isEmitting: false,
       showingBootstrap: false,
       currentQrData: null,
+      framesEmitted: 0,
     );
+  }
+
+  /// Stops and immediately starts again, rebuilding the emitter so the
+  /// current fps, chunk size and EC level apply. The session gets a new
+  /// file_id, so the receiver — which filters frames by that id — treats it
+  /// as a fresh transfer and ignores whatever it had collected.
+  Future<void> restartEmitting() async {
+    stopEmitting();
+    await startEmitting();
   }
 
   void _startDataPhase() {
@@ -281,6 +303,10 @@ class SendNotifier extends StateNotifier<SendState> {
   @override
   void dispose() {
     _stopTimer();
+    // A wakelock outliving the notifier would keep the screen on for the
+    // rest of the app's life, draining a device whose owner may have no way
+    // to charge it.
+    unawaited(allowScreenSleep());
     super.dispose();
   }
 }
@@ -521,9 +547,8 @@ bool isPreviewableImageExtension(String? extension) {
 }
 
 /// Shows the picked file: type icon (or image thumbnail), name and size by
-/// default; tapping expands a metadata section with extension, size in
-/// bytes, and full path. The file picker's `PlatformFile` does not expose a
-/// last-modified date, so that field is omitted.
+/// default. An info button toggles a metadata section with type, dimensions
+/// (images), page count (PDFs), size, magic bytes, and full path.
 class _FileInfoTile extends StatefulWidget {
   const _FileInfoTile({
     required this.fileName,
@@ -542,7 +567,7 @@ class _FileInfoTile extends StatefulWidget {
   /// Absolute path on the sender device, if the picker exposed one.
   final String? filePath;
 
-  /// File bytes, used to render a thumbnail for image files.
+  /// File bytes, used to render a thumbnail and extract metadata.
   final Uint8List? fileBytes;
 
   @override
@@ -554,7 +579,9 @@ class _FileInfoTileState extends State<_FileInfoTile> {
 
   @override
   Widget build(BuildContext context) {
-    final hasMetadata = widget.fileExtension != null || widget.filePath != null;
+    final hasMetadata = widget.fileExtension != null ||
+        widget.filePath != null ||
+        widget.fileBytes != null;
 
     return Container(
       decoration: BoxDecoration(
@@ -564,70 +591,41 @@ class _FileInfoTileState extends State<_FileInfoTile> {
       ),
       child: Column(
         children: [
-          InkWell(
-            onTap: hasMetadata
-                ? () => setState(() => _expanded = !_expanded)
-                : null,
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  _buildLeading(),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.fileName,
-                          style: Theme.of(context).textTheme.titleSmall,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          _formatSize(widget.fileSize),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                _buildLeading(),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.fileName,
+                        style: Theme.of(context).textTheme.titleSmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        formatFileSize(widget.fileSize),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ),
-                  if (hasMetadata)
-                    Icon(
-                      _expanded ? Icons.expand_less : Icons.expand_more,
-                      color: DeadDropColors.textSecondary,
-                      size: 20,
-                    ),
+                ),
+                if (hasMetadata) ...[
+                  _InfoButton(
+                    expanded: _expanded,
+                    onTap: () => setState(() => _expanded = !_expanded),
+                  ),
                   const SizedBox(width: 4),
-                  const Icon(Icons.check_circle,
-                      color: DeadDropColors.success, size: 20),
                 ],
-              ),
+                const Icon(Icons.check_circle,
+                    color: DeadDropColors.success, size: 20),
+              ],
             ),
           ),
-          if (_expanded && hasMetadata)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Column(
-                children: [
-                  const Divider(height: 1),
-                  const SizedBox(height: 8),
-                  if (widget.fileExtension != null)
-                    _MetadataRow(
-                      label: 'Type',
-                      value: widget.fileExtension!.toUpperCase(),
-                    ),
-                  _MetadataRow(
-                    label: 'Size',
-                    value: '${widget.fileSize} bytes',
-                  ),
-                  if (widget.filePath != null)
-                    _MetadataRow(
-                      label: 'Path',
-                      value: widget.filePath!,
-                    ),
-                ],
-              ),
-            ),
+          if (_expanded && hasMetadata) _buildMetadataSection(),
         ],
       ),
     );
@@ -659,12 +657,122 @@ class _FileInfoTileState extends State<_FileInfoTile> {
     );
   }
 
-  static String _formatSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  Widget _buildMetadataSection() {
+    final bytes = widget.fileBytes;
+    final ext = widget.fileExtension;
+    final rows = <Widget>[];
+
+    // Type: extension + MIME
+    final mime = guessMimeType(bytes, ext);
+    if (ext != null || mime != null) {
+      final typeLabel = ext != null ? ext.toUpperCase() : '';
+      final mimeLabel = mime ?? '';
+      final value = mimeLabel.isNotEmpty && typeLabel.isNotEmpty
+          ? '$typeLabel ($mimeLabel)'
+          : typeLabel.isNotEmpty
+              ? typeLabel
+              : mimeLabel;
+      if (value.isNotEmpty) {
+        rows.add(_MetadataRow(label: 'Type', value: value));
+      }
     }
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+
+    // Dimensions (images only)
+    if (bytes != null && isPreviewableImageExtension(ext)) {
+      final dims = parseImageDimensions(bytes);
+      if (dims != null) {
+        rows.add(_MetadataRow(
+          label: 'Dimensions',
+          value: '${dims.width} \u00d7 ${dims.height}',
+        ));
+      }
+    }
+
+    // Page count (PDFs only)
+    if (bytes != null && ext == 'pdf') {
+      final pages = countPdfPages(bytes);
+      if (pages != null) {
+        rows.add(_MetadataRow(
+          label: 'Pages',
+          value: '~$pages',
+        ));
+      }
+    }
+
+    // Size: human-readable + exact bytes
+    rows.add(_MetadataRow(
+      label: 'Size',
+      value: formatSizeWithBytes(widget.fileSize),
+    ));
+
+    // Magic bytes / signature
+    if (bytes != null && bytes.isNotEmpty) {
+      rows.add(_MetadataRow(
+        label: 'Signature',
+        value: fileSignature(bytes),
+      ));
+    }
+
+    // Path
+    if (widget.filePath != null) {
+      rows.add(_MetadataRow(
+        label: 'Path',
+        value: widget.filePath!,
+      ));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Column(
+        children: [
+          const Divider(height: 1),
+          const SizedBox(height: 8),
+          ...rows,
+        ],
+      ),
+    );
+  }
+}
+
+/// A circular bordered info button that toggles the metadata section.
+class _InfoButton extends StatelessWidget {
+  const _InfoButton({required this.expanded, required this.onTap});
+
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: expanded ? 'Hide metadata' : 'View metadata',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: expanded
+                  ? DeadDropColors.accent
+                  : DeadDropColors.borderButton,
+              width: 1.5,
+            ),
+            color: expanded
+                ? DeadDropColors.accent.withOpacity(0.15)
+                : Colors.transparent,
+          ),
+          child: Icon(
+            Icons.info_outline,
+            size: 18,
+            color: expanded
+                ? DeadDropColors.accent
+                : DeadDropColors.textSecondary,
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -683,7 +791,7 @@ class _MetadataRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 56,
+            width: 72,
             child: Text(
               label,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1129,7 +1237,7 @@ class _SendingScreen extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               Text(
-                _formatSize(state.fileBytes?.length ?? 0),
+                formatFileSize(state.fileBytes?.length ?? 0),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 24),
@@ -1161,29 +1269,41 @@ class _SendingScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              // Stop button
-              FilledButton.icon(
-                onPressed: notifier.stopEmitting,
-                icon: const Icon(Icons.stop),
-                label: const Text('Stop transfer'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 56),
-                  backgroundColor: DeadDropColors.error,
-                ),
+              // Restart and Stop. Restart exists because finding workable
+              // fps and chunk-size values is trial and error, and without
+              // it the only way to apply a new value was to close the app
+              // and re-pair with the receiver.
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: notifier.restartEmitting,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Restart'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 56),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: notifier.stopEmitting,
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 56),
+                        backgroundColor: DeadDropColors.error,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
       ),
     );
-  }
-
-  static String _formatSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    }
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 }
 
