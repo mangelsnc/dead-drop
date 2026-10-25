@@ -19,6 +19,7 @@ import '../../src/identity_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
+import '../responsive.dart';
 
 /// State for the send flow.
 class SendState {
@@ -127,8 +128,7 @@ class SendState {
       totalFrames: totalFrames ?? this.totalFrames,
       currentQrData: currentQrData ?? this.currentQrData,
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
-      sendError:
-          clearSendError ? null : (sendError ?? this.sendError),
+      sendError: clearSendError ? null : (sendError ?? this.sendError),
     );
   }
 }
@@ -363,65 +363,82 @@ class SendPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('Send a file')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── Step 1: Select file ──────────────────────────────
-            _StepCard(
-              step: 1,
-              title: 'Choose a file',
-              isComplete: state.fileBytes != null,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (state.fileName != null) ...[
-                    _FileInfoTile(
-                      fileName: state.fileName!,
-                      fileSize: state.fileBytes!.length,
-                      fileExtension: state.fileExtension,
-                      filePath: state.filePath,
-                      fileBytes: state.fileBytes,
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  FilledButton.tonalIcon(
-                    onPressed: notifier.pickFile,
-                    icon: const Icon(Icons.folder_open),
-                    label: Text(
-                      state.fileName == null ? 'Choose file' : 'Change file',
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 52),
+        child: ContentWidthLimit(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Steps 1 and 2 are the actions; configuration and identity are
+              // supporting material. On a desktop window they sit side by
+              // side rather than stacking into a column that scrolls while
+              // two thirds of the window stays empty. On a phone the same
+              // widgets stack in this order.
+              TwoColumnLayout(
+                start: [
+                  // ── Step 1: Select file ──────────────────────────────
+                  _StepCard(
+                    step: 1,
+                    title: 'Choose a file',
+                    isComplete: state.fileBytes != null,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (state.fileName != null) ...[
+                          _FileInfoTile(
+                            fileName: state.fileName!,
+                            fileSize: state.fileBytes!.length,
+                            fileExtension: state.fileExtension,
+                            filePath: state.filePath,
+                            fileBytes: state.fileBytes,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        FilledButton.tonalIcon(
+                          onPressed: notifier.pickFile,
+                          icon: const Icon(Icons.folder_open),
+                          label: Text(
+                            state.fileName == null
+                                ? 'Choose file'
+                                : 'Change file',
+                          ),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 52),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+
+                  // ── Step 2: Scan receiver key ────────────────────────
+                  _StepCard(
+                    step: 2,
+                    title: 'Scan receiver\'s QR',
+                    isComplete: state.receiverPk != null,
+                    child: _ReceiverKeySection(
+                      state: state,
+                      notifier: notifier,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                end: [
+                  // ── Step 3: Configure (collapsible) ──────────────
+                  _ConfigSection(state: state, notifier: notifier),
+                  const SizedBox(height: 16),
+
+                  // ── Identity fingerprint ─────────────────────────
+                  const _IdentityFingerprintCard(),
+                  const SizedBox(height: 16),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 8),
 
-            // ── Step 2: Scan receiver key ────────────────────────
-            _StepCard(
-              step: 2,
-              title: 'Scan receiver\'s QR',
-              isComplete: state.receiverPk != null,
-              child: _ReceiverKeySection(
-                state: state,
-                notifier: notifier,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Step 3: Configure (collapsible) ──────────────────
-            _ConfigSection(state: state, notifier: notifier),
-            const SizedBox(height: 16),
-
-            // ── Identity fingerprint ─────────────────────────────
-            const _IdentityFingerprintCard(),
-            const SizedBox(height: 24),
-
-            // ── Step 4: Start ────────────────────────────────────
-            _StartSection(state: state, notifier: notifier),
-          ],
+              // Full width in both layouts: this is the one action that acts
+              // on everything above it, and it should not look like it
+              // belongs to either column.
+              _StartSection(state: state, notifier: notifier),
+            ],
+          ),
         ),
       ),
     );
@@ -465,9 +482,14 @@ class _StepCard extends StatelessWidget {
                       : Text('$step'),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
+                // Expanded, not a bare Text: in the two-column desktop
+                // layout a card gets roughly half the window, and a title
+                // at its natural size overflows the row.
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ],
             ),
@@ -777,9 +799,8 @@ class _InfoButton extends StatelessWidget {
           child: Icon(
             Icons.info_outline,
             size: 18,
-            color: expanded
-                ? DeadDropColors.accent
-                : DeadDropColors.textSecondary,
+            color:
+                expanded ? DeadDropColors.accent : DeadDropColors.textSecondary,
           ),
         ),
       ),
@@ -864,8 +885,7 @@ class _ReceiverKeySection extends StatelessWidget {
             ),
             child: Row(
               children: [
-                const Icon(Icons.check_circle,
-                    color: DeadDropColors.success),
+                const Icon(Icons.check_circle, color: DeadDropColors.success),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -1026,8 +1046,7 @@ class _KeyScanPageState extends State<_KeyScanPage> {
             alignment: Alignment.bottomCenter,
             child: Container(
               margin: const EdgeInsets.all(24),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.6),
                 borderRadius: BorderRadius.circular(8),
