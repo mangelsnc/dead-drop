@@ -10,7 +10,7 @@
 >
 > - **Self-destruct is off by default** and must be turned on deliberately in Settings.
 > - **The decoy holds whatever you put in it** — the app does not generate fake content for you, so an unprepared decoy is not convincing.
-> - **None of this has been tested on a real phone or tablet**, only in the automated test suite on desktop hardware.
+> - **Device testing is partial**: exercised by hand on Android and Linux, plus the automated test suite. **Not yet tested on iOS or macOS.**
 > - Self-destruct **discards keys, not files**, and can be **triggered deliberately** by an attacker who just keeps guessing wrong.
 >
 > Full details, including passphrase-strength and offline-attack limits, are in [docs/security.md](docs/security.md); planned work is tracked in [Issues](../../issues).
@@ -92,7 +92,7 @@ That's it. The [full user guide](docs/user-guide.md) walks through every step wi
 
 **Do I need internet?** No. Never. Not to install the app (if you copy it via USB), not to use it, not to activate it.
 
-**What if someone forces me to unlock it?** The vault has a **decoy passphrase** for exactly this situation: a second, independently-encrypted environment you set up beforehand with your own files, indistinguishable from the real one in behaviour and unlock timing. It only helps if you configure it in advance and keep its content credible — the app does not invent decoy content for you. Files outside the vault have no such protection. Current protections and honest limits (including things not yet tested on real devices): [docs/security.md](docs/security.md).
+**What if someone forces me to unlock it?** The vault has a **decoy passphrase** for exactly this situation: a second, independently-encrypted environment you set up beforehand with your own files, indistinguishable from the real one in behaviour and unlock timing. It only helps if you configure it in advance and keep its content credible — the app does not invent decoy content for you. Files outside the vault have no such protection. Current protections and honest limits (including what has and has not been tested on real devices): [docs/security.md](docs/security.md).
 
 **Is it legal?** Yes. DeadDrop is free software (MIT licence), auditable by anyone, and does not hide its own existence. It protects the same right as a sealed letter: the privacy of correspondence. Full analysis in the [FAQ](docs/faq.md#is-it-legal).
 
@@ -106,7 +106,7 @@ DeadDrop is in active development for the **#cryptograFREE** challenge (RootedCO
 
 - ✅ Documentation and value proposition
 - ✅ E2E-encrypted air-gapped transfer prototype (v0.1)
-- ✅ Vault: passphrase-protected storage, decoy environment, optional self-destruct (not yet tested on real devices — see [docs/security.md](docs/security.md))
+- ✅ Vault: passphrase-protected storage, decoy environment, optional self-destruct (tested on Android and Linux; iOS/macOS pending — see [docs/security.md](docs/security.md))
 - 🚧 MVP in development (delivery: February 2027)
 - 📋 Roadmap: Android/iOS mobile apps after the MVP for the transfer feature. The vault/decoy/self-destruct feature specifically targets Android/iOS **first** (the coercion scenario it defends against is a phone-in-hand scenario) — see `docs/technical-spec.md` §5.1.
 
