@@ -332,6 +332,35 @@ class VaultController extends StateNotifier<VaultState>
     await store.writeSlots([slots[0], wrapped]);
   }
 
+  /// Seals [bytes] under [name] into the currently-open environment.
+  ///
+  /// This is the only way callers outside this file ever get bytes into the
+  /// vault — [VaultStore.put] needs the raw data key, which this controller
+  /// deliberately never exposes on [VaultState] (see [_dataKey]'s doc
+  /// comment). Keeping the put here, rather than handing the key to the
+  /// caller, means the receive flow (and any future caller) never has to
+  /// hold the key itself even transiently.
+  ///
+  /// Returns null if the vault is locked — callers (e.g. the receive page)
+  /// are expected to get it unlocked first and not call this otherwise; this
+  /// does not attempt to unlock on the caller's behalf, since that would
+  /// require a passphrase this method has no way to ask for.
+  ///
+  /// Refreshes [VaultState.entries] on success so a caller that navigates to
+  /// the vault screen afterwards sees the new entry without a separate list
+  /// round-trip.
+  Future<VaultEntry?> saveFile(String name, Uint8List bytes) async {
+    final store = _store;
+    final dataKey = _dataKey;
+    final slot = state.slot;
+    if (store == null || dataKey == null || slot == null) return null;
+
+    final entry = await store.put(dataKey, slot, name, bytes);
+    final entries = await store.list(dataKey, slot);
+    state = state.copyWith(entries: entries);
+    return entry;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);

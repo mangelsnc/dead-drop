@@ -16,6 +16,7 @@ import '../../src/tofu_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
+import '../vault/vault_controller.dart';
 
 /// State for the receive flow.
 class ReceiveState {
@@ -29,6 +30,7 @@ class ReceiveState {
     this.fileBytes,
     this.fileName,
     this.savedPath,
+    this.savedToVault = false,
     this.error,
     this.senderFingerprint,
     this.isNewSender = false,
@@ -45,6 +47,13 @@ class ReceiveState {
   final String? savedPath;
   final String? error;
 
+  /// Set once the received bytes have been sealed into the vault via
+  /// [ReceiveNotifier.saveToVault]. Kept separate from [savedPath] — the two
+  /// destinations are mutually exclusive in the UI (see receive_page.dart's
+  /// result card) but are tracked independently so neither save path has to
+  /// know about the other's bookkeeping.
+  final bool savedToVault;
+
   /// The sender's identity fingerprint (first 16 hex chars of their
   /// Ed25519 public key), extracted from the verified session header.
   final String? senderFingerprint;
@@ -53,8 +62,7 @@ class ReceiveState {
   /// The UI shows a warning prompting out-of-band verification.
   final bool isNewSender;
 
-  double get progress =>
-      totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
+  double get progress => totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
 
   bool get sessionActive => receiver != null;
 
@@ -68,6 +76,7 @@ class ReceiveState {
     Uint8List? fileBytes,
     String? fileName,
     String? savedPath,
+    bool? savedToVault,
     String? error,
     String? senderFingerprint,
     bool? isNewSender,
@@ -82,6 +91,7 @@ class ReceiveState {
       fileBytes: fileBytes ?? this.fileBytes,
       fileName: fileName ?? this.fileName,
       savedPath: savedPath ?? this.savedPath,
+      savedToVault: savedToVault ?? this.savedToVault,
       error: error,
       senderFingerprint: senderFingerprint ?? this.senderFingerprint,
       isNewSender: isNewSender ?? this.isNewSender,
@@ -213,6 +223,30 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     state = state.copyWith(savedPath: path);
   }
 
+  /// Seals the received bytes directly into the open vault environment via
+  /// [vaultController].
+  ///
+  /// Unlike [saveFile], this never touches [FilePicker] and never writes
+  /// plaintext to disk at any point: the bytes go straight from
+  /// [ReceiveState.fileBytes] (already in memory from the transfer) into
+  /// [VaultController.saveFile] / [VaultStore.put], which seal them before
+  /// the first byte is written. There is no intermediate temp file for the
+  /// caller to clean up — the store's own atomic-write path
+  /// (temp-then-rename) only ever sees ciphertext.
+  ///
+  /// Requires an unlocked vault — [VaultController.saveFile] returns null
+  /// otherwise, in which case this leaves [ReceiveState.savedToVault]
+  /// unset. The UI (`_ReceivePageState`) is responsible for getting the
+  /// vault unlocked before calling this.
+  Future<void> saveToVault(VaultController vaultController) async {
+    if (state.fileBytes == null) return;
+    final name = state.fileName ??
+        'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
+    final entry = await vaultController.saveFile(name, state.fileBytes!);
+    if (entry == null) return;
+    state = state.copyWith(savedToVault: true);
+  }
+
   void reset() {
     state = ReceiveState(receiverKeypair: state.receiverKeypair);
   }
@@ -258,6 +292,14 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   Widget build(BuildContext context) {
     final state = ref.watch(receiveProvider);
     final notifier = ref.read(receiveProvider.notifier);
+
+    // Mirrors home_page.dart: the vault destination is offered only once a
+    // vault exists in this session, never merely disabled — see that file's
+    // doc comment on vaultExists for why an absent option, not a greyed-out
+    // one, is the property the vault's coercion-resistance depends on.
+    final vaultExists = ref.watch(
+      vaultControllerProvider.select((s) => s.exists),
+    );
 
     // Stop the camera as soon as the transfer completes.
     ref.listen(receiveProvider, (prev, next) {
@@ -313,8 +355,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                           padding: const EdgeInsets.all(16),
                           decoration: const BoxDecoration(
                             color: Colors.white,
-                            borderRadius:
-                                BorderRadius.all(Radius.circular(12)),
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
                           ),
                           child: QrImageView(
                             data: encodeHandshakeQr(
@@ -392,8 +433,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     const Icon(Icons.videocam_off,
-                                        color: DeadDropColors.error,
-                                        size: 48),
+                                        color: DeadDropColors.error, size: 48),
                                     const SizedBox(height: 12),
                                     Text(
                                       _mapScannerError(error),
@@ -498,24 +538,64 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
+                            if (state.savedToVault) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Saved to vault',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
                             const SizedBox(height: 12),
                             Row(
                               children: [
-                                FilledButton.icon(
-                                  onPressed: state.savedPath == null
-                                      ? notifier.saveFile
-                                      : null,
-                                  icon: const Icon(Icons.save),
-                                  label: const Text('Save file'),
+                                // Each button is Expanded rather than
+                                // intrinsically sized: with the vault option
+                                // present this row holds three labelled
+                                // buttons, which overflows a phone-width
+                                // screen if the buttons just size to their
+                                // text (see fix/receive-save-and-layout,
+                                // PR #60, for the same fix applied to the
+                                // two-button case).
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    onPressed: state.savedPath == null
+                                        ? notifier.saveFile
+                                        : null,
+                                    icon: const Icon(Icons.save),
+                                    label: const Text('Device'),
+                                  ),
                                 ),
-                                const SizedBox(width: 12),
-                                OutlinedButton.icon(
-                                  onPressed: () {
-                                    notifier.reset();
-                                    _stopScanner();
-                                  },
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('New transfer'),
+                                // The vault destination is offered only once
+                                // a vault exists in this session — never
+                                // shown disabled. A greyed-out option would
+                                // itself tell an attacker the feature exists
+                                // and the user set it up, which is exactly
+                                // the kind of tell the vault's
+                                // coercion-resistance is built to avoid (see
+                                // home_page.dart's identical treatment of
+                                // its Vault entry).
+                                if (vaultExists) ...[
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: state.savedToVault
+                                          ? null
+                                          : () => _saveToVault(context, ref),
+                                      icon: const Icon(Icons.lock_outline),
+                                      label: const Text('Vault'),
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () {
+                                      notifier.reset();
+                                      _stopScanner();
+                                    },
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('New'),
+                                  ),
                                 ),
                               ],
                             ),
@@ -556,6 +636,46 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
         ),
       ),
     );
+  }
+
+  /// Saves the received file into the vault, prompting for the vault's
+  /// passphrase first if it is locked.
+  ///
+  /// The vault must be unlocked to receive a write: [VaultController] only
+  /// ever holds a data key for whichever environment the user explicitly
+  /// unlocked, and there is no way to derive one from nothing (unlocking is
+  /// the whole point of the passphrase — see vault_controller.dart). Three
+  /// options exist when a vault exists but is locked: offer the button and
+  /// let the save fail (confusing — the button looked actionable), silently
+  /// unlock with no passphrase (impossible, and if it were possible it would
+  /// defeat the vault's purpose), or ask for the passphrase right here. This
+  /// picks the third: a small inline prompt that unlocks via the same
+  /// [VaultController.unlock] the Vault screen uses, then proceeds with the
+  /// save on success. A wrong passphrase here behaves exactly like a wrong
+  /// passphrase on the Vault screen (attempt-guard penalties, self-destruct)
+  /// — this prompt does not bypass any of that, it just reaches the same
+  /// entry point from a second place in the UI.
+  Future<void> _saveToVault(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(receiveProvider.notifier);
+    final vaultController = ref.read(vaultControllerProvider.notifier);
+
+    if (!ref.read(vaultControllerProvider).unlocked) {
+      final unlocked = await _promptVaultUnlock(context);
+      if (!unlocked) return;
+    }
+
+    await notifier.saveToVault(vaultController);
+  }
+
+  /// Shows a small modal asking for the vault passphrase, used when
+  /// [_saveToVault] is invoked while the vault is locked. Returns whether
+  /// the vault ended up unlocked.
+  Future<bool> _promptVaultUnlock(BuildContext context) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => const _VaultUnlockDialog(),
+    );
+    return result ?? false;
   }
 
   void _startScanner() {
@@ -781,7 +901,9 @@ class _SenderIdentityCard extends StatelessWidget {
                         'New sender — verify this fingerprint through '
                         'another channel (in person, phone call) to '
                         'confirm the sender\'s identity.',
-                        style: Theme.of(context).textTheme.bodySmall
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
                             ?.copyWith(color: DeadDropColors.warning),
                       ),
                     ),
@@ -801,6 +923,105 @@ class _SenderIdentityCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vault unlock prompt (shown from the receive result when saving to a
+// locked vault)
+// ---------------------------------------------------------------------------
+
+/// A small modal passphrase prompt, used only to unlock the vault from the
+/// receive flow's "Save to vault" button when no environment is currently
+/// open.
+///
+/// Deliberately a thin reuse of [VaultController.unlock] rather than a
+/// separate unlock code path — attempt-guard penalties and self-destruct
+/// must apply identically here and on the main Vault screen (vault_page.dart
+/// `_LockedView`), since a passphrase typed here is indistinguishable from
+/// one typed there as far as a coercion scenario is concerned. Reads
+/// [VaultState.error] via `ref.watch` (the same public surface the Vault
+/// screen itself uses) rather than touching [VaultController.state]
+/// directly, which is `@visibleForTesting`/protected outside this library.
+class _VaultUnlockDialog extends ConsumerStatefulWidget {
+  const _VaultUnlockDialog();
+
+  @override
+  ConsumerState<_VaultUnlockDialog> createState() => _VaultUnlockDialogState();
+}
+
+class _VaultUnlockDialogState extends ConsumerState<_VaultUnlockDialog> {
+  final _passphraseController = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _passphraseController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _unlock() async {
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final ok = await ref
+        .read(vaultControllerProvider.notifier)
+        .unlock(_passphraseController.text);
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop(true);
+      return;
+    }
+    setState(() {
+      _submitting = false;
+      _error = ref.read(vaultControllerProvider).error ?? 'Could not unlock';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Unlock vault'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _passphraseController,
+            obscureText: true,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Passphrase'),
+            onSubmitted: (_) => _submitting ? null : _unlock(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: const TextStyle(color: DeadDropColors.error),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed:
+              _submitting ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _unlock,
+          child: _submitting
+              ? const SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Unlock'),
+        ),
+      ],
     );
   }
 }
