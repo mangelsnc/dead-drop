@@ -13,11 +13,15 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sodium/sodium_sumo.dart';
 
 import 'package:dead_drop/src/vault/vault_session.dart';
 import 'package:dead_drop/src/vault/vault_store.dart';
+import 'package:dead_drop/src/vault/attempt_guard.dart';
+import 'package:dead_drop/src/vault/vault_keys.dart';
 import 'package:dead_drop/ui/vault/vault_controller.dart';
 
 Uint8List _bytes(List<int> values) => Uint8List.fromList(values);
@@ -120,6 +124,56 @@ String? _bundledSodiumLibsBinary() {
   return binary.existsSync() ? binary.path : null;
 }
 
+/// In-memory keychain: `flutter_secure_storage` talks to the OS over a
+/// platform channel that does not exist in `flutter_tester`.
+class _FakeSecureStorage extends FlutterSecureStoragePlatform {
+  final Map<String, String> data = {};
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    data[key] = value;
+  }
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      data[key];
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      data.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    data.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(data);
+
+  @override
+  Future<void> deleteAll({
+    required Map<String, String> options,
+  }) async {
+    data.clear();
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -144,6 +198,78 @@ void main() {
     final store = VaultStore(tempDir, sodium);
     return VaultController(sodium, store);
   }
+
+  test(
+      'self-destruct at the threshold destroys every slot, and says nothing '
+      'an ordinary wrong passphrase would not', () async {
+    // The most safety-critical behaviour in the feature, and the one that
+    // had no coverage: a surviving decoy would prove to an attacker that
+    // there had been something to erase.
+    final keychain = _FakeSecureStorage();
+    FlutterSecureStoragePlatform.instance = keychain;
+    keychain.data[kSelfDestructStorageKey] = 'true';
+
+    final store = VaultStore(tempDir, sodium);
+    final controller = VaultController(
+      sodium,
+      store,
+      // No delay: the production curve would make this test wait nearly
+      // four minutes of real time to cross the threshold. The counting and
+      // the wipe are unaffected — only the waiting is.
+      attemptGuard: AttemptGuard(
+        storage: const FlutterSecureStorage(),
+        penaltyStep: Duration.zero,
+      ),
+    );
+    addTearDown(controller.dispose);
+
+    await controller.createVault('correct horse battery staple six');
+    await controller.addDecoy('seven eight nine ten eleven twelve');
+    controller.lock();
+
+    // A success resets the counter, so the run of failures that crosses the
+    // threshold has to be unbroken. Check that reset explicitly first —
+    // it is the reason a naive version of this test never fires at all.
+    for (var i = 0; i < kSelfDestructThreshold - 1; i++) {
+      await controller.unlock('wrong passphrase $i');
+    }
+    expect(await controller.unlock('correct horse battery staple six'), isTrue,
+        reason: 'one short of the threshold, the vault still opens');
+    controller.lock();
+
+    // Now an unbroken run all the way to the threshold.
+    for (var i = 0; i < kSelfDestructThreshold - 1; i++) {
+      final fired = await controller.unlock('still wrong $i');
+      expect(fired, isFalse);
+    }
+    final crossed = await controller.unlock('one wrong too many');
+    expect(crossed, isFalse);
+    expect(controller.state.error, 'Incorrect passphrase',
+        reason: 'the wipe must not announce itself');
+
+    // The wipe is deliberately not awaited inside unlock() so it cannot be
+    // timed; wait for it here before checking the slots.
+    await controller.debugWipe;
+
+    expect(await controller.unlock('correct horse battery staple six'), isFalse,
+        reason: 'the real environment must be gone');
+    expect(await controller.unlock('seven eight nine ten eleven twelve'),
+        isFalse,
+        reason: 'the decoy must be gone too — a survivor proves there was '
+            'something to erase');
+
+    // Let any straggling wipe I/O settle before tearDown removes the temp
+    // directory out from under it.
+    await controller.debugWipe;
+
+    final slots = await store.readSlots();
+    expect(slots, hasLength(kVaultEnvironmentSlots));
+    for (final slot in slots) {
+      expect(slot, isA<WrappedKey>(),
+          reason: 'destroyed slots still parse as filler: the on-disk shape '
+              'must not reveal that a wipe happened');
+    }
+  });
 
   test('unlock with the real passphrase exposes the real entries', () async {
     final controller = buildController();
