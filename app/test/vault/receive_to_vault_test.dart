@@ -289,6 +289,13 @@ void main() {
     const secretMarker = 'DEADDROP-PLAINTEXT-MARKER-DO-NOT-LEAK';
     final bytes = Uint8List.fromList(utf8.encode(secretMarker));
 
+    // Snapshot system temp before the save so the check below can look at
+    // the files this save created, rather than at every file the machine
+    // happens to have in /tmp.
+    final tempBefore = <String>{
+      for (final e in Directory.systemTemp.listSync()) e.path,
+    };
+
     final entry = await controller.saveFile('secret.txt', bytes);
     expect(entry, isNotNull);
 
@@ -306,20 +313,25 @@ void main() {
     expect(offenders, isEmpty,
         reason: 'plaintext marker leaked into: $offenders');
 
-    // Also check the system temp directory in case anything wrote a scratch
-    // file outside the vault's own root (e.g. via a file picker or a stray
-    // temp file) — the whole point of saveFile() is that it never touches
-    // FilePicker or any path outside the sealed store.
+    // Also check for a scratch file written outside the vault's own root
+    // (e.g. via a file picker, or a stray temp file) — the whole point of
+    // saveFile() is that it never touches FilePicker or any path outside
+    // the sealed store.
+    //
+    // Only entries that appeared during the save are examined. Reading
+    // every file already in system temp made this test depend on unrelated
+    // files on the host: on a CI runner, whose /tmp holds hundreds of
+    // megabytes of other jobs' data, it timed out at 30s. It also could not
+    // distinguish our leak from someone else's file.
     final sysTempOffenders = <String>[];
-    await for (final e in Directory.systemTemp.list(recursive: false)) {
-      if (e is! File) continue;
+    for (final e in Directory.systemTemp.listSync()) {
+      if (e is! File || tempBefore.contains(e.path)) continue;
       try {
-        final raw = await e.readAsBytes();
-        if (_containsBytes(raw, utf8.encode(secretMarker))) {
+        if (_containsBytes(e.readAsBytesSync(), utf8.encode(secretMarker))) {
           sysTempOffenders.add(e.path);
         }
       } on FileSystemException {
-        // Unrelated file disappeared/changed concurrently — not ours.
+        // Appeared and vanished again mid-test — not ours to read.
       }
     }
     expect(sysTempOffenders, isEmpty,

@@ -227,7 +227,28 @@ void main() {
             'others, which is the exact stopwatch tell this feature exists '
             'to prevent.',
       );
-    });
+    },
+        // Wall-clock timing is not measurable on a shared CI runner. This
+        // test is a stopwatch: it needs the machine to be otherwise quiet.
+        // GitHub's hosted macOS runners are neither quiet nor consistently
+        // provisioned, and this measured a 96ms spread there against an
+        // 80ms bound while the same commit measured well inside the bound
+        // on Linux.
+        //
+        // The bound is deliberately NOT relaxed to accommodate that noise.
+        // Its whole value is sitting below the ~150ms that a reintroduced
+        // early return would remove from one path; a bound loose enough to
+        // survive a noisy runner would no longer catch the regression it
+        // exists to catch, and would pass while silently measuring nothing.
+        //
+        // So it runs where the measurement means something — a developer
+        // machine and the Linux container — and is skipped on macOS CI.
+        // The Linux CI job still runs it on every push, so a real
+        // short-circuit is still caught before merge.
+        skip: Platform.isMacOS && Platform.environment['CI'] == 'true'
+            ? 'wall-clock timing is not measurable on shared macOS CI '
+                'runners; covered by the Linux CI job'
+            : null);
 
     test(
         'an early return after the first match would blow the bound '
