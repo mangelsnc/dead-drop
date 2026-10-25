@@ -73,7 +73,7 @@ FLUTTER_VERSION := $(shell sed -n 's/.*"flutter"[[:space:]]*:[[:space:]]*"\([^"]
 # with $(FLUTTER_VERSION); fall back to PATH otherwise, with a warning.
 HOST_FLUTTER := $(shell command -v fvm >/dev/null 2>&1 && echo "fvm flutter" || echo "flutter")
 
-.PHONY: help image image-force _check-host-flutter build-linux build-android build-ios build-macos test analyze clean shell doctor
+.PHONY: help image image-force _check-host-flutter build-linux build-android build-ios build-macos test test-timing analyze clean shell doctor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -139,11 +139,20 @@ build-macos: ## macOS build — runs on HOST, not in Docker (requires macOS + Fl
 	cd $(APP_DIR) && $(HOST_FLUTTER) pub get && $(HOST_FLUTTER) build macos --release
 	@echo "✔ Output: $(APP_DIR)/build/macos/Build/Products/Release/dead_drop.app"
 
-test: $(STAMP) ## Run the test suite
+test: $(STAMP) ## Run the test suite (excludes wall-clock timing tests)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
-		flutter test"
+		flutter test --exclude-tags timing"
+
+test-timing: $(STAMP) ## Run the wall-clock timing tests (serial; needs a quiet, non-emulated machine)
+	@echo "Note: on an Apple Silicon host this runs under x86_64 emulation,"
+	@echo "where the measurement is dominated by emulator jitter. CI's Linux"
+	@echo "job runs it natively — see app/dart_test.yaml."
+	$(DOCKER_RUN) $(IMAGE) bash -c "\
+		cd $(APP_DIR) && \
+		flutter pub get && \
+		flutter test --tags timing --concurrency 1"
 
 analyze: $(STAMP) ## Run static analysis (flutter analyze)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\

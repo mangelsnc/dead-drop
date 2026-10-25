@@ -30,6 +30,7 @@
 /// - AttemptGuard's rate limiter is injected with `penaltyStep: Duration.zero`
 ///   so these tests measure the crypto, not the limiter. Production still
 ///   applies the real penalty; that is covered by attempt_guard_test.dart.
+@Tags(['timing'])
 library;
 
 import 'dart:ffi';
@@ -135,23 +136,38 @@ const int _kRepetitions = 11;
 /// exactly the asymmetry this test exists to rule out.
 const int _kWarmupRepetitions = 3;
 
-/// The bound this test enforces, in milliseconds, on the spread between the
-/// slowest and fastest median among {real, decoy, wrong passphrase}.
+/// The bound this test enforces on the spread between the slowest and
+/// fastest median among {real, decoy, wrong passphrase}, as a FRACTION of
+/// the fastest median.
 ///
-/// Chosen from this project's own measurements: a steady-state `tryUnlock`
-/// call (2 Argon2id derivations) costs roughly 300ms under the pinned
-/// Docker toolchain (x86_64 emulation), built from a ~150ms-per-derivation
-/// steady-state spike figure recorded while implementing vault_session.dart.
-/// All three outcomes (real, decoy, wrong) run the identical two-derivation
-/// loop with no outcome-dependent branch, so their true costs should be
-/// equal up to scheduler/GC noise — a difference of even a single
-/// derivation's worth of extra or skipped work (~150ms) would be a real
-/// regression, not noise. 80ms is comfortably above the jitter this suite
-/// observes between repeated identical calls, and comfortably below the
-/// ~150ms a reintroduced early return would remove from one path — see the
-/// "catches a short-circuit" sibling test below, which exercises that
-/// mutation directly.
-const int _kMaxSpreadMillis = 80;
+/// All three outcomes run the identical two-derivation loop with no
+/// outcome-dependent branch, so their true costs are equal up to
+/// scheduler/GC noise. A reintroduced early return would skip one of the two
+/// Argon2id derivations on the matching path, making it roughly 50% faster
+/// than the others — so any ratio comfortably below 0.5 catches the
+/// regression this test exists to catch. 0.25 is used.
+///
+/// **Why a ratio and not a fixed number of milliseconds.** The previous
+/// version enforced an absolute 80ms. That measures the machine as much as
+/// the code: under load, or on an emulated x86_64 container, or on a shared
+/// CI runner, every path slows down together and the absolute spread grows
+/// while the code is unchanged. It failed at 96ms on a macOS CI runner and
+/// at 208ms locally when `flutter analyze` ran in the same container — both
+/// times with no regression present. A test that fails on a busy machine
+/// teaches people to ignore it.
+///
+/// A ratio is stable under uniform slowdown, which is exactly the noise we
+/// want to reject, and still fails loudly when one path does different work.
+const double _kMaxSpreadRatio = 0.25;
+
+/// A floor for the absolute spread, below which the ratio is not applied.
+///
+/// This exists because a ratio alone can be defeated by making everything
+/// slow: at very large medians a 25% spread is a lot of real milliseconds.
+/// It also stops the test flapping when all three medians are tiny and
+/// scheduler jitter dominates the ratio. Both bounds must be exceeded for a
+/// failure, so this is deliberately well under one derivation's ~150ms.
+const int _kMinSpreadMillis = 40;
 
 /// Computes the median of a list of [Duration]s, measured in microseconds.
 Duration _median(List<Duration> samples) {
@@ -198,8 +214,9 @@ void main() {
 
     test(
         'real, decoy and wrong passphrase unlock within a tight bound '
-        '(median over $_kRepetitions reps, $_kMaxSpreadMillis ms spread '
-        'bound)', () async {
+        '(median over $_kRepetitions reps, '
+        '${(_kMaxSpreadRatio * 100).toStringAsFixed(0)}% spread bound)',
+        () async {
       final realMedian = await _medianDuration(() async {
         tryUnlock(sodium, 'real passphrase', slots);
       });
@@ -214,41 +231,29 @@ void main() {
       final fastest = medians.reduce((a, b) => a < b ? a : b);
       final slowest = medians.reduce((a, b) => a > b ? a : b);
       final spread = slowest - fastest;
+      final ratio = spread.inMicroseconds / fastest.inMicroseconds;
+
+      // Both bounds must be exceeded to fail: the ratio is what detects a
+      // skipped derivation, the floor stops tiny absolute differences
+      // tripping it when the whole machine is fast.
+      final tooWide =
+          ratio >= _kMaxSpreadRatio && spread.inMilliseconds >= _kMinSpreadMillis;
 
       expect(
-        spread.inMilliseconds,
-        lessThan(_kMaxSpreadMillis),
+        tooWide,
+        isFalse,
         reason: 'real=${realMedian.inMilliseconds}ms '
             'decoy=${decoyMedian.inMilliseconds}ms '
             'wrong=${wrongMedian.inMilliseconds}ms '
             'spread=${spread.inMilliseconds}ms '
-            '(bound: $_kMaxSpreadMillis ms) — a widening spread here means '
-            'one outcome is doing measurably different work than the '
-            'others, which is the exact stopwatch tell this feature exists '
-            'to prevent.',
+            '(${(ratio * 100).toStringAsFixed(1)}% of the fastest; bounds: '
+            '<${(_kMaxSpreadRatio * 100).toStringAsFixed(0)}% or '
+            '<$_kMinSpreadMillis ms) — a widening spread here means one '
+            'outcome is doing measurably different work than the others, '
+            'which is the exact stopwatch tell this feature exists to '
+            'prevent.',
       );
-    },
-        // Wall-clock timing is not measurable on a shared CI runner. This
-        // test is a stopwatch: it needs the machine to be otherwise quiet.
-        // GitHub's hosted macOS runners are neither quiet nor consistently
-        // provisioned, and this measured a 96ms spread there against an
-        // 80ms bound while the same commit measured well inside the bound
-        // on Linux.
-        //
-        // The bound is deliberately NOT relaxed to accommodate that noise.
-        // Its whole value is sitting below the ~150ms that a reintroduced
-        // early return would remove from one path; a bound loose enough to
-        // survive a noisy runner would no longer catch the regression it
-        // exists to catch, and would pass while silently measuring nothing.
-        //
-        // So it runs where the measurement means something — a developer
-        // machine and the Linux container — and is skipped on macOS CI.
-        // The Linux CI job still runs it on every push, so a real
-        // short-circuit is still caught before merge.
-        skip: Platform.isMacOS && Platform.environment['CI'] == 'true'
-            ? 'wall-clock timing is not measurable on shared macOS CI '
-                'runners; covered by the Linux CI job'
-            : null);
+    });
 
     test(
         'an early return after the first match would blow the bound '
@@ -259,7 +264,7 @@ void main() {
       // `if (result != null) break;` right after the match check in
       // vault_session.dart's tryUnlock loop, then re-run the test above.
       //
-      // Verified by hand while choosing _kMaxSpreadMillis, then reverted:
+      // Verified by hand while choosing the spread bound, then reverted:
       // with that mutation in place, the sibling test above measured
       // real=90ms, decoy=188ms, wrong=181ms (spread 97ms) under this
       // project's pinned Docker toolchain — the REAL passphrase (slot 0,
