@@ -17,13 +17,26 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Tracks which sender fingerprints this device has seen before.
 class TofuStore {
-  static const _storageKey = 'deaddrop_tofu_known_senders';
+  static const _unscopedStorageKey = 'deaddrop_tofu_known_senders';
   static const _storage = FlutterSecureStorage(
     lOptions: LinuxOptions(),
     mOptions: MacOsOptions(),
   );
 
+  final String _storageKey;
   Set<String>? _cached;
+
+  /// [environmentSlot] scopes the known-senders list to a vault environment
+  /// (real or decoy). Without scoping, opening the decoy would show the
+  /// real environment's TOFU history — a populated sender list next to a
+  /// still-empty decoy file list (or vice versa) is internally incoherent
+  /// and a tell to an attacker. `null` is the no-vault case and keeps the
+  /// original, unsuffixed storage key byte-for-byte — there are no vaults
+  /// in the wild yet, so existing installs must see no behaviour change.
+  TofuStore({int? environmentSlot})
+      : _storageKey = environmentSlot == null
+            ? _unscopedStorageKey
+            : '${_unscopedStorageKey}_env$environmentSlot';
 
   /// Check whether a sender fingerprint has been seen before.
   ///

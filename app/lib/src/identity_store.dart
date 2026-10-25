@@ -19,7 +19,7 @@ import 'crypto.dart';
 
 /// Loads, stores, and provides the device's persistent Ed25519 identity.
 class IdentityStore {
-  static const _storageKey = 'deaddrop_identity_ed25519';
+  static const _unscopedStorageKey = 'deaddrop_identity_ed25519';
   static const _storage = FlutterSecureStorage(
     // On Linux, use libsecret (available on all desktop distros).
     lOptions: LinuxOptions(),
@@ -28,9 +28,19 @@ class IdentityStore {
   );
 
   final Sodium _sodium;
+  final String _storageKey;
   Identity? _cached;
 
-  IdentityStore(this._sodium);
+  /// [environmentSlot] scopes the identity to a vault environment (real or
+  /// decoy) so each one gets its own signing identity and cannot be
+  /// correlated with the others. Leaving it `null` is the no-vault case and
+  /// keeps the original, unsuffixed storage key byte-for-byte — there are no
+  /// vaults in the wild yet, so existing installs must see no behaviour
+  /// change at all.
+  IdentityStore(this._sodium, {int? environmentSlot})
+      : _storageKey = environmentSlot == null
+            ? _unscopedStorageKey
+            : '${_unscopedStorageKey}_env$environmentSlot';
 
   /// Load the persisted identity, or generate and persist a new one on
   /// first run.
