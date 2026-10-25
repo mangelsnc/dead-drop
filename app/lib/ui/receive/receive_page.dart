@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
@@ -201,16 +202,55 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   }
 
   Future<void> saveFile() async {
-    if (state.fileBytes == null) return;
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: 'Save received file',
-      fileName: state.fileName ??
-          'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}',
-    );
-    if (path == null) return;
-    final file = File(path);
-    await file.writeAsBytes(state.fileBytes!);
-    state = state.copyWith(savedPath: path);
+    final bytes = state.fileBytes;
+    if (bytes == null) return;
+
+    final name = state.fileName ??
+        'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
+
+    try {
+      // FilePicker.saveFile() is desktop-only: on Android and iOS it has no
+      // native "save as" dialog to show and returns null, which the previous
+      // code silently treated as "user cancelled" — so the button did
+      // nothing at all on a phone, with no error. Mobile gets the app's
+      // documents directory instead, and the UI reports where the file went.
+      final String path;
+      if (Platform.isAndroid || Platform.isIOS) {
+        final dir = await getApplicationDocumentsDirectory();
+        path = await _uniquePathIn(dir, name);
+      } else {
+        final chosen = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save received file',
+          fileName: name,
+        );
+        if (chosen == null) return; // genuinely cancelled
+        path = chosen;
+      }
+
+      await File(path).writeAsBytes(bytes);
+      state = state.copyWith(savedPath: path);
+    } catch (e) {
+      // A failed save must say so. Swallowing it leaves the user believing
+      // a file they may have crossed a border for is on disk when it is not.
+      state = state.copyWith(error: 'Could not save the file: $e');
+    }
+  }
+
+  /// Returns a path inside [dir] for [name] that does not already exist,
+  /// suffixing "-1", "-2" and so on. Receiving two files with the same name
+  /// must not silently overwrite the first.
+  Future<String> _uniquePathIn(Directory dir, String name) async {
+    final dot = name.lastIndexOf('.');
+    final stem = dot > 0 ? name.substring(0, dot) : name;
+    final ext = dot > 0 ? name.substring(dot) : '';
+
+    var candidate = '${dir.path}/$name';
+    var n = 1;
+    while (await File(candidate).exists()) {
+      candidate = '${dir.path}/$stem-$n$ext';
+      n++;
+    }
+    return candidate;
   }
 
   void reset() {
@@ -493,29 +533,42 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                             ),
                             if (state.savedPath != null) ...[
                               const SizedBox(height: 4),
-                              Text(
+                              // The full path is shown rather than just the
+                              // filename: on mobile the file lands in the
+                              // app's documents directory, and a user who is
+                              // not told where it went cannot find it. Wraps
+                              // rather than truncating for the same reason.
+                              SelectableText(
                                 'Saved to: ${state.savedPath}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
                             const SizedBox(height: 12),
+                            // Each button takes half the width rather than
+                            // its intrinsic size: on a phone the two labels
+                            // plus icons overflow a bare Row, which pushed
+                            // "New transfer" out of place.
                             Row(
                               children: [
-                                FilledButton.icon(
-                                  onPressed: state.savedPath == null
-                                      ? notifier.saveFile
-                                      : null,
-                                  icon: const Icon(Icons.save),
-                                  label: const Text('Save file'),
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    onPressed: state.savedPath == null
+                                        ? notifier.saveFile
+                                        : null,
+                                    icon: const Icon(Icons.save),
+                                    label: const Text('Save file'),
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
-                                OutlinedButton.icon(
-                                  onPressed: () {
-                                    notifier.reset();
-                                    _stopScanner();
-                                  },
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('New transfer'),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () {
+                                      notifier.reset();
+                                      _stopScanner();
+                                    },
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('New transfer'),
+                                  ),
                                 ),
                               ],
                             ),
