@@ -149,11 +149,30 @@ jobs:
           ./git-cliff --config cliff.toml --tag "$NEW" > CHANGELOG.md
           head -40 CHANGELOG.md
 
+      # The build number must increase on every release, never reset.
+      # Google Play and App Store Connect both reject an upload whose build
+      # number has been seen before for that version train — and unlike the
+      # version name, it is not something a user ever sees, so there is no
+      # reason for it to be anything but monotonic. Using the total commit
+      # count gives that for free: it only ever grows, it is derivable from
+      # the repository alone, and two builds of the same commit agree.
       - name: Bump version in pubspec.yaml
         run: |
           VERSION="${{ steps.version.outputs.version_number }}"
-          sed -i "s/^version: .*/version: ${VERSION}+1/" app/pubspec.yaml
+          BUILD=$(git rev-list --count HEAD)
+          sed -i "s/^version: .*/version: ${VERSION}+${BUILD}/" app/pubspec.yaml
           grep '^version:' app/pubspec.yaml
+
+          # Fail loudly rather than shipping a mislabelled binary: every
+          # platform reads its user-visible version from this one line
+          # (Android via flutter.versionName, Apple via
+          # $(FLUTTER_BUILD_NAME)), so a pubspec that disagrees with the tag
+          # means the released artifacts identify themselves as the wrong
+          # release. That is exactly what happened through v0.2.0.
+          if ! grep -q "^version: ${VERSION}+" app/pubspec.yaml; then
+            echo "::error::pubspec.yaml does not carry ${VERSION} after the bump"
+            exit 1
+          fi
 
       - name: Commit version bump
         run: |

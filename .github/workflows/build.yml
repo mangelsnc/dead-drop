@@ -140,8 +140,13 @@ jobs:
       - name: Package
         run: |
           cd app/build/macos/Build/Products/Release
-          tar czf ../../../../../../deaddrop-macos-arm64.tar.gz dead_drop.app
-          cd ../../../../../../
+          # The bundle is named by PRODUCT_NAME in Runner/Configs/AppInfo.xcconfig,
+          # so hardcoding it here breaks silently whenever the app is renamed —
+          # which is exactly what happened when it became DeadDrop. Find it.
+          APP=$(ls -d *.app | head -1)
+          test -n "$APP" || { echo "::error::no .app bundle in $(pwd)"; exit 1; }
+          tar czf "${GITHUB_WORKSPACE}/deaddrop-macos-arm64.tar.gz" "$APP"
+          cd "${GITHUB_WORKSPACE}"
           shasum -a 256 deaddrop-macos-arm64.tar.gz > deaddrop-macos-arm64.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
