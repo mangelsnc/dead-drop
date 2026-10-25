@@ -14,6 +14,7 @@ import '../../src/handshake.dart';
 import '../../src/receiver.dart';
 import '../../src/tofu_store.dart';
 import '../../src/transport.dart';
+import '../../src/utils.dart';
 import '../../main.dart';
 import '../theme.dart';
 
@@ -32,6 +33,7 @@ class ReceiveState {
     this.error,
     this.senderFingerprint,
     this.isNewSender = false,
+    this.pendingSender,
   });
 
   final ReceiverKeypair? receiverKeypair;
@@ -49,14 +51,27 @@ class ReceiveState {
   /// Ed25519 public key), extracted from the verified session header.
   final String? senderFingerprint;
 
-  /// True when this sender fingerprint has never been seen before (TOFU).
-  /// The UI shows a warning prompting out-of-band verification.
+  /// True when this sender fingerprint had never been seen before (TOFU)
+  /// and the user accepted it during this session. Kept so the UI can keep
+  /// showing the "verify out of band" hint for the rest of the transfer.
   final bool isNewSender;
+
+  /// A verified session from an unrecognised sender, held until the user
+  /// accepts or rejects the fingerprint.
+  ///
+  /// TOFU only means anything if a human looks at the fingerprint the first
+  /// time: trust established automatically is not trust. While this is set
+  /// the session is NOT armed — [receiver] stays null, incoming data frames
+  /// are ignored, and nothing has been written to the TOFU store.
+  final PendingSender? pendingSender;
 
   double get progress =>
       totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
 
   bool get sessionActive => receiver != null;
+
+  /// True while an unrecognised sender is waiting for the user's decision.
+  bool get awaitingSenderApproval => pendingSender != null;
 
   ReceiveState copyWith({
     ReceiverKeypair? receiverKeypair,
@@ -71,6 +86,10 @@ class ReceiveState {
     String? error,
     String? senderFingerprint,
     bool? isNewSender,
+    PendingSender? pendingSender,
+    // copyWith's `??` idiom cannot express "set this back to null", and
+    // clearing the pending sender is exactly what accept/reject must do.
+    bool clearPendingSender = false,
   }) {
     return ReceiveState(
       receiverKeypair: receiverKeypair ?? this.receiverKeypair,
@@ -85,8 +104,19 @@ class ReceiveState {
       error: error,
       senderFingerprint: senderFingerprint ?? this.senderFingerprint,
       isNewSender: isNewSender ?? this.isNewSender,
+      pendingSender:
+          clearPendingSender ? null : (pendingSender ?? this.pendingSender),
     );
   }
+}
+
+/// A session whose signature verified but whose sender is unknown to this
+/// device, waiting on the user's accept/reject decision.
+class PendingSender {
+  const PendingSender({required this.receiver, required this.fingerprint});
+
+  final Receiver receiver;
+  final String fingerprint;
 }
 
 class ReceiveNotifier extends StateNotifier<ReceiveState> {
@@ -143,18 +173,27 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
       await receiver.startSession(data);
 
       // Extract the sender's identity fingerprint from the verified header.
-      final senderKey = receiver.session!.header.senderVerifyKey;
-      final fingerprint = senderKey
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .substring(0, 16);
+      // Same derivation the sender shows in its own identity card — both
+      // sides must render an identical string or the comparison the user is
+      // asked to make is meaningless.
+      final fingerprint =
+          fingerprintOf(receiver.session!.header.senderVerifyKey);
 
       // TOFU check: have we seen this sender before?
       final known = await _tofuStore.isKnown(fingerprint);
       if (!known) {
-        // First time seeing this sender — flag for UI warning.
-        // The user should verify the fingerprint out-of-band.
-        await _tofuStore.markKnown(fingerprint);
+        // An unrecognised sender is held here, NOT armed. The fingerprint is
+        // only written to the TOFU store once the user accepts it in
+        // acceptPendingSender() — otherwise the first contact would be
+        // trusted automatically and every later transfer from an impostor
+        // would show up as an already-known sender.
+        state = state.copyWith(
+          pendingSender:
+              PendingSender(receiver: receiver, fingerprint: fingerprint),
+          senderFingerprint: fingerprint,
+          error: null,
+        );
+        return;
       }
 
       state = state.copyWith(
@@ -162,11 +201,37 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         totalChunks: receiver.session!.header.chunkCount,
         error: null,
         senderFingerprint: fingerprint,
-        isNewSender: !known,
+        isNewSender: false,
       );
     } on DeadDropCryptoError catch (e) {
       state = state.copyWith(error: 'Session rejected: ${e.message}');
     }
+  }
+
+  /// The user confirmed the fingerprint out of band: remember the sender and
+  /// arm the held session so data frames start decoding.
+  Future<void> acceptPendingSender() async {
+    final pending = state.pendingSender;
+    if (pending == null) return;
+
+    await _tofuStore.markKnown(pending.fingerprint);
+    state = state.copyWith(
+      receiver: pending.receiver,
+      totalChunks: pending.receiver.session!.header.chunkCount,
+      isNewSender: true,
+      clearPendingSender: true,
+      error: null,
+    );
+  }
+
+  /// The user rejected the sender: drop the session without recording any
+  /// trust, and keep scanning.
+  void rejectPendingSender() {
+    if (state.pendingSender == null) return;
+    state = state.copyWith(
+      clearPendingSender: true,
+      error: 'Sender rejected — the transfer was not accepted.',
+    );
   }
 
   void _processDataFrame(Uint8List data) {
@@ -424,8 +489,17 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             ),
             const SizedBox(height: 16),
 
+            // ── Unknown sender: decision required before decoding ────
+            if (state.awaitingSenderApproval) ...[
+              _UnknownSenderPrompt(
+                fingerprint: state.pendingSender!.fingerprint,
+                onAccept: notifier.acceptPendingSender,
+                onReject: notifier.rejectPendingSender,
+              ),
+              const SizedBox(height: 16),
+            ]
             // ── Sender identity (shown after bootstrap) ──────────
-            if (state.senderFingerprint != null) ...[
+            else if (state.senderFingerprint != null) ...[
               _SenderIdentityCard(
                 fingerprint: state.senderFingerprint!,
                 isNewSender: state.isNewSender,
@@ -698,6 +772,98 @@ class _PublicKeyTextView extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Unknown sender prompt (blocks the transfer until the user decides)
+// ---------------------------------------------------------------------------
+
+/// Asks the user to confirm an unrecognised sender before any data is
+/// decoded.
+///
+/// This is the moment TOFU depends on: the fingerprint is only remembered
+/// once a human has compared it with the sender out of band. Deciding
+/// automatically here would make every later transfer from an impostor look
+/// like a familiar sender.
+///
+/// The copy deliberately avoids "public key", "fingerprint of the Ed25519
+/// identity" and similar: the user is asked to compare a code with the
+/// person in front of them, which is the whole action.
+class _UnknownSenderPrompt extends StatelessWidget {
+  const _UnknownSenderPrompt({
+    required this.fingerprint,
+    required this.onAccept,
+    required this.onReject,
+  });
+
+  final String fingerprint;
+  final VoidCallback onAccept;
+  final VoidCallback onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.help_outline, color: DeadDropColors.warning),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Is this who you expect?',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'You have not received from this device before. Ask the person '
+              'sending the file to read out the code shown on their screen '
+              'and check that it matches:',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: SelectableText(
+                fingerprint,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 18,
+                  letterSpacing: 2,
+                  color: DeadDropColors.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onReject,
+                    icon: const Icon(Icons.close),
+                    label: const Text("Codes don't match"),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: onAccept,
+                    icon: const Icon(Icons.check),
+                    label: const Text('Codes match'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

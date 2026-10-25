@@ -21,6 +21,7 @@ import 'package:dead_drop/src/handshake.dart';
 import 'package:dead_drop/src/qrframe.dart';
 import 'package:dead_drop/src/receiver.dart';
 import 'package:dead_drop/src/transport.dart';
+import 'package:dead_drop/src/utils.dart';
 
 /// Loads the native libsodium library for the current test platform.
 ///
@@ -303,6 +304,37 @@ void main() {
       final restored =
           Identity.fromSecretKeyBytes(sodium, identity.secretKeyBytes);
       expect(restored.fingerprint, fp1);
+    });
+
+    // The TOFU prompt asks the user to read a code off the sender's screen
+    // and compare it with the one on the receiver's. That check is only
+    // meaningful if both screens derive the string the same way: the sender
+    // renders it from its own Identity, the receiver from the verify key it
+    // reads out of the session header. If these two ever diverge, every
+    // first-contact transfer would show a mismatch and users would learn to
+    // click through the warning.
+    test('Sender and receiver derive the same fingerprint string', () async {
+      final identity = await Identity.generate(sodium);
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+
+      final (_, header) = await Session.open(
+        sodium,
+        Uint8List.fromList(List.filled(64, 7)),
+        512,
+        receiverKp.publicKey,
+        identity,
+      );
+
+      // Sender side: straight from the local identity.
+      // Receiver side: from the verify key carried in the header.
+      expect(fingerprintOf(header.senderVerifyKey), identity.fingerprint);
+      expect(identity.fingerprint.length, fingerprintLength);
+    });
+
+    test('Different identities produce different fingerprints', () async {
+      final a = await Identity.generate(sodium);
+      final b = await Identity.generate(sodium);
+      expect(a.fingerprint, isNot(b.fingerprint));
     });
 
     // Cross-platform known-answer tests for the manifest hash.
