@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium_libs/sodium_libs.dart';
 
@@ -36,6 +35,7 @@ class ReceiveState {
     this.savedToVault = false,
     this.error,
     this.senderFingerprint,
+    this.senderName,
     this.isNewSender = false,
     this.pendingSender,
   });
@@ -67,6 +67,11 @@ class ReceiveState {
   /// showing the "verify out of band" hint for the rest of the transfer.
   final bool isNewSender;
 
+  /// The name the user gave this sender, or null if they are unnamed or
+  /// this is a first contact. A local label, not an authenticated claim —
+  /// see TofuStore.
+  final String? senderName;
+
   /// A verified session from an unrecognised sender, held until the user
   /// accepts or rejects the fingerprint.
   ///
@@ -96,6 +101,7 @@ class ReceiveState {
     bool? savedToVault,
     String? error,
     String? senderFingerprint,
+    String? senderName,
     bool? isNewSender,
     PendingSender? pendingSender,
     // copyWith's `??` idiom cannot express "set this back to null", and
@@ -115,6 +121,7 @@ class ReceiveState {
       savedToVault: savedToVault ?? this.savedToVault,
       error: error,
       senderFingerprint: senderFingerprint ?? this.senderFingerprint,
+      senderName: senderName ?? this.senderName,
       isNewSender: isNewSender ?? this.isNewSender,
       pendingSender:
           clearPendingSender ? null : (pendingSender ?? this.pendingSender),
@@ -216,6 +223,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         totalChunks: receiver.session!.header.chunkCount,
         error: null,
         senderFingerprint: fingerprint,
+        senderName: await _tofuStore.nameFor(fingerprint),
         isNewSender: false,
       );
     } on DeadDropCryptoError catch (e) {
@@ -225,16 +233,21 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
 
   /// The user confirmed the fingerprint out of band: remember the sender and
   /// arm the held session so data frames start decoding.
-  Future<void> acceptPendingSender() async {
+  /// [name] is the label the user chose for this sender, or null if they
+  /// accepted without naming them. Naming is offered because a device's
+  /// identity is persistent: the same sender shows the same fingerprint on
+  /// every transfer, so the name stays meaningful.
+  Future<void> acceptPendingSender({String? name}) async {
     final pending = state.pendingSender;
     if (pending == null) return;
 
-    await _tofuStore.markKnown(pending.fingerprint);
+    await _tofuStore.markKnown(pending.fingerprint, name: name);
     state = state.copyWith(
       receiver: pending.receiver,
       totalChunks: pending.receiver.session!.header.chunkCount,
       isNewSender: true,
       clearPendingSender: true,
+      senderName: name,
       error: null,
     );
   }
@@ -288,26 +301,30 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
 
     try {
-      // FilePicker.saveFile() is desktop-only: on Android and iOS it has no
-      // native "save as" dialog to show and returns null, which the previous
-      // code silently treated as "user cancelled" — so the button did
-      // nothing at all on a phone, with no error. Mobile gets the app's
-      // documents directory instead, and the UI reports where the file went.
-      final String path;
-      if (Platform.isAndroid || Platform.isIOS) {
-        final dir = await getApplicationDocumentsDirectory();
-        path = await _uniquePathIn(dir, name);
-      } else {
-        final chosen = await FilePicker.platform.saveFile(
-          dialogTitle: 'Save received file',
-          fileName: name,
-        );
-        if (chosen == null) return; // genuinely cancelled
-        path = chosen;
-      }
+      // The user picks the destination on every platform, including mobile.
+      //
+      // On Android and iOS `saveFile` requires `bytes` and throws an
+      // ArgumentError without them; it then hands the bytes to the platform
+      // and writes the file itself. An earlier fix read that failure as
+      // "saveFile is desktop-only" and fell back to the app's private
+      // documents directory, which made the button work but chose the
+      // destination for the user — the file landed somewhere they could not
+      // reach from a file manager. Passing the bytes gets the system
+      // document picker, so any folder they can write to is available.
+      //
+      // On desktop `saveFile` returns a path and writes nothing, so we write
+      // the bytes ourselves. Hence the two branches.
+      final chosen = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save received file',
+        fileName: name,
+        bytes: Platform.isAndroid || Platform.isIOS ? bytes : null,
+      );
+      if (chosen == null) return; // cancelled
 
-      await File(path).writeAsBytes(bytes);
-      state = state.copyWith(savedPath: path);
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        await File(chosen).writeAsBytes(bytes);
+      }
+      state = state.copyWith(savedPath: chosen);
     } catch (e) {
       // A failed save must say so. Swallowing it leaves the user believing
       // a file they may have crossed a border for is on disk when it is not.
@@ -337,23 +354,6 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final entry = await vaultController.saveFile(name, state.fileBytes!);
     if (entry == null) return;
     state = state.copyWith(savedToVault: true);
-  }
-
-  /// Returns a path inside [dir] for [name] that does not already exist,
-  /// suffixing "-1", "-2" and so on. Receiving two files with the same name
-  /// must not silently overwrite the first.
-  Future<String> _uniquePathIn(Directory dir, String name) async {
-    final dot = name.lastIndexOf('.');
-    final stem = dot > 0 ? name.substring(0, dot) : name;
-    final ext = dot > 0 ? name.substring(dot) : '';
-
-    var candidate = '${dir.path}/$name';
-    var n = 1;
-    while (await File(candidate).exists()) {
-      candidate = '${dir.path}/$stem-$n$ext';
-      n++;
-    }
-    return candidate;
   }
 
   /// Clears everything about the current transfer, keeping this device's
@@ -387,6 +387,31 @@ class ReceivePage extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<ReceivePage> createState() => _ReceivePageState();
+}
+
+/// Renders a save destination in a form a person can act on.
+///
+/// Desktop returns a real filesystem path, which is already readable and is
+/// shown unchanged. Android's Storage Access Framework instead returns a
+/// content URI such as
+/// `content://com.android.providers.downloads.documents/document/raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Freport.pdf`,
+/// which tells the user nothing. Where such a URI embeds a readable path,
+/// that path is shown; otherwise the decoded document identifier is, which
+/// at least names the folder and file.
+@visibleForTesting
+String displayPath(String raw) {
+  if (!raw.startsWith('content://')) return raw;
+
+  final decoded = Uri.decodeComponent(raw);
+  // SAF document ids look like "raw:/storage/emulated/0/Download/x.pdf" or
+  // "primary:Download/x.pdf"; both carry the part worth showing after the
+  // last colon.
+  final marker = decoded.lastIndexOf(':');
+  if (marker != -1 && marker + 1 < decoded.length) {
+    final tail = decoded.substring(marker + 1);
+    if (tail.contains('/')) return tail;
+  }
+  return decoded;
 }
 
 class _ReceivePageState extends ConsumerState<ReceivePage> {
@@ -591,7 +616,8 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             if (state.awaitingSenderApproval) ...[
               _UnknownSenderPrompt(
                 fingerprint: state.pendingSender!.fingerprint,
-                onAccept: notifier.acceptPendingSender,
+                onAccept: (name) =>
+                    notifier.acceptPendingSender(name: name),
                 onReject: notifier.rejectPendingSender,
               ),
               const SizedBox(height: 16),
@@ -601,6 +627,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               _SenderIdentityCard(
                 fingerprint: state.senderFingerprint!,
                 isNewSender: state.isNewSender,
+                name: state.senderName,
               ),
               const SizedBox(height: 16),
             ],
@@ -694,13 +721,13 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                             ),
                             if (state.savedPath != null) ...[
                               const SizedBox(height: 4),
-                              // The full path is shown rather than just the
-                              // filename: on mobile the file lands in the
-                              // app's documents directory, and a user who is
-                              // not told where it went cannot find it. Wraps
-                              // rather than truncating for the same reason.
+                              // Selectable and wrapping rather than
+                              // truncated: this is the only record of where
+                              // a file the user may have taken real risks
+                              // for actually went, and they may need to
+                              // copy it.
                               SelectableText(
-                                'Saved to: ${state.savedPath}',
+                                'Saved to: ${displayPath(state.savedPath!)}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
@@ -1008,7 +1035,7 @@ class _PublicKeyTextView extends StatelessWidget {
 /// The copy deliberately avoids "public key", "fingerprint of the Ed25519
 /// identity" and similar: the user is asked to compare a code with the
 /// person in front of them, which is the whole action.
-class _UnknownSenderPrompt extends StatelessWidget {
+class _UnknownSenderPrompt extends StatefulWidget {
   const _UnknownSenderPrompt({
     required this.fingerprint,
     required this.onAccept,
@@ -1016,8 +1043,23 @@ class _UnknownSenderPrompt extends StatelessWidget {
   });
 
   final String fingerprint;
-  final VoidCallback onAccept;
+
+  /// Called with the name the user typed, or null if they left it blank.
+  final void Function(String? name) onAccept;
   final VoidCallback onReject;
+
+  @override
+  State<_UnknownSenderPrompt> createState() => _UnknownSenderPromptState();
+}
+
+class _UnknownSenderPromptState extends State<_UnknownSenderPrompt> {
+  final _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1049,7 +1091,7 @@ class _UnknownSenderPrompt extends StatelessWidget {
             const SizedBox(height: 12),
             Center(
               child: SelectableText(
-                fingerprint,
+                widget.fingerprint,
                 style: const TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 18,
@@ -1059,11 +1101,32 @@ class _UnknownSenderPrompt extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+            // Naming is offered here, and only here, because this is the
+            // one moment the user is already looking at the person the
+            // code belongs to. A device's identity is persistent, so the
+            // name stays correct for every later transfer — and "From:
+            // Ana" is something they can check against their own memory,
+            // which sixteen hex characters is not.
+            //
+            // Optional on purpose: someone receiving under pressure should
+            // not have to fill in a form to accept a file.
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(
+                labelText: 'Name this sender (optional)',
+                hintText: 'e.g. Ana',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              textCapitalization: TextCapitalization.words,
+              onSubmitted: (_) => _accept(),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: onReject,
+                    onPressed: widget.onReject,
                     icon: const Icon(Icons.close),
                     label: const Text("Codes don't match"),
                   ),
@@ -1071,7 +1134,7 @@ class _UnknownSenderPrompt extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: onAccept,
+                    onPressed: _accept,
                     icon: const Icon(Icons.check),
                     label: const Text('Codes match'),
                   ),
@@ -1083,6 +1146,8 @@ class _UnknownSenderPrompt extends StatelessWidget {
       ),
     );
   }
+
+  void _accept() => widget.onAccept(_nameController.text);
 }
 
 // ---------------------------------------------------------------------------
@@ -1100,13 +1165,32 @@ class _SenderIdentityCard extends StatelessWidget {
   const _SenderIdentityCard({
     required this.fingerprint,
     required this.isNewSender,
+    this.name,
   });
 
   final String fingerprint;
   final bool isNewSender;
 
+  /// The name the user gave this sender, if any.
+  final String? name;
+
   @override
   Widget build(BuildContext context) {
+    // A known sender collapses to one line.
+    //
+    // This card used to sit between the camera preview and the progress
+    // bar at full height, so on a phone the user had to choose between
+    // aiming the camera and watching progress — scrolling between the two
+    // during a transfer, which is the one moment attention is scarce.
+    //
+    // For a sender they have already checked and named there is nothing to
+    // act on, so it says who it is and gets out of the way; the full
+    // fingerprint is still one tap away. A NEW sender keeps the full
+    // warning, because there the user is being asked to do something.
+    if (!isNewSender) {
+      return _KnownSenderLine(fingerprint: fingerprint, name: name);
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1115,16 +1199,12 @@ class _SenderIdentityCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(
-                  isNewSender ? Icons.warning_amber : Icons.verified_user,
-                  color: isNewSender
-                      ? DeadDropColors.warning
-                      : DeadDropColors.success,
-                ),
+                const Icon(Icons.warning_amber,
+                    color: DeadDropColors.warning),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Sender identity',
+                    name == null ? 'Sender identity' : 'From $name',
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
@@ -1143,45 +1223,106 @@ class _SenderIdentityCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            if (isNewSender) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: DeadDropColors.warning.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: DeadDropColors.warning.withOpacity(0.4),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline,
-                        color: DeadDropColors.warning, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'New sender — verify this fingerprint through '
-                        'another channel (in person, phone call) to '
-                        'confirm the sender\'s identity.',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: DeadDropColors.warning),
-                      ),
-                    ),
-                  ],
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: DeadDropColors.warning.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: DeadDropColors.warning.withOpacity(0.4),
                 ),
               ),
-            ] else ...[
-              Text(
-                'Known sender — this device has received files from '
-                'this identity before.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: DeadDropColors.success,
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline,
+                      color: DeadDropColors.warning, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'New sender — verify this fingerprint through '
+                      'another channel (in person, phone call) to '
+                      'confirm the sender\'s identity.',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: DeadDropColors.warning),
                     ),
-                textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One line for a sender the user has already checked: who it is, and a tap
+/// to see the fingerprint again.
+class _KnownSenderLine extends StatelessWidget {
+  const _KnownSenderLine({required this.fingerprint, this.name});
+
+  final String fingerprint;
+  final String? name;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = name ?? 'Known sender';
+
+    return InkWell(
+      onTap: () => showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(name == null ? 'Sender identity' : 'From $name'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SelectableText(
+                fingerprint,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 18,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'This device has received files from this identity before. '
+                'The name is a label you gave it on this device — it is not '
+                'proof of who they are.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            const Icon(Icons.verified_user,
+                color: DeadDropColors.success, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'From $label',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: DeadDropColors.success,
+                    ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.info_outline,
+                size: 16, color: Theme.of(context).hintColor),
           ],
         ),
       ),
