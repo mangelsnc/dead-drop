@@ -1,0 +1,28 @@
+<section id="handshake" data-section="El protocolo en detalle: cripto, código fuente y trama" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:36px">
+<h2 style="font-size:42px;font-weight:600;line-height:1.1">El saludo inicial: un QR fijo con la clave pública</h2>
+<p style="font-size:20px;color:#4a5568;width:992px;line-height:1.4">Antes de enviar nada, el emisor necesita la clave pública del receptor. El receptor la muestra en un QR estático que el emisor escanea una sola vez.</p>
+<div style="display:flex;gap:24px;align-items:stretch">
+<div style="width:463px;background:#0d1117;border-radius:8px;padding:24px;display:flex;flex-direction:column;gap:12px">
+<p style="font-family:'JetBrains Mono', monospace;font-size:17px;color:#3ddbd9;font-weight:700">CONTENIDO DEL QR DE SALUDO</p>
+<p style="font-family:'JetBrains Mono', monospace;font-size:17px;color:#e8edf2;line-height:1.6">DD1.&lt;base64url&gt;</p>
+<hr style="border-top:1px solid #24323d">
+<p style="font-family:'JetBrains Mono', monospace;font-size:17px;color:#9fb3c0;line-height:1.6">{<br>&nbsp;&nbsp;"t": "dd-key",<br>&nbsp;&nbsp;"v": 1,<br>&nbsp;&nbsp;"pk": "&lt;64 hex = 32 bytes&gt;"<br>}</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:13px">
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:7px">
+<h3 style="font-size:20px;font-weight:600;color:#2b7a78">Por qué el prefijo DD1.</h3>
+<p style="font-size:17px;color:#4a5568;line-height:1.4">Permite al escáner descartar al instante cualquier QR ajeno, sin intentar interpretarlo.</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:7px">
+<h3 style="font-size:20px;font-weight:600;color:#2b7a78">Por qué base64url</h3>
+<p style="font-size:17px;color:#4a5568;line-height:1.4">Los lectores de QR tratan el contenido como texto. Un byte &gt; 0x7F puede reinterpretarse como UTF-8 y corromper el dato. El texto ASCII sobrevive intacto a cualquier lector.</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:7px">
+<h3 style="font-size:20px;font-weight:600;color:#2b7a78">Clave efímera</h3>
+<p style="font-size:17px;color:#4a5568;line-height:1.4">El par X25519 del receptor se genera por sesión, no se reutiliza entre transferencias.</p>
+</div>
+</div>
+</div>
+<p style="margin:0;font-size:17px;color:#6a7179">app/lib/src/handshake.dart · app/lib/src/transport.dart</p>
+<aside>El coste del envoltorio base64url es un 33% más de caracteres, pero la densidad del QR en modo byte es la misma para ASCII que para binario, así que el coste real es un patrón de módulos algo más denso. A cambio, el canal deja de corromperse de forma intermitente, que era el fallo que motivó este diseño.</aside>
+</section>

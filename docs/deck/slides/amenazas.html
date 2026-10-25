@@ -1,0 +1,45 @@
+<section id="amenazas" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:32px">
+<h2 style="font-size:56px;font-weight:600;line-height:1.1">Modelo de amenazas: qué protege y qué no</h2>
+<table style="font-family:'IBM Plex Sans', Arial, sans-serif;font-size:23px;color:#14213d">
+<tr style="background:#14213d">
+<th style="width:30%;padding:14px 18px;color:#ffffff;text-align:left;font-weight:600">Adversario</th>
+<th style="width:40%;padding:14px 18px;color:#ffffff;text-align:left;font-weight:600">Qué puede hacer</th>
+<th style="width:30%;padding:14px 18px;color:#ffffff;text-align:left;font-weight:600">Resultado</th>
+</tr>
+<tr>
+<td style="padding:14px 18px"><b>Vigilancia de red</b></td>
+<td style="padding:14px 18px;color:#4a5568">Inspeccionar todo el tráfico de ambos dispositivos</td>
+<td style="padding:14px 18px;color:#2b7a78"><b>Protegido</b> — no hay tráfico</td>
+</tr>
+<tr style="background:#f2f5f4">
+<td style="padding:14px 18px"><b>Escucha de radio</b></td>
+<td style="padding:14px 18px;color:#4a5568">Detectar emisiones Bluetooth o wifi en la sala</td>
+<td style="padding:14px 18px;color:#2b7a78"><b>Protegido</b> — no hay radio</td>
+</tr>
+<tr>
+<td style="padding:14px 18px"><b>Observador en la sala</b></td>
+<td style="padding:14px 18px;color:#4a5568">Fotografiar la pantalla mientras emite</td>
+<td style="padding:14px 18px;color:#d98b4a"><b>Parcial</b> — ve que hay transferencia, no el contenido</td>
+</tr>
+<tr style="background:#f2f5f4">
+<td style="padding:14px 18px"><b>Suplantador</b></td>
+<td style="padding:14px 18px;color:#4a5568">Emitir sus propios QR haciéndose pasar por el emisor</td>
+<td style="padding:14px 18px;color:#2b7a78"><b>Protegido</b> — firma Ed25519 + TOFU</td>
+</tr>
+<tr>
+<td style="padding:14px 18px"><b>Acceso físico al móvil</b></td>
+<td style="padding:14px 18px;color:#4a5568">Requisar el dispositivo e inspeccionarlo</td>
+<td style="padding:14px 18px;color:#c7522a"><b>En desarrollo</b> — el almacén cifrado</td>
+</tr>
+<tr style="background:#f2f5f4">
+<td style="padding:14px 18px"><b>Coacción con la clave</b></td>
+<td style="padding:14px 18px;color:#4a5568">Obligar al usuario a dar la contraseña real</td>
+<td style="padding:14px 18px;color:#6a7179"><b>Fuera de alcance</b> — no hay solución técnica</td>
+</tr>
+</table>
+<div style="background:#f7ded7;border-left:5px solid #c7522a;border-radius:11px;padding:26px 32px">
+<p style="font-size:25px;line-height:1.45;color:#14213d"><b>La documentación marca cada fila con su estado real.</b> Un usuario que pueda ser detenido en una frontera necesita saber exactamente qué le protege hoy y qué es todavía un objetivo de diseño. Prometer de más aquí no es optimismo: es poner a alguien en riesgo.</p>
+</div>
+<p style="margin:0;font-size:21px;color:#6a7179">docs/security.md — cada protección etiquetada como implementada o planificada</p>
+<aside>Esta tabla es la diapositiva más importante del bloque técnico. Un proyecto de seguridad se juzga tanto por lo que admite no cubrir como por lo que cubre. La última fila no tiene solución: si alguien te obliga a dar la contraseña real, ninguna criptografía ayuda.</aside>
+</section>

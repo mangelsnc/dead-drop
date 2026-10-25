@@ -1,0 +1,46 @@
+<section id="rendimiento" data-section="Rendimiento medido y modelo de amenazas" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:36px">
+<h2 style="font-size:45px;font-weight:600;line-height:1.1">Rendimiento medido</h2>
+<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:19px">
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:25px;display:flex;flex-direction:column;gap:6px">
+<p style="font-size:70px;font-weight:600;line-height:1;color:#14213d;font-family:'JetBrains Mono', monospace">1,12×</p>
+<p style="font-size:19px;color:#4a5568;line-height:1.35">tramas emitidas por trozo útil, en un fichero de 1 MB</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:25px;display:flex;flex-direction:column;gap:6px">
+<p style="font-size:70px;font-weight:600;line-height:1;color:#14213d;font-family:'JetBrains Mono', monospace">50%</p>
+<p style="font-size:19px;color:#4a5568;line-height:1.35">de pérdida de tramas tolerada en los tests, sin fallo</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:25px;display:flex;flex-direction:column;gap:6px">
+<p style="font-size:70px;font-weight:600;line-height:1;color:#14213d;font-family:'JetBrains Mono', monospace">135</p>
+<p style="font-size:19px;color:#4a5568;line-height:1.35">pruebas automáticas sobre el protocolo y la criptografía</p>
+</div>
+</div>
+<div style="display:flex;gap:22px;align-items:stretch">
+<div style="flex:1;background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:24px;display:flex;flex-direction:column;gap:14px">
+<h3 style="font-size:22px;font-weight:600">La eficiencia mejora con el tamaño</h3>
+<div style="display:flex;flex-direction:column;gap:11px">
+<div style="display:flex;align-items:center;gap:14px">
+<p style="width:84px;font-family:'JetBrains Mono', monospace;font-size:18px;color:#4a5568">1 KB</p>
+<div style="width:84px;height:26px;background:#c7522a;border-radius:4px"></div>
+<p style="font-size:18px;color:#4a5568">2,00× de sobrecoste</p>
+</div>
+<div style="display:flex;align-items:center;gap:14px">
+<p style="width:84px;font-family:'JetBrains Mono', monospace;font-size:18px;color:#4a5568">100 KB</p>
+<div style="width:60px;height:26px;background:#d98b4a;border-radius:4px"></div>
+<p style="font-size:18px;color:#4a5568">1,43×</p>
+</div>
+<div style="display:flex;align-items:center;gap:14px">
+<p style="width:84px;font-family:'JetBrains Mono', monospace;font-size:18px;color:#4a5568">1 MB</p>
+<div style="width:47px;height:26px;background:#2b7a78;border-radius:4px"></div>
+<p style="font-size:18px;color:#4a5568">1,12× — cerca del óptimo teórico</p>
+</div>
+</div>
+</div>
+<div style="width:432px;background:#eef3f2;border-left:3px solid #2b7a78;border-radius:8px;padding:24px;display:flex;flex-direction:column;gap:10px">
+<h3 style="font-size:21px;font-weight:600;color:#14213d">Qué limita la velocidad real</h3>
+<p style="font-size:18px;color:#4a5568;line-height:1.45">No el cifrado ni el código fuente: la <b>cámara</b>. Cuántos fotogramas por segundo captura con nitidez suficiente para decodificar un QR denso determina el caudal, y varía mucho entre dispositivos.</p>
+<p style="font-size:18px;color:#4a5568;line-height:1.45">Por eso los parámetros son ajustables en pantalla durante la transferencia.</p>
+</div>
+</div>
+<p style="margin:0;font-size:17px;color:#6a7179">Medido con flutter test sobre el pipeline completo — cifrado, codificación, envoltorio, descifrado y verificación</p>
+<aside>El sobrecoste del código LT es inherente: con pocos trozos hacen falta proporcionalmente más tramas para que la propagación despeje todo. Con ficheros grandes converge hacia el límite teórico, que es aproximadamente 1,05.</aside>
+</section>

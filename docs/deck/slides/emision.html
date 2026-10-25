@@ -1,0 +1,34 @@
+<section id="emision" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:34px">
+<h2 style="font-size:49px;font-weight:600;line-height:1.1">La emisión: un bucle que no espera a nadie</h2>
+<div style="display:flex;gap:24px">
+<div style="flex:1;display:flex;flex-direction:column;gap:15px">
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:9px;padding:23px;display:flex;flex-direction:column;gap:9px">
+<h3 style="font-size:23px;font-weight:600;color:#2b7a78">QR de arranque, una sola vez</h3>
+<p style="font-size:20px;color:#4a5568;line-height:1.4">179 bytes con la clave efímera del emisor, el identificador de sesión, el tamaño, el número de trozos, el hash BLAKE2b y la firma Ed25519 sobre todo lo anterior.</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:9px;padding:23px;display:flex;flex-direction:column;gap:9px">
+<h3 style="font-size:23px;font-weight:600;color:#2b7a78">Trama 0: metadatos cifrados</h3>
+<p style="font-size:20px;color:#4a5568;line-height:1.4">El nombre del fichero viaja <b>dentro</b> del canal cifrado, nunca en claro. Un observador no sabe qué se está transfiriendo.</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:9px;padding:23px;display:flex;flex-direction:column;gap:9px">
+<h3 style="font-size:23px;font-weight:600;color:#2b7a78">Tramas 1..∞ en bucle</h3>
+<p style="font-size:20px;color:#4a5568;line-height:1.4">El emisor genera tramas indefinidamente. No sabe cuántas han llegado; el usuario detiene la emisión cuando el receptor indica que ha terminado.</p>
+</div>
+</div>
+<div style="width:486px;display:flex;flex-direction:column;gap:15px">
+<div style="background:#0d1117;border-radius:9px;padding:24px;display:flex;flex-direction:column;gap:12px">
+<p style="font-family:'JetBrains Mono', monospace;font-size:17px;color:#3ddbd9;font-weight:700">PARÁMETROS AJUSTABLES</p>
+<div style="display:flex;flex-direction:column;gap:11px">
+<p style="font-size:20px;color:#e8edf2;line-height:1.4"><b style="font-family:'JetBrains Mono', monospace;color:#3ddbd9">fps</b> &nbsp;— velocidad de emisión. Más rápido no siempre es mejor: depende de la cámara receptora.</p>
+<p style="font-size:20px;color:#e8edf2;line-height:1.4"><b style="font-family:'JetBrains Mono', monospace;color:#3ddbd9">chunk_size</b> &nbsp;— bytes por trozo. Escala automáticamente con el tamaño del fichero.</p>
+<p style="font-size:20px;color:#e8edf2;line-height:1.4"><b style="font-family:'JetBrains Mono', monospace;color:#3ddbd9">nivel EC</b> &nbsp;— corrección de errores del QR. Más robustez, menos capacidad.</p>
+</div>
+</div>
+<div style="background:#eef3f2;border-left:4px solid #2b7a78;border-radius:9px;padding:23px">
+<p style="font-size:20px;line-height:1.45;color:#14213d"><b>Límite por diseño:</b> el número de trozos es un entero de 16 bits, así que con trozos de 512 B el máximo son <b>32 MB</b>. Con trozos de 2 KB, 128 MB. La aplicación valida el tamaño antes de empezar y lo dice con claridad.</p>
+</div>
+</div>
+</div>
+<p style="margin:0;font-size:18px;color:#6a7179">app/lib/src/emitter.dart</p>
+<aside>Ese límite de 32 MB fue un defecto encontrado en auditoría: el campo desbordaba en silencio y producía una transferencia que fallaba sin explicación. Ahora se valida antes de empezar y el mensaje de error dice el máximo para el tamaño de trozo elegido.</aside>
+</section>

@@ -1,0 +1,32 @@
+<section id="lectura" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:34px">
+<h2 style="font-size:64px;font-weight:600;line-height:1.1">La lectura: cada fotograma pasa cinco filtros</h2>
+<div style="position:relative;width:1664px;height:660px">
+
+<p style="box-sizing:border-box;position:absolute;left:0;top:0;width:300px;min-height:118px;background:#ffffff;border:1px solid #cdd6dc;border-radius:10px;padding:22px;font-size:25px;line-height:1.35"><b>1 · Decodificar</b><br><span style="color:#6a7179">El lector extrae el texto del QR. Si no hay QR legible, se descarta.</span></p>
+
+<p style="box-sizing:border-box;position:absolute;left:341px;top:0;width:300px;min-height:118px;background:#ffffff;border:1px solid #cdd6dc;border-radius:10px;padding:22px;font-size:25px;line-height:1.35"><b>2 · Prefijo</b><br><span style="color:#6a7179">¿Empieza por DD1.? Si no, es un QR ajeno: se ignora sin más.</span></p>
+
+<p style="box-sizing:border-box;position:absolute;left:682px;top:0;width:300px;min-height:118px;background:#ffffff;border:1px solid #cdd6dc;border-radius:10px;padding:22px;font-size:25px;line-height:1.35"><b>3 · Estructura</b><br><span style="color:#6a7179">¿Magic correcto, versión soportada, longitudes coherentes?</span></p>
+
+<p style="box-sizing:border-box;position:absolute;left:1023px;top:0;width:300px;min-height:118px;background:#ffffff;border:1px solid #cdd6dc;border-radius:10px;padding:22px;font-size:25px;line-height:1.35"><b>4 · Sesión</b><br><span style="color:#6a7179">¿El file_id coincide con la sesión activa? Si no, es de otra transferencia.</span></p>
+
+<p style="box-sizing:border-box;position:absolute;left:1364px;top:0;width:300px;min-height:118px;background:#ffffff;border:1px solid #cdd6dc;border-radius:10px;padding:22px;font-size:25px;line-height:1.35"><b>5 · Autenticación</b><br><span style="color:#6a7179">¿Poly1305 valida? Si no, la trama se descarta.</span></p>
+
+<svg style="position:absolute;left:286px;top:45px;width:69px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 69 28" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="44" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="55,14 44,7.18 44,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:627px;top:45px;width:69px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 69 28" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="44" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="55,14 44,7.18 44,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:968px;top:45px;width:69px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 69 28" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="44" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="55,14 44,7.18 44,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:1309px;top:45px;width:69px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 69 28" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="44" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="55,14 44,7.18 44,20.82" fill="#2b7a78"/></svg>
+
+<p style="box-sizing:border-box;position:absolute;left:1364px;top:246px;width:300px;min-height:110px;background:#eef3f2;border:2px solid #2b7a78;border-radius:10px;padding:22px;font-size:25px;line-height:1.35"><b>6 · Al decodificador</b><br><span style="color:#4a5568">Se despeja por propagación.</span></p>
+
+<svg style="position:absolute;left:1500px;top:160px;width:28px;height:100px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 28 100" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="14" y2="75" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="14,86 7.18,75 20.82,75" fill="#2b7a78"/></svg>
+
+<p style="box-sizing:border-box;position:absolute;left:1364px;top:428px;width:300px;min-height:110px;background:#14213d;border-radius:10px;padding:22px;font-size:25px;line-height:1.35;color:#ffffff"><b>7 · ¿Completo?</b><br><span style="color:#9fb3c0">Reconstruir y verificar el hash.</span></p>
+
+<svg style="position:absolute;left:1500px;top:342px;width:28px;height:100px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 28 100" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="14" y2="75" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="14,86 7.18,75 20.82,75" fill="#2b7a78"/></svg>
+
+<p style="box-sizing:border-box;position:absolute;left:0;top:246px;width:1280px;min-height:292px;background:#f7ded7;border-left:6px solid #c7522a;border-radius:12px;padding:36px 40px;font-size:28px;line-height:1.5;color:#14213d"><b style="font-size:32px">Descartar nunca es un error.</b><br><br>En este canal, perder tramas es lo normal: desenfoque, reflejo, movimiento de la mano. Una trama que falla cualquiera de los cinco filtros simplemente no se usa — no se avisa, no se aborta, no se reintenta.<br><br>El código fuente digital es lo que convierte esa pérdida constante en un detalle sin importancia. Mientras lleguen suficientes tramas <b>cualesquiera</b>, el fichero se reconstruye.</p>
+<p style="position:absolute;left:1364px;top:618px;width:300px;margin:0;font-size:22px;line-height:1.35;color:#6a7179">app/lib/src/receiver.dart — probado con 50% de pérdida de tramas</p>
+</div>
+<aside>Los cinco filtros están ordenados de más barato a más caro: comprobar un prefijo de cuatro caracteres cuesta nada, verificar Poly1305 cuesta. Con una cámara a 12 fotogramas por segundo, la mayoría de descartes ocurren en los dos primeros pasos.</aside>
+</section>

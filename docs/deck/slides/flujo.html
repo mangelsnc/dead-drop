@@ -1,0 +1,36 @@
+<section id="flujo" data-section="Cómo funciona, de principio a fin" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:40px">
+<h2 style="font-size:64px;font-weight:600;line-height:1.1">Una transferencia completa, paso a paso</h2>
+<div style="position:relative;width:1664px;height:740px">
+
+<p style="box-sizing:border-box;position:absolute;left:0;top:0;width:340px;min-height:120px;background:#ffffff;border:2px solid #2b7a78;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#14213d"><b>1 · Receptor</b><br>Genera un par de claves X25519 y muestra su clave pública en un QR fijo.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:452px;top:0;width:340px;min-height:120px;background:#ffffff;border:2px solid #2b7a78;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#14213d"><b>2 · Emisor</b><br>Escanea ese QR y obtiene la clave pública del receptor.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:904px;top:0;width:340px;min-height:120px;background:#ffffff;border:2px solid #2b7a78;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#14213d"><b>3 · Emisor</b><br>Elige el fichero, deriva la clave de sesión y lo trocea.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:1324px;top:0;width:340px;min-height:120px;background:#14213d;border:2px solid #14213d;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#ffffff"><b>4 · Emisor</b><br>Emite la cabecera firmada en un QR de arranque.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:1324px;top:290px;width:340px;min-height:120px;background:#14213d;border:2px solid #14213d;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#ffffff"><b>5 · Emisor</b><br>Emite tramas cifradas en bucle, sin parar y sin esperar respuesta.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:904px;top:290px;width:340px;min-height:120px;background:#ffffff;border:2px solid #2b7a78;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#14213d"><b>6 · Receptor</b><br>La cámara captura las tramas que puede. Las perdidas no importan.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:452px;top:290px;width:340px;min-height:120px;background:#ffffff;border:2px solid #2b7a78;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#14213d"><b>7 · Receptor</b><br>Descifra cada trama y alimenta el decodificador del código fuente.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:0;top:290px;width:340px;min-height:120px;background:#ffffff;border:2px solid #2b7a78;border-radius:12px;padding:24px;font-size:26px;line-height:1.35;color:#14213d"><b>8 · Receptor</b><br>Al reunir suficientes tramas, reconstruye el fichero completo.</p>
+
+<p style="box-sizing:border-box;position:absolute;left:0;top:520px;width:792px;min-height:100px;background:#eef3f2;border:2px solid #2b7a78;border-radius:12px;padding:24px;font-size:27px;line-height:1.35;color:#14213d"><b>9 · Verificación</b> — se comprueba el hash BLAKE2b contra la cabecera firmada. Si no coincide, el fichero se descarta.</p>
+
+<svg style="position:absolute;left:326px;top:46px;width:140px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 140 28" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="115" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="126,14 115,7.18 115,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:778px;top:46px;width:140px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 140 28" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="115" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="126,14 115,7.18 115,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:1230px;top:46px;width:108px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 108 28" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="83" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="94,14 83,7.18 83,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:1480px;top:106px;width:28px;height:198px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 28 198" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="14" y2="173" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="14,184 7.18,173 20.82,173" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:1230px;top:336px;width:108px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 108 28" xmlns="http://www.w3.org/2000/svg"><line x1="94" y1="14" x2="25" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="14,14 25,7.18 25,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:778px;top:336px;width:140px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 140 28" xmlns="http://www.w3.org/2000/svg"><line x1="126" y1="14" x2="25" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="14,14 25,7.18 25,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:326px;top:336px;width:140px;height:28px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 140 28" xmlns="http://www.w3.org/2000/svg"><line x1="126" y1="14" x2="25" y2="14" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="14,14 25,7.18 25,20.82" fill="#2b7a78"/></svg>
+<svg style="position:absolute;left:156px;top:396px;width:28px;height:138px;overflow:visible;z-index:0;pointer-events:none" viewBox="0 0 28 138" xmlns="http://www.w3.org/2000/svg"><line x1="14" y1="14" x2="14" y2="113" stroke="#2b7a78" stroke-width="3" stroke-linecap="round"/><polygon points="14,124 7.18,113 20.82,113" fill="#2b7a78"/></svg>
+
+<p style="position:absolute;left:850px;top:540px;width:814px;font-size:26px;line-height:1.4;color:#4a5568">El canal es <b>unidireccional</b>: el emisor nunca sabe qué ha llegado. No hay confirmaciones ni reenvíos — por eso el paso 5 emite en bucle indefinidamente.</p>
+<p style="position:absolute;left:850px;top:672px;width:814px;margin:0;font-size:24px;line-height:1.4;color:#6a7179">Los pasos 1 y 2 solo se repiten si cambia el receptor.</p>
+</div>
+<aside>Lo importante de este diagrama es el paso 5. Como no hay canal de vuelta, el emisor no puede saber qué tramas han llegado, así que no puede reenviar las perdidas. Emite indefinidamente y el receptor se queda con lo que atrapa. Eso obliga al diseño del código fuente que viene después.</aside>
+</section>

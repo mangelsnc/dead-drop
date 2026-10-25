@@ -1,0 +1,34 @@
+<section id="estado" data-section="Estado del proyecto" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:36px">
+<h2 style="font-size:45px;font-weight:600;line-height:1.1">Estado del proyecto</h2>
+<div style="display:flex;gap:22px">
+<div style="flex:1;display:flex;flex-direction:column;gap:13px">
+<div style="background:#eef3f2;border-left:4px solid #2b7a78;border-radius:7px;padding:18px 21px;display:flex;flex-direction:column;gap:6px">
+<h3 style="font-size:20px;font-weight:600;color:#2b7a78">Funciona hoy</h3>
+<p style="font-size:18px;color:#4a5568;line-height:1.45">Transferencia air-gapped completa, cifrada de extremo a extremo, con firma del emisor verificada y confirmación de huella en el primer contacto.</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:7px;padding:18px 21px;display:flex;flex-direction:column;gap:6px">
+<h3 style="font-size:20px;font-weight:600">Compila y se prueba en</h3>
+<p style="font-size:18px;color:#4a5568;line-height:1.45">Linux, Windows, macOS, Android e iOS. Integración continua en las cuatro primeras, con builds reproducibles y checksums publicados.</p>
+</div>
+<div style="background:#f7ded7;border-left:4px solid #c7522a;border-radius:7px;padding:18px 21px;display:flex;flex-direction:column;gap:6px">
+<h3 style="font-size:20px;font-weight:600;color:#8a3a1c">Todavía no</h3>
+<p style="font-size:18px;color:#4a5568;line-height:1.45">Almacén cifrado, entorno señuelo y autodestrucción. Diseñados y en desarrollo; marcados como no implementados en toda la documentación.</p>
+</div>
+</div>
+<div style="width:449px;background:#14213d;border-radius:8px;padding:25px;display:flex;flex-direction:column;gap:17px">
+<p style="font-family:'JetBrains Mono', monospace;font-size:17px;color:#3ddbd9;font-weight:700">LA AUDITORÍA DEL NÚCLEO</p>
+<p style="font-size:18px;color:#b8c4ce;line-height:1.45">Una revisión del protocolo encontró seis defectos. Todos corregidos, cada uno con su prueba de regresión:</p>
+<div style="display:flex;flex-direction:column;gap:8px">
+<p style="font-size:18px;color:#e8edf2;line-height:1.35">— La firma del emisor no se verificaba nunca</p>
+<p style="font-size:18px;color:#e8edf2;line-height:1.35">— La semilla del generador se perdía al truncarse</p>
+<p style="font-size:18px;color:#e8edf2;line-height:1.35">— Ficheros de más de 32 MB corrompían la cabecera</p>
+<p style="font-size:18px;color:#e8edf2;line-height:1.35">— Índices fuera de rango llegaban al decodificador</p>
+<p style="font-size:18px;color:#e8edf2;line-height:1.35">— La documentación citaba un hash distinto al real</p>
+<p style="font-size:18px;color:#e8edf2;line-height:1.35">— Código de comparación duplicado</p>
+</div>
+<p style="font-size:17px;color:#8b9aa7;line-height:1.4;font-style:italic">Ninguno estaba en los primitivos criptográficos. Todos en el cableado entre ellos.</p>
+</div>
+</div>
+<p style="margin:0;font-size:17px;color:#6a7179">Repositorio público desde el primer commit · licencia MIT · entrega del MVP prevista para febrero de 2027</p>
+<aside>Mostrar la lista de defectos encontrados no es una debilidad: es la prueba de que el código se somete a revisión real. Un proyecto de criptografía que no publique sus fallos corregidos es un proyecto que no los ha buscado.</aside>
+</section>

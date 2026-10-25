@@ -1,0 +1,35 @@
+<section id="fountain" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:32px">
+<h2 style="font-size:41px;font-weight:600;line-height:1.1">El código fuente digital: por qué da igual qué tramas se pierdan</h2>
+<div style="display:flex;gap:23px">
+<div style="width:419px;display:flex;flex-direction:column;gap:14px">
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:19px;display:flex;flex-direction:column;gap:6px">
+<h3 style="font-size:19px;font-weight:600;color:#c7522a">El problema</h3>
+<p style="font-size:17px;color:#4a5568;line-height:1.4">La cámara pierde tramas: desenfoque, movimiento, reflejos. Y no hay canal de vuelta para pedir que reenvíen la número 42.</p>
+</div>
+<div style="background:#ffffff;border:1px solid #e3e6e4;border-radius:8px;padding:19px;display:flex;flex-direction:column;gap:6px">
+<h3 style="font-size:19px;font-weight:600;color:#c7522a">Lo que no sirve</h3>
+<p style="font-size:17px;color:#4a5568;line-height:1.4">Repetir el fichero en bucle funciona, pero es lentísimo: hay que esperar a ver la trama concreta que falta — el problema del coleccionista de cromos.</p>
+</div>
+<div style="background:#eef3f2;border-left:3px solid #2b7a78;border-radius:8px;padding:19px;display:flex;flex-direction:column;gap:6px">
+<h3 style="font-size:19px;font-weight:600;color:#2b7a78">La solución: código LT</h3>
+<p style="font-size:17px;color:#4a5568;line-height:1.4">Cada trama es el XOR de un subconjunto pseudoaleatorio de los trozos. El receptor necesita <b>cualquier</b> K·(1+ε) tramas, no unas concretas.</p>
+</div>
+</div>
+<div style="flex:1;position:relative;height:356px">
+<p style="position:absolute;left:0;top:0;width:394px;font-family:'JetBrains Mono', monospace;font-size:17px;font-weight:700;color:#2b7a78">EJEMPLO CON 4 TROZOS</p>
+
+<p style="position:absolute;left:0;top:32px;width:89px;height:41px;background:#14213d;border-radius:5px;color:#ffffff;font-family:'JetBrains Mono', monospace;font-size:17px;text-align:center;line-height:26px">A</p>
+<p style="position:absolute;left:99px;top:32px;width:89px;height:41px;background:#14213d;border-radius:5px;color:#ffffff;font-family:'JetBrains Mono', monospace;font-size:17px;text-align:center;line-height:26px">B</p>
+<p style="position:absolute;left:198px;top:32px;width:89px;height:41px;background:#14213d;border-radius:5px;color:#ffffff;font-family:'JetBrains Mono', monospace;font-size:17px;text-align:center;line-height:26px">C</p>
+<p style="position:absolute;left:297px;top:32px;width:89px;height:41px;background:#14213d;border-radius:5px;color:#ffffff;font-family:'JetBrains Mono', monospace;font-size:17px;text-align:center;line-height:26px">D</p>
+
+<p style="position:absolute;left:0;top:102px;width:386px;height:38px;background:#ffffff;border:1px solid #cdd6dc;border-radius:5px;font-family:'JetBrains Mono', monospace;font-size:17px;line-height:24px;padding:0 22px;color:#14213d">trama 1 &nbsp;=&nbsp; <b style="color:#2b7a78">A</b></p>
+<p style="position:absolute;left:0;top:147px;width:386px;height:38px;background:#ffffff;border:1px solid #cdd6dc;border-radius:5px;font-family:'JetBrains Mono', monospace;font-size:17px;line-height:24px;padding:0 22px;color:#14213d">trama 2 &nbsp;=&nbsp; <b style="color:#2b7a78">B ⊕ C</b></p>
+<p style="position:absolute;left:0;top:193px;width:386px;height:38px;background:#f7ded7;border:1px solid #e0b3a6;border-radius:5px;font-family:'JetBrains Mono', monospace;font-size:17px;line-height:24px;padding:0 22px;color:#8a3a1c">trama 3 &nbsp;=&nbsp; A ⊕ D &nbsp;&nbsp;&nbsp;perdida</p>
+<p style="position:absolute;left:0;top:239px;width:386px;height:38px;background:#ffffff;border:1px solid #cdd6dc;border-radius:5px;font-family:'JetBrains Mono', monospace;font-size:17px;line-height:24px;padding:0 22px;color:#14213d">trama 4 &nbsp;=&nbsp; <b style="color:#2b7a78">C</b></p>
+<p style="position:absolute;left:0;top:284px;width:386px;height:38px;background:#ffffff;border:1px solid #cdd6dc;border-radius:5px;font-family:'JetBrains Mono', monospace;font-size:17px;line-height:24px;padding:0 22px;color:#14213d">trama 5 &nbsp;=&nbsp; <b style="color:#2b7a78">A ⊕ B ⊕ D</b></p>
+</div>
+</div>
+<p style="margin:0;font-size:17px;color:#6a7179">Con 1, 2, 4 y 5 se despeja todo: C de la 4, B de la 2, A de la 1, D de la 5. La trama perdida nunca hizo falta.</p>
+<aside>El decodificador resuelve por propagación: busca una trama de grado 1, la da por conocida, la elimina por XOR de las demás, y repite. Es el mismo principio que usan las descargas por satélite, donde tampoco hay canal de retorno.</aside>
+</section>

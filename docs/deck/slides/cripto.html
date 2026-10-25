@@ -1,0 +1,46 @@
+<section id="cripto" style="background:#fbfbf8;color:#14213d;font-family:'IBM Plex Sans', Arial, sans-serif;padding:112px 128px 72px;display:flex;flex-direction:column;gap:32px">
+<h2 style="font-size:47px;font-weight:600;line-height:1.1">Criptografía: libsodium, parámetros por defecto</h2>
+<p style="font-size:22px;color:#4a5568;width:1112px;line-height:1.4">Principio del proyecto: cero criptografía propia. Todo primitivo viene de libsodium con sus parámetros por defecto.</p>
+<table style="font-family:'IBM Plex Sans', Arial, sans-serif;font-size:20px;color:#14213d">
+<tr style="background:#14213d">
+<th style="width:26%;padding:13px 16px;color:#ffffff;text-align:left;font-weight:600">Función</th>
+<th style="width:30%;padding:13px 16px;color:#ffffff;text-align:left;font-weight:600">Primitivo</th>
+<th style="width:44%;padding:13px 16px;color:#ffffff;text-align:left;font-weight:600">Para qué</th>
+</tr>
+<tr>
+<td style="padding:13px 16px"><b>Intercambio de claves</b></td>
+<td style="padding:13px 16px;font-family:'JetBrains Mono', monospace;color:#2b7a78">X25519</td>
+<td style="padding:13px 16px;color:#4a5568">Deriva un secreto compartido entre la clave efímera del emisor y la del receptor</td>
+</tr>
+<tr style="background:#f2f5f4">
+<td style="padding:13px 16px"><b>Cifrado</b></td>
+<td style="padding:13px 16px;font-family:'JetBrains Mono', monospace;color:#2b7a78">XSalsa20-Poly1305</td>
+<td style="padding:13px 16px;color:#4a5568">Cifra y autentica cada trama. Nonce aleatorio de 24 bytes por mensaje</td>
+</tr>
+<tr>
+<td style="padding:13px 16px"><b>Firma</b></td>
+<td style="padding:13px 16px;font-family:'JetBrains Mono', monospace;color:#2b7a78">Ed25519</td>
+<td style="padding:13px 16px;color:#4a5568">Firma la cabecera de sesión: acredita qué instalación la originó</td>
+</tr>
+<tr style="background:#f2f5f4">
+<td style="padding:13px 16px"><b>Hash</b></td>
+<td style="padding:13px 16px;font-family:'JetBrains Mono', monospace;color:#2b7a78">BLAKE2b-256</td>
+<td style="padding:13px 16px;color:#4a5568">Huella del fichero en claro, incluida en la cabecera firmada</td>
+</tr>
+<tr>
+<td style="padding:13px 16px"><b>Aleatoriedad</b></td>
+<td style="padding:13px 16px;font-family:'JetBrains Mono', monospace;color:#2b7a78">randombytes_buf</td>
+<td style="padding:13px 16px;color:#4a5568">CSPRNG del sistema operativo. Nunca dart:math para material criptográfico</td>
+</tr>
+</table>
+<div style="display:flex;gap:18px">
+<div style="flex:1;background:#eef3f2;border-left:4px solid #2b7a78;border-radius:7px;padding:19px 22px">
+<p style="font-size:19px;line-height:1.4;color:#14213d"><b>Verificación de firma obligatoria.</b> El receptor rechaza cualquier cabecera cuya firma no valide, sin excepción.</p>
+</div>
+<div style="flex:1;background:#eef3f2;border-left:4px solid #2b7a78;border-radius:7px;padding:19px 22px">
+<p style="font-size:19px;line-height:1.4;color:#14213d"><b>TOFU.</b> La primera vez que aparece un emisor, se pide confirmar su huella fuera de banda antes de aceptar.</p>
+</div>
+</div>
+<p style="margin:0;font-size:18px;color:#6a7179">app/lib/src/crypto.dart — implementación portada 1:1 desde el spike en Python con PyNaCl</p>
+<aside>La regla de cero criptografía propia no es ceremonial: una auditoría del núcleo encontró seis defectos, y ninguno estaba en los primitivos. Estaban en el cableado — una firma que no se verificaba, una semilla que se truncaba, un contador que desbordaba en silencio. Ahí es donde se rompen estos sistemas.</aside>
+</section>

@@ -1,0 +1,43 @@
+{
+  "v": 4,
+  "createdOnFiles": { "v": 1, "at": "2026-10-25T10:00:00Z" },
+  "lists": "css",
+  "title": "DeadDrop — Transferencia air-gapped por QR",
+  "order": [
+    "portada",
+    "problema",
+    "quien",
+    "que-es",
+    "flujo",
+    "arquitectura",
+    "handshake",
+    "cripto",
+    "fountain",
+    "trama",
+    "emision",
+    "lectura",
+    "rendimiento",
+    "amenazas",
+    "vault",
+    "estado",
+    "cierre"
+  ],
+  "sections": {
+    "s1": { "description": "Qué problema resuelve y para quién", "start": "portada" },
+    "s2": { "description": "Cómo funciona, de principio a fin", "start": "flujo" },
+    "s3": { "description": "El protocolo en detalle: cripto, código fuente y trama", "start": "handshake" },
+    "s4": { "description": "Rendimiento medido y modelo de amenazas", "start": "rendimiento" },
+    "s5": { "description": "Estado del proyecto", "start": "estado" }
+  },
+  "faces": {
+    "ibm-plex-sans": {
+      "family": "IBM Plex Sans",
+      "href": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+    },
+    "jetbrains-mono": {
+      "family": "JetBrains Mono",
+      "href": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap"
+    }
+  },
+  "designSystems": []
+}
