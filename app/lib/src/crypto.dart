@@ -1,6 +1,6 @@
 /// crypto.dart — E2E encryption layer for DeadDrop.
 ///
-/// Ported 1:1 from spike/src/crypto.py (PyNaCl → sodium_libs).
+/// Ported 1:1 from spike/src/crypto.py (PyNaCl → sodium).
 ///
 /// Primitives (libsodium):
 /// * Key exchange : X25519          (crypto_box / crypto_kx)
@@ -12,7 +12,7 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:sodium_libs/sodium_libs.dart';
+import 'package:sodium/sodium.dart';
 
 import 'utils.dart';
 
