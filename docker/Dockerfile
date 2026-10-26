@@ -13,6 +13,13 @@ FROM ubuntu:22.04
 
 # Pinned toolchain versions — keep in sync with .github/workflows/build.yml
 ARG FLUTTER_VERSION=3.47.8
+
+# Marks every image this project builds, so `make docker-clean` (and the
+# command in docs/development.md) can find them by label rather than by a
+# name pattern that drifts when the tag changes. Without this, an image
+# orphaned by a version bump is indistinguishable from someone else's.
+LABEL dev.deaddrop.project="dead-drop"
+
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708_latest
 ARG ANDROID_PLATFORM_VERSION=34
 ARG ANDROID_BUILD_TOOLS_VERSION=34.0.0

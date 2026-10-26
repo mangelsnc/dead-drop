@@ -31,9 +31,23 @@ GID := $(shell id -g)
 PUB_CACHE_VOL    := deaddrop-pub-cache
 GRADLE_CACHE_VOL := deaddrop-gradle-cache
 
+# Everything this project creates in Docker carries this label, so it can be
+# found and removed without guessing from names. `docker run -v name:/path`
+# creates a volume with no labels, so the volumes are created up front here
+# instead of letting the run command conjure them.
+DOCKER_LABEL := dev.deaddrop.project=dead-drop
+
 # Base docker run command: bind-mount the repo and reuse named volumes for
 # the pub and Gradle caches so builds stay fast between runs.
 # --platform is forced on every invocation (Apple Silicon Macs need it).
+# Creates the cache volumes with the project label if they do not exist.
+# Idempotent and ~20ms, so every containerised target can depend on it.
+_volumes:
+	@for v in $(PUB_CACHE_VOL) $(GRADLE_CACHE_VOL); do \
+		docker volume inspect $$v >/dev/null 2>&1 || \
+			docker volume create --label $(DOCKER_LABEL) $$v >/dev/null; \
+	done
+
 DOCKER_RUN := docker run --rm --platform $(PLATFORM) \
 	--user $(UID):$(GID) \
 	-v "$(CURDIR):/workspace" \
@@ -74,7 +88,7 @@ STAMP := .make/image-$(subst :,-,$(IMAGE))
 # with $(FLUTTER_VERSION); fall back to PATH otherwise, with a warning.
 HOST_FLUTTER := $(shell command -v fvm >/dev/null 2>&1 && echo "fvm flutter" || echo "flutter")
 
-.PHONY: help image image-force _check-host-flutter build-linux build-android build-ios build-macos test test-timing analyze clean shell doctor
+.PHONY: help image image-force _check-host-flutter _volumes build-linux build-android build-ios build-macos test test-timing analyze docker-status docker-clean docker-clean-all docker-prune-hint clean shell doctor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -92,6 +106,7 @@ $(STAMP): $(DOCKERFILE)
 	@mkdir -p $(dir $@)
 	@echo "⟳ Dev image out of date — rebuilding (first run takes ~10-15 min)…"
 	docker build --platform $(PLATFORM) -f $(DOCKERFILE) -t $(IMAGE) \
+		--label $(DOCKER_LABEL) \
 		--build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) .
 	@touch $@
 	@echo "✔ Image $(IMAGE) up to date"
@@ -100,14 +115,14 @@ $(STAMP): $(DOCKERFILE)
 # fires. Runs on every make invocation; a bare `docker image inspect` is ~0.1s.
 $(shell docker image inspect $(IMAGE) >/dev/null 2>&1 || rm -f $(STAMP) 2>/dev/null)
 
-build-linux: $(STAMP) ## Compile the Linux desktop app (release)
+build-linux: $(STAMP) _volumes ## Compile the Linux desktop app (release)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
 		flutter build linux --release"
 	@echo "✔ Output: $(APP_DIR)/build/linux/x64/release/bundle/"
 
-build-android: $(STAMP) ## Compile the Android APK (release)
+build-android: $(STAMP) _volumes ## Compile the Android APK (release)
 	@if [ -f $(KEY_PROPERTIES) ] && [ -z "$(KEYSTORE_MOUNT)" ]; then \
 		echo "✖ $(KEY_PROPERTIES) points at a keystore that does not exist:"; \
 		echo "    $(KEYSTORE_PATH)"; \
@@ -140,13 +155,13 @@ build-macos: ## macOS build — runs on HOST, not in Docker (requires macOS + Fl
 	cd $(APP_DIR) && $(HOST_FLUTTER) pub get && $(HOST_FLUTTER) build macos --release
 	@echo "✔ Output: $(APP_DIR)/build/macos/Build/Products/Release/dead_drop.app"
 
-test: $(STAMP) ## Run the test suite (excludes wall-clock timing tests)
+test: $(STAMP) _volumes ## Run the test suite (excludes wall-clock timing tests)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
 		flutter test --exclude-tags timing"
 
-test-timing: $(STAMP) ## Run the wall-clock timing tests (serial; needs a quiet, non-emulated machine)
+test-timing: $(STAMP) _volumes ## Run the wall-clock timing tests (serial; needs a quiet, non-emulated machine)
 	@echo "Note: on an Apple Silicon host this runs under x86_64 emulation,"
 	@echo "where the measurement is dominated by emulator jitter. CI's Linux"
 	@echo "job runs it natively — see app/dart_test.yaml."
@@ -155,7 +170,7 @@ test-timing: $(STAMP) ## Run the wall-clock timing tests (serial; needs a quiet,
 		flutter pub get && \
 		flutter test --tags timing --concurrency 1"
 
-analyze: $(STAMP) ## Run static analysis (flutter analyze)
+analyze: $(STAMP) _volumes ## Run static analysis (flutter analyze)
 	$(DOCKER_RUN) $(IMAGE) bash -c "\
 		cd $(APP_DIR) && \
 		flutter pub get && \
@@ -179,13 +194,60 @@ _check-host-flutter:
 		echo "✔ Flutter $$actual matches .fvmrc"; \
 	fi
 
+docker-status: ## Show what this project is using in Docker, and what is reclaimable
+	@echo "Images (label $(DOCKER_LABEL)):"
+	@docker images --filter "label=$(DOCKER_LABEL)" \
+		--format "  {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}" || true
+	@echo ""
+	@echo "Volumes (label $(DOCKER_LABEL)) — caches, keep unless you want a slow rebuild:"
+	@docker volume ls --filter "label=$(DOCKER_LABEL)" --format "  {{.Name}}" || true
+	@echo ""
+	@echo "Stale images (this project, not the current $(IMAGE)):"
+	@docker images --filter "label=$(DOCKER_LABEL)" --format "{{.Repository}}:{{.Tag}} {{.Size}}" \
+		| grep -v "^$(IMAGE) " | sed 's/^/  /' || echo "  none"
+
+docker-clean: ## Remove this project's stale Docker images (keeps caches and the current image)
+	@echo "Removing images labelled $(DOCKER_LABEL) other than $(IMAGE)…"
+	@ids=$$(docker images --filter "label=$(DOCKER_LABEL)" --format "{{.ID}} {{.Repository}}:{{.Tag}}" \
+		| grep -v " $(IMAGE)$$" | awk '{print $$1}' | sort -u); \
+	if [ -z "$$ids" ]; then echo "  nothing to remove"; else \
+		docker rmi $$ids || true; fi
+	@echo "Cache volumes kept. To remove those too: make docker-clean-all"
+
+docker-clean-all: ## Remove this project's images AND cache volumes (next build re-downloads everything)
+	@$(MAKE) --no-print-directory docker-clean
+	@echo "Removing cache volumes (next build will be slow)…"
+	@docker volume rm $(PUB_CACHE_VOL) $(GRADLE_CACHE_VOL) 2>/dev/null || true
+	@rm -f .make/image-*
+	@echo "Done."
+
+docker-prune-hint: ## Print the command to reclaim Docker's build cache (not run automatically)
+	@echo "Docker's build cache is shared across every project on this machine,"
+	@echo "so this Makefile will not purge it for you. Current usage:"
+	@echo ""
+	@docker system df 2>/dev/null | sed 's/^/  /' || true
+	@echo ""
+	@echo "To reclaim build-cache layers older than a week, keeping recent ones"
+	@echo "so your next build stays fast:"
+	@echo ""
+	@echo "    docker builder prune --filter until=168h"
+	@echo ""
+	@echo "Anonymous volumes (no name, no label) accumulate from containers that"
+	@echo "were run without --rm. They may belong to other projects, so check the"
+	@echo "dates before removing any:"
+	@echo ""
+	@echo "    docker volume ls -qf dangling=true | \\"
+	@echo "      xargs -I{} docker volume inspect {} \\"
+	@echo "        --format '{{.Name}}  {{.CreatedAt}}'"
+	@echo "    docker volume prune    # removes ALL of them, after confirming"
+
 clean: ## Remove build artifacts (host-side, no container needed)
 	rm -rf $(APP_DIR)/build
 	rm -rf $(APP_DIR)/.dart_tool
 	@echo "✔ Cleaned $(APP_DIR)/build and $(APP_DIR)/.dart_tool"
 
-shell: $(STAMP) ## Open an interactive shell inside the dev container
+shell: $(STAMP) _volumes ## Open an interactive shell inside the dev container
 	$(DOCKER_RUN) $(TTY) $(IMAGE) bash
 
-doctor: $(STAMP) ## Run flutter doctor inside the container (diagnostics)
+doctor: $(STAMP) _volumes ## Run flutter doctor inside the container (diagnostics)
 	$(DOCKER_RUN) $(IMAGE) flutter doctor -v
