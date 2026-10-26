@@ -315,19 +315,17 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
       // reach from a file manager. Passing the bytes gets the system
       // document picker, so any folder they can write to is available.
       //
-      // On desktop `saveFile` returns a path and writes nothing, so we write
-      // the bytes ourselves. Hence the two branches.
-      final chosen = await FilePicker.platform.saveFile(
+      // file_picker 13 takes the bytes on every platform and writes the
+      // file itself, so the desktop branch that used to write them by
+      // hand is gone. It returns a Uri rather than a path.
+      final chosen = await FilePicker.saveFile(
         dialogTitle: 'Save received file',
         fileName: name,
-        bytes: Platform.isAndroid || Platform.isIOS ? bytes : null,
+        bytes: bytes,
       );
       if (chosen == null) return; // cancelled
 
-      if (!Platform.isAndroid && !Platform.isIOS) {
-        await File(chosen).writeAsBytes(bytes);
-      }
-      state = state.copyWith(savedPath: chosen);
+      state = state.copyWith(savedPath: chosen.toFilePath());
     } catch (e) {
       // A failed save must say so. Swallowing it leaves the user believing
       // a file they may have crossed a border for is on disk when it is not.
@@ -580,7 +578,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               }
                             }
                           },
-                          errorBuilder: (context, error, child) {
+                          errorBuilder: (context, error) {
                             return Center(
                               child: Padding(
                                 padding: const EdgeInsets.all(16),

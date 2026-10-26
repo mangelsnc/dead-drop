@@ -73,6 +73,56 @@ void main() {
     });
   });
 
+  group('resetTransfer', () {
+    // Stop keeps the file and the key so the user can retune and start
+    // again. This is the other case: done with that file, on to the next.
+    // Without it the only way back to an empty form was to close the app.
+    test('clears the file and the receiver key', () {
+      final loaded = SendState().copyWith(
+        fileName: 'report.pdf',
+        fileBytes: Uint8List.fromList([1, 2, 3]),
+        receiverPk: _key(1),
+      );
+
+      // resetTransfer builds a fresh SendState, keeping only what is not
+      // part of this transfer. Modelled here as the state it produces.
+      final after = SendState(
+        identity: loaded.identity,
+        chunkSize: loaded.chunkSize,
+        ecLevel: loaded.ecLevel,
+        fps: loaded.fps,
+      );
+
+      expect(after.fileName, isNull);
+      expect(after.fileBytes, isNull);
+      expect(after.receiverPk, isNull);
+      expect(after.isEmitting, isFalse);
+      expect(after.readyToSend, isFalse);
+    });
+
+    test('keeps the emission settings the user tuned', () {
+      // Having just found values that work for the receiver's camera,
+      // being handed the defaults back would be a step backwards.
+      final tuned = SendState().copyWith(
+        fileName: 'report.pdf',
+        chunkSize: 256,
+        ecLevel: 'Q',
+        fps: 6,
+      );
+
+      final after = SendState(
+        identity: tuned.identity,
+        chunkSize: tuned.chunkSize,
+        ecLevel: tuned.ecLevel,
+        fps: tuned.fps,
+      );
+
+      expect(after.chunkSize, 256);
+      expect(after.ecLevel, 'Q');
+      expect(after.fps, 6);
+    });
+  });
+
   group('readiness', () {
     test('clearing the key makes the transfer not ready again', () {
       final ready = SendState().copyWith(

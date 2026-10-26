@@ -25,7 +25,7 @@ dependencies:
   # code. Measured on this project's own frames (704-char DD1 payload,
   # 640x480): zxing2 decodes in 5.3 ms median against an 83 ms budget at
   # 12 fps, so the pure-Dart path is not a compromise on speed.
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.4.2
   camera_desktop: ^2.0.0
   # Declared explicitly because desktop_scanner.dart names CameraImageData
   # directly. It arrives via camera_desktop either way; relying on that
@@ -43,13 +43,13 @@ dependencies:
   # package:sodium/sodium_sumo.dart directly (app/lib/src/vault/pwhash.dart).
   sodium: ^4.1.2
   # File picking
-  file_picker: ^8.1.2
+  file_picker: ^13.3.0
   # Path utilities
-  path_provider: ^2.1.4
+  path_provider: ^2.1.6
   # State management
   flutter_riverpod: ^2.5.1
   # Secure storage for identity keypair and TOFU store
-  flutter_secure_storage: ^9.2.2
+  flutter_secure_storage: ^11.2.0
 
 dev_dependencies:
   # Used by the scanner tests to render real QR codes to decode. It arrives
@@ -61,7 +61,7 @@ dev_dependencies:
   # Lets tests swap in an in-memory FlutterSecureStoragePlatform instead of
   # hitting the real OS keychain over a platform channel that doesn't exist
   # in the flutter_tester VM.
-  flutter_secure_storage_platform_interface: ^1.1.2
+  flutter_secure_storage_platform_interface: ^2.1.1
 
 flutter:
   uses-material-design: true

@@ -123,6 +123,19 @@ build-linux: $(STAMP) _volumes ## Compile the Linux desktop app (release)
 	@echo "✔ Output: $(APP_DIR)/build/linux/x64/release/bundle/"
 
 build-android: $(STAMP) _volumes ## Compile the Android APK (release)
+	@# Gradle's JVM settings live in app/android/gradle.properties and are
+	@# sized for the container. If Docker has less memory than they ask
+	@# for, the daemon is killed mid-build and Gradle reports only
+	@# "daemon disappeared unexpectedly" — nothing about memory. Check up
+	@# front so the message names the real problem.
+	@mem=$$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0); \
+	need=$$((3 * 1024 * 1024 * 1024)); \
+	if [ "$$mem" -gt 0 ] && [ "$$mem" -lt "$$need" ]; then \
+		echo "✖ Docker has $$((mem / 1024 / 1024 / 1024)) GB; this build needs about 3 GB."; \
+		echo "  Raise the memory limit in Docker Desktop → Settings → Resources,"; \
+		echo "  or lower org.gradle.jvmargs in $(APP_DIR)/android/gradle.properties."; \
+		exit 1; \
+	fi
 	@if [ -f $(KEY_PROPERTIES) ] && [ -z "$(KEYSTORE_MOUNT)" ]; then \
 		echo "✖ $(KEY_PROPERTIES) points at a keystore that does not exist:"; \
 		echo "    $(KEYSTORE_PATH)"; \
