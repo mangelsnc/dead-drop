@@ -8,13 +8,33 @@ on:
     branches: [main]
 
 env:
-  FLUTTER_VERSION: '3.24.5'
+  # Must match .fvmrc, which the Makefile and the Docker image tag read.
+  # GitHub Actions cannot read a file into `env`, so this is the one place
+  # the version is repeated — keep the two in step when bumping Flutter.
+  FLUTTER_VERSION: '3.47.8'
 
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      # The Flutter version lives in two places — .fvmrc (read by the
+      # Makefile and the Docker image tag) and FLUTTER_VERSION above,
+      # because Actions cannot read a file into `env`. They have now
+      # drifted twice, each time failing a whole CI run on something that
+      # had nothing to do with the change. Fail here instead, in seconds,
+      # with a message that says what to edit.
+      - name: Flutter version matches .fvmrc
+        run: |
+          PINNED=$(sed -n 's/.*"flutter"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .fvmrc)
+          if [ "$PINNED" != "${{ env.FLUTTER_VERSION }}" ]; then
+            echo "::error::.fvmrc pins Flutter $PINNED but this workflow's" \
+                 "FLUTTER_VERSION is ${{ env.FLUTTER_VERSION }}." \
+                 "Update env.FLUTTER_VERSION in .github/workflows/build.yml."
+            exit 1
+          fi
+          echo "Both pin Flutter $PINNED"
 
       - uses: subosito/flutter-action@v2
         with:
