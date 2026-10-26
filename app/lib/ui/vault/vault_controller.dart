@@ -100,6 +100,34 @@ class VaultController extends StateNotifier<VaultState>
       : _attemptGuard = attemptGuard ?? AttemptGuard(),
         super(const VaultState()) {
     WidgetsBinding.instance.addObserver(this);
+    _restoreExistence();
+  }
+
+  /// Notices a vault configured in a previous run.
+  ///
+  /// `exists` used to be set only by createVault and unlock, both of
+  /// which happen within one session — so after the app was fully closed
+  /// and reopened, a configured vault looked like no vault at all: no
+  /// entry on the home screen, no unlock prompt, and no vault option when
+  /// saving a received file. The data was never lost, but nothing in the
+  /// interface could reach it.
+  ///
+  /// Asks the store whether it was ever set up, which is a different
+  /// question from what the slots contain. An empty slot is deliberately
+  /// indistinguishable from a full one — that is the decoy — so this
+  /// learns only that a vault exists, never how many environments there
+  /// are or whether either holds anything.
+  Future<void> _restoreExistence() async {
+    final store = _store;
+    if (store == null) return;
+    try {
+      if (await store.hasBeenSetUp() && mounted && !state.exists) {
+        state = state.copyWith(exists: true);
+      }
+    } catch (_) {
+      // An unreadable store means the UI offers no vault, which is the
+      // safe direction: better than an entry that cannot be opened.
+    }
   }
 
   final SodiumSumo? _sodium;

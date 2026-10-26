@@ -199,6 +199,43 @@ void main() {
     }
   });
 
+  test('a vault survives the app being closed and reopened', () async {
+    // Reported from a device: create a vault, fully close the app (not
+    // just background it), reopen — and the vault was gone from the
+    // interface. No entry, no unlock prompt, no vault option when saving
+    // a received file. The data was always on disk; nothing in the UI
+    // could reach it, because `exists` was only ever set by createVault
+    // and unlock, both of which happen within a single session.
+    final first = buildController();
+    await first.createVault('correct horse battery staple six');
+    expect(first.state.exists, isTrue);
+    first.dispose();
+
+    // A fresh controller over the same directory, as on the next launch.
+    final reopened = buildController();
+    addTearDown(reopened.dispose);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(reopened.state.exists, isTrue,
+        reason: 'a configured vault must still be reachable after a '
+            'restart');
+    expect(reopened.state.unlocked, isFalse,
+        reason: 'but still locked — knowing one exists is not knowing the '
+            'passphrase');
+    expect(await reopened.unlock('correct horse battery staple six'), isTrue);
+  });
+
+  test('no vault means no vault, after a restart too', () async {
+    // The other direction: a directory nobody has set up must not start
+    // claiming a vault exists, or the home screen would show an entry
+    // that opens nothing.
+    final controller = buildController();
+    addTearDown(controller.dispose);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(controller.state.exists, isFalse);
+  });
+
   test('unlock with the real passphrase exposes the real entries', () async {
     final controller = buildController();
     addTearDown(controller.dispose);
