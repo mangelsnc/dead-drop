@@ -58,6 +58,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtool \
         pkg-config \
         libgtk-3-dev \
+        # camera_desktop's Linux capture backend. Needed at build
+        # time (pkg-config) and at run time (the V4L2 element).
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-good \
         liblzma-dev \
         libstdc++-12-dev \
         libsecret-1-dev \

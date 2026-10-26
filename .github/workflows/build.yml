@@ -45,7 +45,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+          # GStreamer is camera_desktop's capture backend on Linux;
+          # without it the CMake configure step fails before any
+          # Dart is compiled. plugins-good carries the V4L2 element
+          # that actually talks to a webcam.
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
 
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop

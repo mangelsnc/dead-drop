@@ -147,7 +147,9 @@ A single Ubuntu 22.04 image with everything pinned:
 - **Flutter SDK 3.24.5** (the version in `.fvmrc` — see
   [Flutter version](#flutter-version) below)
 - **Linux desktop toolchain**: `clang`, `cmake`, `ninja-build`, `pkg-config`,
-  `libgtk-3-dev` (+ `liblzma-dev`, `libstdc++-12-dev`)
+  `libgtk-3-dev` (+ `liblzma-dev`, `libstdc++-12-dev`), and the
+  GStreamer development packages that camera_desktop needs to capture
+  from a webcam
 - **Android SDK**: command-line tools, platform 34, build-tools 34.0.0, JDK 17
 
 The container runs as a **non-root user** whose UID/GID are matched to your host
