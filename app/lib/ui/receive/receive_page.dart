@@ -19,6 +19,7 @@ import '../../src/utils.dart';
 import '../../main.dart';
 import '../theme.dart';
 import '../technical_text.dart';
+import '../passphrase_field.dart';
 import '../desktop_scanner_view.dart';
 import '../../src/desktop_scanner.dart';
 import '../vault/vault_controller.dart';
@@ -434,6 +435,15 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   @override
   void dispose() {
     _stopScanner();
+    // Leaving the page ends the reception, for the same reason as the
+    // send side: receiveProvider is global, so a half-finished transfer
+    // was still on screen when the user came back having moved on.
+    //
+    // reset() keeps the receiver keypair, so the sender does not have to
+    // re-scan the handshake QR — that pairing is not what the user
+    // walked away from.
+    final notifier = ref.read(receiveProvider.notifier);
+    Future.microtask(notifier.reset);
     super.dispose();
   }
 
@@ -1384,12 +1394,10 @@ class _VaultUnlockDialogState extends ConsumerState<_VaultUnlockDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
+          PassphraseField(
             controller: _passphraseController,
-            obscureText: true,
             autofocus: true,
-            decoration: const InputDecoration(labelText: 'Passphrase'),
-            onSubmitted: (_) => _submitting ? null : _unlock(),
+            onSubmitted: () => _submitting ? null : _unlock(),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
