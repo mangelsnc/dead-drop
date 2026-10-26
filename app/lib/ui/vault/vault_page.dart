@@ -21,6 +21,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../src/vault/vault_store.dart';
 import '../theme.dart';
+import '../passphrase_field.dart';
+import '../technical_text.dart';
 import '../settings/settings_page.dart';
 import 'vault_controller.dart';
 import 'vault_setup_page.dart';
@@ -153,12 +155,11 @@ class _LockedViewState extends ConsumerState<_LockedView> {
               style: theme.textTheme.headlineSmall,
             ),
             const SizedBox(height: 24),
-            TextField(
+            PassphraseField(
               controller: _controller,
-              obscureText: true,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Passphrase'),
-              onSubmitted: (_) => _submitting ? null : _unlock(),
+              textStyle: technicalTextStyle(ref),
+              onSubmitted: () => _submitting ? null : _unlock(),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
