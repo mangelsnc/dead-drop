@@ -19,6 +19,8 @@ import '../../src/utils.dart';
 import '../../main.dart';
 import '../theme.dart';
 import '../technical_text.dart';
+import '../desktop_scanner_view.dart';
+import '../../src/desktop_scanner.dart';
 import '../vault/vault_controller.dart';
 
 /// State for the receive flow.
@@ -564,7 +566,11 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: MobileScanner(
+                        child: usesDesktopScanner
+                            ? DesktopScannerView(
+                                onDetect: notifier.processRawQr,
+                              )
+                            : MobileScanner(
                           controller: _scannerController,
                           onDetect: (capture) {
                             for (final barcode in capture.barcodes) {

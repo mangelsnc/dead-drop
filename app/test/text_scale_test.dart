@@ -113,14 +113,14 @@ void main() {
     });
 
     test('a step that would overshoot lands exactly on the end', () {
-      final nearTop = kMaxTechnicalTextSize - (kTechnicalTextSizeStep / 2);
+      const nearTop = kMaxTechnicalTextSize - (kTechnicalTextSizeStep / 2);
 
       expect(nextLarger(nearTop), kMaxTechnicalTextSize);
     });
 
     test('the range is usable: at least four steps wide', () {
       // A control with two positions is not worth the screen space.
-      final steps =
+      const steps =
           (kMaxTechnicalTextSize - kMinTechnicalTextSize) / kTechnicalTextSizeStep;
 
       expect(steps, greaterThanOrEqualTo(4));
