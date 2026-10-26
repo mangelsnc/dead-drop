@@ -88,7 +88,7 @@ STAMP := .make/image-$(subst :,-,$(IMAGE))
 # with $(FLUTTER_VERSION); fall back to PATH otherwise, with a warning.
 HOST_FLUTTER := $(shell command -v fvm >/dev/null 2>&1 && echo "fvm flutter" || echo "flutter")
 
-.PHONY: help image image-force _check-host-flutter _volumes build-linux build-android build-ios build-macos test test-timing analyze docker-status docker-clean docker-clean-all docker-prune-hint clean shell doctor
+.PHONY: help image image-force _check-host-flutter _volumes build-linux build-android build-ios build-macos test test-timing analyze docker-status docker-clean docker-clean-all docker-cache-report docker-prune-hint clean shell doctor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -220,6 +220,9 @@ docker-clean-all: ## Remove this project's images AND cache volumes (next build 
 	@docker volume rm $(PUB_CACHE_VOL) $(GRADLE_CACHE_VOL) 2>/dev/null || true
 	@rm -f .make/image-*
 	@echo "Done."
+
+docker-cache-report: ## Break Docker's build cache down by age, to pick a prune filter
+	@./scripts/docker-cache-report
 
 docker-prune-hint: ## Print the command to reclaim Docker's build cache (not run automatically)
 	@echo "Docker's build cache is shared across every project on this machine,"
