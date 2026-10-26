@@ -144,11 +144,15 @@ class SendNotifier extends StateNotifier<SendState> {
   Timer? _timer;
 
   Future<void> pickFile() async {
-    final result = await FilePicker.platform.pickFiles(withData: true);
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
+    // file_picker 13 made these static and returns the files directly;
+    // `withData` is gone because bytes always come back.
+    final files = await FilePicker.pickFiles();
+    if (files.isEmpty) return;
+    final file = files.first;
+    // PlatformFile.bytes is gone in file_picker 13: reading is explicit
+    // now, so a picker no longer loads the whole file into memory before
+    // anyone asks for it.
+    final bytes = await file.readAsBytes();
     _stopTimer();
 
     // Auto-select the smallest chunk size that can carry this file without
@@ -274,6 +278,28 @@ class SendNotifier extends StateNotifier<SendState> {
       showingBootstrap: false,
       currentQrData: null,
       framesEmitted: 0,
+    );
+  }
+
+  /// Clears everything about this transfer and returns to step 1.
+  ///
+  /// stopEmitting keeps the file and the key so the user can retune and
+  /// start again; this is the other case — done with that file, on to the
+  /// next. Without it the only way back to an empty form was to close the
+  /// app, which is a poor answer to "send another one".
+  ///
+  /// Keeps the identity, which belongs to the device rather than to any
+  /// transfer, and keeps the emission settings: having just tuned fps and
+  /// chunk size for the receiver's camera, being handed the defaults back
+  /// would be a step backwards.
+  void resetTransfer() {
+    _stopTimer();
+    unawaited(allowScreenSleep());
+    state = SendState(
+      identity: state.identity,
+      chunkSize: state.chunkSize,
+      ecLevel: state.ecLevel,
+      fps: state.fps,
     );
   }
 
@@ -1034,7 +1060,7 @@ class _KeyScanPageState extends State<_KeyScanPage> {
                 _onRaw(raw);
               }
             },
-            errorBuilder: (context, error, child) {
+            errorBuilder: (context, error) {
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -1402,6 +1428,22 @@ class _SendingScreen extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              // Done with this file, on to the next. Stop keeps the file
+              // and the key so the user can retune and start again; this
+              // clears both. Without it the only way back to an empty
+              // form was to close the app.
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () {
+                    notifier.resetTransfer();
+                    Navigator.of(context).popUntil((r) => r.isFirst);
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('New transfer'),
+                ),
               ),
             ],
           ),
