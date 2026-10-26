@@ -21,8 +21,13 @@ ARG FLUTTER_VERSION=3.47.8
 LABEL dev.deaddrop.project="dead-drop"
 
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708_latest
-ARG ANDROID_PLATFORM_VERSION=34
-ARG ANDROID_BUILD_TOOLS_VERSION=34.0.0
+# Android 36 is what Flutter 3.47 targets, and plugins built against it
+# refuse to link into an app compiled against an older platform — the
+# failure names file_picker or whichever plugin is checked first, not the
+# missing SDK, so it reads as a dependency problem rather than a toolchain
+# one.
+ARG ANDROID_PLATFORM_VERSION=36
+ARG ANDROID_BUILD_TOOLS_VERSION=36.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     FLUTTER_HOME=/opt/flutter \
