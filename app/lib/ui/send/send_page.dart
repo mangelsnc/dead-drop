@@ -20,6 +20,8 @@ import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
 import '../technical_text.dart';
+import '../desktop_scanner_view.dart';
+import '../../src/desktop_scanner.dart';
 import '../responsive.dart';
 
 /// State for the send flow.
@@ -859,7 +861,10 @@ class _MetadataRow extends StatelessWidget {
 /// web only — there is no Linux or Windows scanner. Where this is false the
 /// scan button is not offered (it could only fail) and manual entry is the
 /// primary path rather than a disclosed fallback.
-bool get _canScanQr => Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+// Which platforms can scan is decided in src/desktop_scanner.dart, where
+// both implementations live: mobile_scanner on android/ios/macos, and the
+// camera_desktop + zxing2 pair on linux/windows.
+bool get _canScanQr => canScanQr;
 
 class _ReceiverKeySection extends StatelessWidget {
   const _ReceiverKeySection({
@@ -980,19 +985,33 @@ class _KeyScanPageState extends State<_KeyScanPage> {
   @override
   void initState() {
     super.initState();
-    // On desktop, use the default camera (no "back" facing concept).
-    final isDesktop =
-        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    if (usesDesktopScanner) return;
+    // macOS has mobile_scanner but no "back" camera concept.
     _controller = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
+      facing: Platform.isMacOS ? CameraFacing.front : CameraFacing.back,
     );
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    // Only created on the mobile_scanner path; disposing an uninitialised
+    // late field would throw.
+    if (!usesDesktopScanner) _controller.dispose();
     super.dispose();
+  }
+
+  /// Handles one decoded QR string, from either camera implementation.
+  ///
+  /// Ignores anything that is not a handshake QR — the user may well be
+  /// pointing at some other code on the way — and returns the first key
+  /// it recognises.
+  void _onRaw(String raw) {
+    if (_found) return;
+    final pk = decodeHandshakeQr(raw);
+    if (pk == null) return;
+    _found = true;
+    Navigator.of(context).pop(pk);
   }
 
   @override
@@ -1002,19 +1021,17 @@ class _KeyScanPageState extends State<_KeyScanPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          MobileScanner(
+          if (usesDesktopScanner)
+            DesktopScannerView(onDetect: _onRaw)
+          else
+            MobileScanner(
             controller: _controller,
             onDetect: (capture) {
               if (_found) return;
               for (final barcode in capture.barcodes) {
                 final raw = barcode.rawValue;
                 if (raw == null) continue;
-                final pk = decodeHandshakeQr(raw);
-                if (pk != null) {
-                  _found = true;
-                  Navigator.of(context).pop(pk);
-                  return;
-                }
+                _onRaw(raw);
               }
             },
             errorBuilder: (context, error, child) {
