@@ -28,6 +28,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../src/vault/passphrase_strength.dart';
 import '../theme.dart';
+import '../passphrase_field.dart';
 import '../technical_text.dart';
 import 'vault_controller.dart';
 import 'vault_page.dart';
@@ -302,12 +303,14 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
             ],
           ),
         ),
-        TextField(
+        // Starts visible here: the user is choosing a phrase and has to
+        // read it to copy it down. The toggle is still offered, because
+        // "choosing a passphrase" and "someone is looking over my
+        // shoulder" are not mutually exclusive.
+        PassphraseField(
           controller: _ownController,
-          obscureText: false,
-          decoration: const InputDecoration(
-            labelText: 'Passphrase',
-          ),
+          startVisible: true,
+          textStyle: technicalTextStyle(ref),
         ),
         const SizedBox(height: 12),
         if (strength != null)
