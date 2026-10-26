@@ -75,6 +75,18 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
     super.dispose();
   }
 
+  /// What to say under the bar. Names the situation, not a raw number.
+  String _statusLine() {
+    final rate = _scanner.recentDecodeRate;
+    if (rate == null) {
+      return 'Looking… ${_scanner.framesSeen} frames checked';
+    }
+    if (rate >= 0.6) return 'Good — hold it there';
+    if (rate >= 0.3) return 'Reading — try moving a little closer';
+    if (rate > 0) return 'Weak — adjust distance or lighting';
+    return 'Not reading — point at the other screen';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
@@ -117,27 +129,80 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       fit: StackFit.expand,
       children: [
         Center(child: preview),
-        // Says whether the camera is actually looking at anything. Without
-        // it a working camera that sees no code is indistinguishable from
-        // one that never started.
+        // How well the camera is placed, as a bar rather than a number.
+        //
+        // Aim, distance and focus all show up in one figure: the share of
+        // recent frames that held a readable code. Users were working
+        // this out by watching the frame counter and moving the camera
+        // until it sped up; this says it directly.
+        //
+        // A rolling window, so moving closer shows an effect within a
+        // second or two. A running total would keep reporting a bad
+        // start long after the aim was fixed.
         Align(
           alignment: Alignment.bottomCenter,
           child: Container(
             margin: const EdgeInsets.all(8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(6),
+              color: Colors.black.withValues(alpha: 0.65),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(
-              _scanner.framesDecoded > 0
-                  ? 'Reading — ${_scanner.framesDecoded} codes so far'
-                  : 'Looking… ${_scanner.framesSeen} frames checked',
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _QualityBar(rate: _scanner.recentDecodeRate),
+                const SizedBox(height: 6),
+                Text(
+                  _statusLine(),
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ],
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A red-to-green bar showing how well the camera is reading.
+///
+/// Colour and length both carry the value, so it works for someone who
+/// cannot tell red from green — the two differ in lightness as well as
+/// hue, which is why this is amber in the middle rather than a red/green
+/// pair alone.
+class _QualityBar extends StatelessWidget {
+  const _QualityBar({required this.rate});
+
+  /// Share of recent frames read, or null before enough are known.
+  final double? rate;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = rate ?? 0;
+    final colour = rate == null
+        ? Colors.white24
+        : Color.lerp(
+            const Color(0xFFE53935), // red
+            const Color(0xFF43A047), // green
+            // Squared so the bar reaches green only when reading is
+            // genuinely good: a camera at 50% is usable but not where
+            // the user should stop adjusting.
+            (value * value).clamp(0.0, 1.0),
+          )!;
+
+    return SizedBox(
+      width: 180,
+      height: 6,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: LinearProgressIndicator(
+          value: value.clamp(0.05, 1.0),
+          backgroundColor: Colors.white24,
+          valueColor: AlwaysStoppedAnimation<Color>(colour),
+        ),
+      ),
     );
   }
 }
