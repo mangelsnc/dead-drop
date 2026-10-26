@@ -102,6 +102,7 @@ them apart is to remember which is which.
 | `make docker-status` | What this project is using, and which of its images are stale |
 | `make docker-clean` | Removes this project's stale images. Keeps the current image and both caches |
 | `make docker-clean-all` | The above, plus the cache volumes. The next build re-downloads everything |
+| `make docker-cache-report` | Breaks the build cache down by age, so a prune filter can be chosen from data |
 | `make docker-prune-hint` | Prints the commands for machine-wide cleanup, which this Makefile will not run for you |
 
 **A Flutter bump orphans an image.** The tag follows `.fvmrc`, so changing
@@ -114,6 +115,18 @@ projects' work, so they are printed by `make docker-prune-hint` rather
 than run. The cache volumes survive `make docker-clean` on purpose:
 removing them costs a slow rebuild and saves nothing you cannot
 re-download.
+
+**Pruning the build cache by age, and why the obvious filter may free
+nothing.** The build cache is machine-wide and layers are shared between
+images, so age is the safe axis: a layer nothing has touched in months is
+one nothing is building against. `make docker-cache-report` buckets it by
+last use and prints what each cut-off would actually free.
+
+Worth running before choosing a number. After a day of rebuilding this
+image the entire cache was under a week old, so `--filter until=6570h`
+(nine months) would have freed nothing at all — the bulk was recent work,
+and the only way to reclaim it was to accept a slow next build. The
+report tells you which case you are in instead of guessing.
 
 ### Upgrading
 
