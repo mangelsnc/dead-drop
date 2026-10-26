@@ -52,6 +52,9 @@ dependencies:
   flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
+  # Used by the scanner tests to render real QR codes to decode. It arrives
+  # transitively via qr_flutter, but tests name it directly.
+  qr: ^3.0.2
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0

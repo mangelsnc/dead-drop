@@ -160,9 +160,9 @@ void main() {
     });
 
     test('returns null for a frame with no planes', () {
-      final pixels = frameToArgb(CameraImageData(
-        format: const CameraImageFormat(ImageFormatGroup.bgra8888, raw: null),
-        planes: const [],
+      final pixels = frameToArgb(const CameraImageData(
+        format: CameraImageFormat(ImageFormatGroup.bgra8888, raw: null),
+        planes: [],
         width: 4,
         height: 4,
       ));
