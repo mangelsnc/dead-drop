@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Report Docker's build cache by age, so a prune filter can be chosen from
+data rather than guessed.
+
+The build cache is machine-wide: layers are shared between projects, and an
+entry marked shared is one that more than one image depends on. Age is the
+safe axis to prune on — a layer nothing has touched in months is a layer
+nothing is building against.
+
+Run it directly, or via `make docker-cache-report`.
+"""
+
+import re
+import subprocess
+import sys
+
+UNITS = {
+    "second": 1 / 3600, "minute": 1 / 60, "hour": 1,
+    "day": 24, "week": 168, "month": 730, "year": 8760,
+}
+
+# (label, upper bound in hours). The last bucket catches everything older.
+BUCKETS = [
+    ("last 24h", 24),
+    ("1-7 days", 168),
+    ("7-30 days", 720),
+    ("1-3 months", 2190),
+    ("3-9 months", 6570),
+    ("over 9 months", None),
+]
+
+
+def parse_hours(value):
+    """'35 hours ago' -> 35.0. None when the entry was never used."""
+    match = re.match(r"([\d.]+)\s*(\w+?)s?\b", value or "")
+    if not match:
+        return None
+    unit = match.group(2)
+    return float(match.group(1)) * UNITS[unit] if unit in UNITS else None
+
+
+def parse_size(value):
+    """'1.5GB' -> 1.5e9."""
+    match = re.match(r"([\d.]+)\s*([kMGT]?)B", value or "")
+    if not match:
+        return 0.0
+    scale = {"": 1, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12}
+    return float(match.group(1)) * scale[match.group(2)]
+
+
+def read_entries():
+    try:
+        out = subprocess.run(
+            ["docker", "buildx", "du", "--verbose"],
+            capture_output=True, text=True, timeout=120,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        sys.exit(f"could not read the build cache: {exc}")
+
+    fields = {"Last used:": "used", "Size:": "size",
+              "Shared:": "shared", "Reclaimable:": "recl"}
+    entries, current = [], {}
+    for line in out.splitlines():
+        line = line.strip()
+        for prefix, name in fields.items():
+            if line.startswith(prefix):
+                current[name] = line.split(":", 1)[1].strip()
+                # Reclaimable is the last field of each record.
+                if name == "recl":
+                    entries.append(current)
+                    current = {}
+                break
+    return entries
+
+
+def main():
+    entries = [e for e in read_entries() if e.get("recl", "").startswith("true")]
+    if not entries:
+        print("No reclaimable build cache.")
+        return
+
+    tally = {label: [0, 0.0] for label, _ in BUCKETS}
+    tally["never used"] = [0, 0.0]
+    shared_bytes = 0.0
+
+    for entry in entries:
+        hours = parse_hours(entry.get("used"))
+        size = parse_size(entry.get("size"))
+        if entry.get("shared", "").startswith("true"):
+            shared_bytes += size
+
+        if hours is None:
+            bucket = "never used"
+        else:
+            bucket = next(label for label, limit in BUCKETS
+                          if limit is None or hours < limit)
+        tally[bucket][0] += 1
+        tally[bucket][1] += size
+
+    print(f"{'last used':15} {'entries':>8} {'size':>11}")
+    print("-" * 36)
+    for label in [l for l, _ in BUCKETS] + ["never used"]:
+        count, size = tally[label]
+        if count:
+            print(f"{label:15} {count:8} {size / 1e9:8.2f} GB")
+
+    total = sum(size for _, size in tally.values())
+    count = sum(n for n, _ in tally.values())
+    print("-" * 36)
+    print(f"{'reclaimable':15} {count:8} {total / 1e9:8.2f} GB")
+    print(f"\nShared with other images: {shared_bytes / 1e9:.2f} GB "
+          f"— those layers belong to more than one project.\n")
+
+    # What each cut-off would actually free: everything in buckets whose
+    # whole range is older than the cut-off.
+    print("What a prune would free:")
+    for label, cutoff in (("9 months", 6570), ("3 months", 2190),
+                          ("30 days", 720), ("7 days", 168)):
+        freed = sum(
+            size for bucket_label, (_, size) in tally.items()
+            if bucket_label != "never used"
+            and (lambda lim: lim is None or lim > cutoff)(
+                dict(BUCKETS).get(bucket_label))
+        )
+        print(f"  --filter until={cutoff}h  "
+              f"~{freed / 1e9:5.2f} GB   (unused for over {label})")
+
+    print("\n  docker builder prune --filter until=<N>h")
+    print("  Nothing is removed until you run that yourself.")
+
+
+if __name__ == "__main__":
+    main()
