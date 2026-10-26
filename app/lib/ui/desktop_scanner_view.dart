@@ -57,6 +57,10 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
           if (mounted) setState(() => _error = e.toString());
         },
       );
+      // Frame counts and the aspect ratio both arrive after start().
+      _scanner.activity.listen((_) {
+        if (mounted) setState(() {});
+      });
       if (mounted) setState(() => _ready = true);
     } on DesktopCameraException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -101,6 +105,39 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return _scanner.preview();
+    // The preview is drawn at the camera's own ratio. Stretching it to
+    // fill a box of some other shape distorts the image — ugly, and
+    // worse, a squashed QR is harder to aim at.
+    final ratio = _scanner.aspectRatio;
+    final preview = ratio == null
+        ? _scanner.preview()
+        : AspectRatio(aspectRatio: ratio, child: _scanner.preview());
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Center(child: preview),
+        // Says whether the camera is actually looking at anything. Without
+        // it a working camera that sees no code is indistinguishable from
+        // one that never started.
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Container(
+            margin: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              _scanner.framesDecoded > 0
+                  ? 'Reading — ${_scanner.framesDecoded} codes so far'
+                  : 'Looking… ${_scanner.framesSeen} frames checked',
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
