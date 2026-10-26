@@ -27,6 +27,10 @@ dependencies:
   # 12 fps, so the pure-Dart path is not a compromise on speed.
   mobile_scanner: ^5.2.3
   camera_desktop: ^2.0.0
+  # Declared explicitly because desktop_scanner.dart names CameraImageData
+  # directly. It arrives via camera_desktop either way; relying on that
+  # would break the day camera_desktop reorganises its own dependencies.
+  camera_platform_interface: ^2.15.0
   zxing2: ^0.2.4
   # Crypto (libsodium bindings).
   #
