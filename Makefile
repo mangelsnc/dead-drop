@@ -12,7 +12,12 @@
 
 SHELL := /bin/bash
 
-IMAGE        := deaddrop-dev:3.24.5
+# The Flutter version every environment must agree on. Single source of truth
+# is .fvmrc; this reads it so the Makefile, the Docker image tag and CI cannot
+# drift apart.
+FLUTTER_VERSION := $(shell sed -n 's/.*"flutter"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .fvmrc)
+
+IMAGE        := deaddrop-dev:$(FLUTTER_VERSION)
 DOCKERFILE   := docker/Dockerfile
 APP_DIR      := app
 PLATFORM     := linux/amd64
@@ -62,10 +67,6 @@ KEYSTORE_MOUNT := $(if $(wildcard $(KEYSTORE_PATH)),-v "$(KEYSTORE_PATH):$(KEYST
 # (.gitignore) since it describes local Docker state, not the source tree.
 STAMP := .make/image-$(subst :,-,$(IMAGE))
 
-# The Flutter version every environment must agree on. Single source of truth
-# is .fvmrc; this reads it so the Makefile, the Docker image tag and CI cannot
-# drift apart.
-FLUTTER_VERSION := $(shell sed -n 's/.*"flutter"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .fvmrc)
 
 # Apple targets cannot run in Docker (Xcode needs macOS), so they use the
 # host toolchain — the one place where a contributor's own Flutter version

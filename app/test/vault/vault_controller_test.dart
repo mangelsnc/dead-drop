@@ -8,7 +8,6 @@
 /// `lock()` or the app being backgrounded (Review Focus #2).
 library;
 
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -40,88 +39,6 @@ Uint8List tryUnlockFor(
     throw StateError('test setup: $passphrase did not unlock any slot');
   }
   return result.dataKey!;
-}
-
-/// Loads the native libsodium library for the current test platform.
-///
-/// `flutter test` runs in the flutter_tester VM, which does NOT link the
-/// libsodium binaries bundled by sodium_libs (that only happens in real app
-/// builds). So in tests we must load the library manually. We prefer the
-/// binaries bundled in the sodium_libs package (pub cache) and fall back to
-/// system-wide installations. See:
-/// https://github.com/Skycoder42/libsodium_dart_bindings/issues/23
-DynamicLibrary _loadLibsodium() {
-  for (final candidate in _libsodiumCandidates()) {
-    try {
-      return DynamicLibrary.open(candidate);
-    } on ArgumentError {
-      // Not found / not loadable — try next candidate.
-    }
-  }
-  throw StateError(
-    'Could not load libsodium on ${Platform.operatingSystem}. '
-    'Tried: ${_libsodiumCandidates().join(', ')}',
-  );
-}
-
-/// Candidate paths/names for the native libsodium library, in order.
-List<String> _libsodiumCandidates() {
-  final bundled = _bundledSodiumLibsBinary();
-
-  if (Platform.isLinux) {
-    return [
-      if (bundled != null) bundled,
-      'libsodium.so.23',
-      'libsodium.so',
-    ];
-  }
-  if (Platform.isWindows) {
-    return [
-      if (bundled != null) bundled,
-      'libsodium.dll',
-    ];
-  }
-  if (Platform.isMacOS) {
-    return [
-      if (bundled != null) bundled,
-      '/opt/homebrew/lib/libsodium.dylib',
-      '/usr/local/lib/libsodium.dylib',
-      'libsodium.dylib',
-    ];
-  }
-  throw UnsupportedError(
-      'Unsupported test platform: ${Platform.operatingSystem}');
-}
-
-/// Locates the libsodium binary bundled inside the sodium_libs package in
-/// the pub cache, without hardcoding the package version.
-String? _bundledSodiumLibsBinary() {
-  final pubCache = Platform.environment['PUB_CACHE'];
-  if (pubCache == null) return null;
-
-  final hostedDir = Directory('$pubCache/hosted/pub.dev');
-  if (!hostedDir.existsSync()) return null;
-
-  Directory? pkgDir;
-  for (final entry in hostedDir.listSync()) {
-    if (entry is Directory && entry.path.contains('sodium_libs-')) {
-      pkgDir = entry;
-      break;
-    }
-  }
-  if (pkgDir == null) return null;
-
-  final relPath = Platform.isLinux
-      ? 'linux/lib/x86_64/libsodium.so'
-      : Platform.isWindows
-          ? 'windows/lib/Release/v143/libsodium.dll'
-          : Platform.isMacOS
-              ? 'macos/Libraries/libsodium.dylib'
-              : null;
-  if (relPath == null) return null;
-
-  final binary = File('${pkgDir.path}/$relPath');
-  return binary.existsSync() ? binary.path : null;
 }
 
 /// In-memory keychain: `flutter_secure_storage` talks to the OS over a
@@ -182,7 +99,7 @@ void main() {
   late _FakeSecureStorage keychain;
 
   setUpAll(() async {
-    sodium = await SodiumSumoInit.init2(_loadLibsodium);
+    sodium = await SodiumSumoInit.init();
   });
 
   setUp(() {
