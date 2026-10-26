@@ -19,10 +19,30 @@
 /// anyway, so even a slow frame cannot stutter the preview.
 library;
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:zxing2/qrcode.dart';
+
+/// Whether this platform can scan a QR code from a camera at all.
+///
+/// Two different implementations sit behind one answer: `mobile_scanner`
+/// on android, ios and macos, and the camera_desktop + zxing2 pair in
+/// this library on linux and windows. The UI should ask this rather than
+/// test the platform itself, so adding a platform is one edit here.
+bool get canScanQr =>
+    Platform.isAndroid ||
+    Platform.isIOS ||
+    Platform.isMacOS ||
+    Platform.isLinux ||
+    Platform.isWindows;
+
+/// Whether this platform scans through the desktop camera path.
+///
+/// Decides which widget the receive and send pages build: `MobileScanner`
+/// where the plugin exists, [DesktopCameraScanner] where it does not.
+bool get usesDesktopScanner => Platform.isLinux || Platform.isWindows;
 
 /// Converts one camera frame to the ARGB pixel array `zxing2` expects.
 ///
