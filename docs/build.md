@@ -26,7 +26,9 @@ flutter run
 sudo snap install flutter --classic
 
 # Install build dependencies
-sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev
+sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  gstreamer1.0-plugins-good
 
 # Enable desktop support
 flutter config --enable-linux-desktop
@@ -129,4 +131,5 @@ for instructions on verifying that a downloaded binary matches the source code.
 | QR codes not scanning | Ensure good lighting, hold the camera steady, and try lowering the frame rate (fps) on the sender |
 | Transfer stalls mid-way | Keep both devices still; the fountain code recovers from lost frames automatically — just keep scanning |
 | Build fails on Linux | Install `libgtk-3-dev` and `pkg-config` |
+| CMake cannot find `gstreamer-1.0` | Install the GStreamer packages above. They are the camera backend for QR scanning on Linux, and the build stops at CMake without them |
 | Build fails on Windows | Install Visual Studio Build Tools with C++ workload |
