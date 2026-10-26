@@ -6,7 +6,9 @@ import 'package:sodium/sodium_sumo.dart';
 import 'src/identity_store.dart';
 import 'src/tofu_store.dart';
 import 'ui/home_page.dart';
+import 'src/text_scale.dart';
 import 'ui/theme.dart';
+import 'ui/technical_text.dart';
 import 'ui/vault/vault_controller.dart';
 
 /// Global sodium instance provider, used by every non-vault consumer
@@ -83,8 +85,16 @@ Future<void> main() async {
   }
   final Sodium sodium = sumo ?? await SodiumInit.init();
 
+  // Read before the first frame so technical text is already at the user's
+  // chosen size. Reading it from inside the widget tree would draw the
+  // default first and then jump.
+  final textScale = TextScaleStore();
+  final technicalTextSize = await textScale.read();
+
   final overrides = <Override>[
     sodiumProvider.overrideWithValue(sodium),
+    textScaleStoreProvider.overrideWithValue(textScale),
+    technicalTextSizeProvider.overrideWith((ref) => technicalTextSize),
     if (sumo != null) ...[
       sodiumSumoProvider.overrideWithValue(sumo),
       vaultDirectoryProvider.overrideWithValue(await resolveVaultDirectory()),

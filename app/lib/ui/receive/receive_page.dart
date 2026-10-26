@@ -18,6 +18,7 @@ import '../../src/transport.dart';
 import '../../src/utils.dart';
 import '../../main.dart';
 import '../theme.dart';
+import '../technical_text.dart';
 import '../vault/vault_controller.dart';
 
 /// State for the receive flow.
@@ -952,7 +953,7 @@ class _StepCard extends StatelessWidget {
 /// Text view of the receiver public key: selectable hex grouped in blocks
 /// of four characters (easy to read out loud or type by hand), plus a
 /// copy-to-clipboard button. Used when the sender cannot scan the QR.
-class _PublicKeyTextView extends StatelessWidget {
+class _PublicKeyTextView extends ConsumerWidget {
   const _PublicKeyTextView({required this.publicKey});
 
   final Uint8List publicKey;
@@ -975,7 +976,7 @@ class _PublicKeyTextView extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final hexKey = bytesToHex(publicKey);
     final grouped = _groupHex(hexKey);
 
@@ -992,13 +993,9 @@ class _PublicKeyTextView extends StatelessWidget {
           SelectableText(
             grouped,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 14,
-              height: 1.6,
-              letterSpacing: 0.5,
-              color: DeadDropColors.textPrimary,
-            ),
+            style: technicalTextStyle(ref, relativeTo: 1.08,
+                    letterSpacing: 0.5)
+                .copyWith(height: 1.6),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1035,7 +1032,7 @@ class _PublicKeyTextView extends StatelessWidget {
 /// The copy deliberately avoids "public key", "fingerprint of the Ed25519
 /// identity" and similar: the user is asked to compare a code with the
 /// person in front of them, which is the whole action.
-class _UnknownSenderPrompt extends StatefulWidget {
+class _UnknownSenderPrompt extends ConsumerStatefulWidget {
   const _UnknownSenderPrompt({
     required this.fingerprint,
     required this.onAccept,
@@ -1049,10 +1046,11 @@ class _UnknownSenderPrompt extends StatefulWidget {
   final VoidCallback onReject;
 
   @override
-  State<_UnknownSenderPrompt> createState() => _UnknownSenderPromptState();
+  ConsumerState<_UnknownSenderPrompt> createState() =>
+      _UnknownSenderPromptState();
 }
 
-class _UnknownSenderPromptState extends State<_UnknownSenderPrompt> {
+class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
   final _nameController = TextEditingController();
 
   @override
@@ -1092,12 +1090,8 @@ class _UnknownSenderPromptState extends State<_UnknownSenderPrompt> {
             Center(
               child: SelectableText(
                 widget.fingerprint,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 18,
-                  letterSpacing: 2,
-                  color: DeadDropColors.textPrimary,
-                ),
+                style: technicalTextStyle(ref, relativeTo: 1.4,
+                    letterSpacing: 2),
               ),
             ),
             const SizedBox(height: 16),
@@ -1161,7 +1155,7 @@ class _UnknownSenderPromptState extends State<_UnknownSenderPrompt> {
 /// Ed25519 signature has already been validated by the time this widget
 /// appears. The TOFU warning prompts the user to verify the fingerprint
 /// through a separate channel (in person, phone call, etc.).
-class _SenderIdentityCard extends StatelessWidget {
+class _SenderIdentityCard extends ConsumerWidget {
   const _SenderIdentityCard({
     required this.fingerprint,
     required this.isNewSender,
@@ -1175,7 +1169,7 @@ class _SenderIdentityCard extends StatelessWidget {
   final String? name;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // A known sender collapses to one line.
     //
     // This card used to sit between the camera preview and the progress
@@ -1214,12 +1208,8 @@ class _SenderIdentityCard extends StatelessWidget {
             Center(
               child: SelectableText(
                 fingerprint,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 18,
-                  letterSpacing: 2,
-                  color: DeadDropColors.textPrimary,
-                ),
+                style: technicalTextStyle(ref, relativeTo: 1.4,
+                    letterSpacing: 2),
               ),
             ),
             const SizedBox(height: 8),
@@ -1260,14 +1250,14 @@ class _SenderIdentityCard extends StatelessWidget {
 
 /// One line for a sender the user has already checked: who it is, and a tap
 /// to see the fingerprint again.
-class _KnownSenderLine extends StatelessWidget {
+class _KnownSenderLine extends ConsumerWidget {
   const _KnownSenderLine({required this.fingerprint, this.name});
 
   final String fingerprint;
   final String? name;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final label = name ?? 'Known sender';
 
     return InkWell(
@@ -1281,11 +1271,8 @@ class _KnownSenderLine extends StatelessWidget {
             children: [
               SelectableText(
                 fingerprint,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 18,
-                  letterSpacing: 2,
-                ),
+                style: technicalTextStyle(ref, relativeTo: 1.4,
+                    letterSpacing: 2),
               ),
               const SizedBox(height: 12),
               Text(

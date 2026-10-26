@@ -19,6 +19,7 @@ import '../../src/identity_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
+import '../technical_text.dart';
 import '../responsive.dart';
 
 /// State for the send flow.
@@ -1085,16 +1086,16 @@ class _KeyScanPageState extends State<_KeyScanPage> {
 // Manual key input (advanced fallback)
 // ---------------------------------------------------------------------------
 
-class _ManualKeyInput extends StatefulWidget {
+class _ManualKeyInput extends ConsumerStatefulWidget {
   const _ManualKeyInput({required this.onKeyLoaded});
 
   final ValueChanged<Uint8List> onKeyLoaded;
 
   @override
-  State<_ManualKeyInput> createState() => _ManualKeyInputState();
+  ConsumerState<_ManualKeyInput> createState() => _ManualKeyInputState();
 }
 
-class _ManualKeyInputState extends State<_ManualKeyInput> {
+class _ManualKeyInputState extends ConsumerState<_ManualKeyInput> {
   /// Starts expanded where there is no camera to scan with. On Linux and
   /// Windows `mobile_scanner` has no implementation at all, so typing or
   /// pasting the key is not an "advanced fallback" there — it is the only
@@ -1149,7 +1150,7 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
               onPressed: _pasteFromClipboard,
             ),
           ),
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          style: technicalTextStyle(ref),
           maxLength: 64,
           onChanged: _validate,
         ),
@@ -1596,12 +1597,8 @@ class _IdentityFingerprintCard extends ConsumerWidget {
                     Center(
                       child: SelectableText(
                         snapshot.data!,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 18,
-                          letterSpacing: 2,
-                          color: DeadDropColors.textPrimary,
-                        ),
+                        style: technicalTextStyle(ref, relativeTo: 1.4,
+                            letterSpacing: 2),
                       ),
                     ),
                     const SizedBox(height: 8),
