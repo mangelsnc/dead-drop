@@ -22,6 +22,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../theme.dart';
+import '../technical_text.dart';
 import '../../src/vault/attempt_guard.dart';
 import '../vault/vault_controller.dart';
 import '../vault/vault_setup_page.dart';
@@ -49,6 +50,14 @@ class SettingsPage extends ConsumerWidget {
               leading: Icon(Icons.info_outline),
               title: Text('About DeadDrop'),
               subtitle: Text('Air-gapped file transfer'),
+            ),
+            // Deliberately in General, not under Security: that section is
+            // absent in the decoy environment, and someone who needs
+            // larger text needs it there too. It also reveals nothing —
+            // a font size says nothing about whether a vault exists.
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: TechnicalTextSizeControl(),
             ),
             // The vault is opt-in and enabled from here — not from the home
             // screen, which only ever shows a Vault entry after one exists

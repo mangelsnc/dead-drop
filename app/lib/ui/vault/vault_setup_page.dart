@@ -28,6 +28,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../src/vault/passphrase_strength.dart';
 import '../theme.dart';
+import '../technical_text.dart';
 import 'vault_controller.dart';
 import 'vault_page.dart';
 
@@ -226,12 +227,8 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
                 key: const Key('generatedPassphrase'),
                 _generatedPassphrase,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 16,
-                  height: 1.6,
-                  color: DeadDropColors.textPrimary,
-                ),
+                style: technicalTextStyle(ref, relativeTo: 1.23)
+                    .copyWith(height: 1.6),
               ),
               const SizedBox(height: 12),
               Row(
