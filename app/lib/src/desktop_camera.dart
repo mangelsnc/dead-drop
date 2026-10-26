@@ -48,7 +48,31 @@ class DesktopCameraScanner {
 
   int? _cameraId;
   StreamSubscription<CameraImageData>? _frames;
+  StreamSubscription<CameraInitializedEvent>? _initialised;
   final _payloads = StreamController<String>.broadcast();
+
+  /// Width / height of the camera image, once known.
+  ///
+  /// The preview must be drawn at this ratio. Stretching it to fill a box
+  /// of some other shape distorts the image, which is both ugly and
+  /// counterproductive: a squashed QR is harder for the user to aim at.
+  double? _aspectRatio;
+  double? get aspectRatio => _aspectRatio;
+
+  /// How many frames have been looked at, and how many held a code.
+  ///
+  /// Without this the user cannot tell a camera that is working but
+  /// seeing nothing from one that is not running at all — the complaint
+  /// that prompted it.
+  int _framesSeen = 0;
+  int _framesDecoded = 0;
+  int get framesSeen => _framesSeen;
+  int get framesDecoded => _framesDecoded;
+
+  /// Fires whenever [framesSeen] or [framesDecoded] changes, so a widget
+  /// can rebuild without polling.
+  final _activity = StreamController<void>.broadcast();
+  Stream<void> get activity => _activity.stream;
 
   /// Whether a frame is being decoded right now.
   ///
@@ -109,6 +133,20 @@ class DesktopCameraScanner {
           enableAudio: false,
         ),
       );
+      // The aspect ratio is a refinement, not a requirement: a backend
+      // that does not publish this event still scans, it just cannot tell
+      // us the shape of its image. Letting an UnimplementedError here
+      // abort start() would trade a correct preview for no camera at all.
+      try {
+        _initialised = _platform.onCameraInitialized(id).listen((event) {
+          if (event.previewHeight > 0) {
+            _aspectRatio = event.previewWidth / event.previewHeight;
+            if (!_activity.isClosed) _activity.add(null);
+          }
+        });
+      } catch (_) {
+        _aspectRatio = null;
+      }
       await _platform.initializeCamera(id);
       _cameraId = id;
     } on PlatformException catch (e) {
@@ -129,9 +167,13 @@ class DesktopCameraScanner {
   Future<void> _onFrame(CameraImageData frame) async {
     if (_decoding || _payloads.isClosed) return;
     _decoding = true;
+    _framesSeen++;
+    if (!_activity.isClosed) _activity.add(null);
     try {
       final payload = await compute(decodeFrame, frame);
       if (payload != null && !_payloads.isClosed) {
+        _framesDecoded++;
+        _activity.add(null);
         _payloads.add(payload);
       }
     } catch (_) {
@@ -161,6 +203,8 @@ class DesktopCameraScanner {
   Future<void> dispose() async {
     await _frames?.cancel();
     _frames = null;
+    await _initialised?.cancel();
+    _initialised = null;
 
     final id = _cameraId;
     _cameraId = null;
@@ -174,5 +218,6 @@ class DesktopCameraScanner {
     }
 
     await _payloads.close();
+    await _activity.close();
   }
 }

@@ -711,11 +711,13 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                                 Icon(Icons.check_circle,
                                     color: Colors.green[400]),
                                 const SizedBox(width: 8),
-                                Text(
-                                  'Transfer complete!',
-                                  style: TextStyle(
-                                    color: Colors.green[400],
-                                    fontWeight: FontWeight.bold,
+                                Expanded(
+                                  child: Text(
+                                    'Transfer complete!',
+                                    style: TextStyle(
+                                      color: Colors.green[400],
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -746,62 +748,57 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               ),
                             ],
                             const SizedBox(height: 12),
-                            // Each button takes half the width rather than
-                            // its intrinsic size: on a phone the two labels
-                            // plus icons overflow a bare Row, which pushed
-                            // "New transfer" out of place.
-                            Row(
-                              children: [
-                                // Each button is Expanded rather than
-                                // intrinsically sized: with the vault option
-                                // present this row holds three labelled
-                                // buttons, which overflows a phone-width
-                                // screen if the buttons just size to their
-                                // text (see fix/receive-save-and-layout,
-                                // PR #60, for the same fix applied to the
-                                // two-button case).
-                                Expanded(
-                                  child: FilledButton.icon(
-                                    onPressed: state.savedPath == null
-                                        ? notifier.saveFile
-                                        : null,
-                                    icon: const Icon(Icons.save),
-                                    label: const Text('Device'),
-                                  ),
+                            // Stacked, not side by side. Three labelled
+                            // buttons sharing a phone's width left each one
+                            // too narrow to read, and the labels had been
+                            // cut to single words ("Device", "New") to make
+                            // them fit at all. Full width each costs a
+                            // little vertical space on a screen that has it
+                            // — the file has arrived, nothing else is
+                            // competing for room — and buys labels that say
+                            // what they do.
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: state.savedPath == null
+                                    ? notifier.saveFile
+                                    : null,
+                                icon: const Icon(Icons.save),
+                                label: const Text('Save to this device'),
+                              ),
+                            ),
+                            // The vault destination is offered only once a
+                            // vault exists in this session — never shown
+                            // disabled. A greyed-out option would itself
+                            // tell an attacker the feature exists and the
+                            // user set it up, which is exactly the kind of
+                            // tell the vault's coercion-resistance is built
+                            // to avoid (see home_page.dart's identical
+                            // treatment of its Vault entry).
+                            if (vaultExists) ...[
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: state.savedToVault
+                                      ? null
+                                      : () => _saveToVault(context, ref),
+                                  icon: const Icon(Icons.lock_outline),
+                                  label: const Text('Save to the vault'),
                                 ),
-                                // The vault destination is offered only once
-                                // a vault exists in this session — never
-                                // shown disabled. A greyed-out option would
-                                // itself tell an attacker the feature exists
-                                // and the user set it up, which is exactly
-                                // the kind of tell the vault's
-                                // coercion-resistance is built to avoid (see
-                                // home_page.dart's identical treatment of
-                                // its Vault entry).
-                                if (vaultExists) ...[
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: state.savedToVault
-                                          ? null
-                                          : () => _saveToVault(context, ref),
-                                      icon: const Icon(Icons.lock_outline),
-                                      label: const Text('Vault'),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: () {
-                                      notifier.reset();
-                                      _stopScanner();
-                                    },
-                                    icon: const Icon(Icons.refresh),
-                                    label: const Text('New'),
-                                  ),
-                                ),
-                              ],
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  notifier.reset();
+                                  _stopScanner();
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('New transfer'),
+                              ),
                             ),
                           ],
                         ),
@@ -941,9 +938,13 @@ class _StepCard extends StatelessWidget {
                   child: Text('$step'),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
+                // Expanded, not a bare Text: a title at its natural size
+                // overflows the row on a narrow phone.
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ],
             ),

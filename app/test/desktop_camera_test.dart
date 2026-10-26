@@ -54,6 +54,18 @@ class _FakeCameraPlatform extends CameraPlatform {
   }
 
   @override
+  Stream<CameraInitializedEvent> onCameraInitialized(int cameraId) =>
+      Stream.value(CameraInitializedEvent(
+        cameraId,
+        640,
+        480,
+        ExposureMode.auto,
+        true,
+        FocusMode.auto,
+        true,
+      ));
+
+  @override
   Future<void> initializeCamera(
     int cameraId, {
     ImageFormatGroup imageFormatGroup = ImageFormatGroup.unknown,
@@ -105,6 +117,14 @@ CameraImageData _frame(String payload) {
     width: side,
     height: side,
   );
+}
+
+/// A platform that does not publish camera dimensions, as the base class
+/// does by default.
+class _NoInitEventPlatform extends _FakeCameraPlatform {
+  @override
+  Stream<CameraInitializedEvent> onCameraInitialized(int cameraId) =>
+      throw UnimplementedError('onCameraInitialized() is not implemented.');
 }
 
 void main() {
@@ -162,6 +182,30 @@ void main() {
         throwsA(isA<DesktopCameraException>().having((e) => e.message,
             'message', contains('Another application'))),
       );
+    });
+
+    test('starts even when the platform cannot report its dimensions',
+        () async {
+      // The aspect ratio is a refinement, not a requirement. A backend
+      // that does not publish the event should still scan — trading a
+      // correct preview shape for no camera at all is a bad deal.
+      final scanner = DesktopCameraScanner(platform: _NoInitEventPlatform());
+      addTearDown(scanner.dispose);
+
+      await scanner.start();
+
+      expect(scanner.cameraId, 7);
+      expect(scanner.aspectRatio, isNull);
+    });
+
+    test('learns the camera\'s aspect ratio', () async {
+      final scanner = DesktopCameraScanner(platform: _FakeCameraPlatform());
+      addTearDown(scanner.dispose);
+
+      await scanner.start();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(scanner.aspectRatio, closeTo(640 / 480, 0.001));
     });
 
     test('refuses to start twice', () async {
