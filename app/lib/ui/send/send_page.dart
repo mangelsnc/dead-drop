@@ -383,6 +383,17 @@ class SendPage extends ConsumerStatefulWidget {
 }
 
 class _SendPageState extends ConsumerState<SendPage> {
+  /// Captured here so dispose can use it: `ref` throws once the element
+  /// is finalizing, and the provider is global so the notifier outlives
+  /// this widget anyway.
+  late final SendNotifier _notifier;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifier = ref.read(sendProvider.notifier);
+  }
+
   @override
   void dispose() {
     // Leaving the page ends the transfer. sendProvider is global, so
@@ -392,8 +403,12 @@ class _SendPageState extends ConsumerState<SendPage> {
     //
     // Deferred past this frame because dispose runs during a build, and
     // changing provider state there throws.
-    final notifier = ref.read(sendProvider.notifier);
-    Future.microtask(notifier.resetTransfer);
+    // Guarded for the same reason as the receive side: a ProviderScope
+    // torn down with the page leaves a disposed notifier behind, and
+    // state about to be discarded needs no reset.
+    Future.microtask(() {
+      if (_notifier.mounted) _notifier.resetTransfer();
+    });
     super.dispose();
   }
 

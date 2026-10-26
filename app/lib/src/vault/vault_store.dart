@@ -93,6 +93,17 @@ class VaultEntryNotFoundException implements Exception {
   String toString() => 'VaultEntryNotFoundException: no entry $id';
 }
 
+/// Thrown by [VaultStore.readSlots] when no vault exists on disk.
+///
+/// Distinct from a failed unlock on purpose. Whether a vault exists here
+/// is already visible in the interface, so saying so costs nothing;
+/// whether a *slot* holds an environment is the secret, and nothing in
+/// this file reports on that.
+class VaultNotSetUpException implements Exception {
+  @override
+  String toString() => 'VaultNotSetUpException: no vault in this directory';
+}
+
 /// Number of random bytes in an entry id, hex-encoded for the filename.
 ///
 /// 16 bytes (128 bits) is comfortably collision-free for a personal vault's
@@ -151,6 +162,26 @@ class VaultStore {
       _kWrappedDataKeyBytes +
       sodium.crypto.secretBox.macBytes;
 
+  /// Whether a vault has ever been set up in this directory.
+  ///
+  /// True once [init] has run, which happens when the user creates a
+  /// vault and never otherwise. The slot files themselves cannot answer
+  /// this — an empty slot is deliberately indistinguishable from a full
+  /// one, which is the whole basis of the decoy — so this asks whether
+  /// the store exists at all, not what is in it.
+  ///
+  /// That distinction is the reason this is safe: it reveals that the
+  /// user once configured a vault, which the Vault entry in the interface
+  /// already reveals, and says nothing about how many environments there
+  /// are or whether either holds anything.
+  Future<bool> hasBeenSetUp() async {
+    try {
+      return await _slotFile(0).exists();
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Creates the on-disk layout if it does not already exist.
   ///
   /// Both slot files are created here, at [_slotFileBytes] each, filled
@@ -176,26 +207,6 @@ class VaultStore {
   /// has. Swept here rather than in [list] or [get] — on every read would
   /// be wasted work for a condition [init] already clears once per process
   /// lifetime (or app launch), and widens the surface for no benefit.
-  /// Whether a vault has ever been set up in this directory.
-  ///
-  /// True once [init] has run, which happens when the user creates a
-  /// vault and never otherwise. The slot files themselves cannot answer
-  /// this — an empty slot is deliberately indistinguishable from a full
-  /// one, which is the whole basis of the decoy — so this asks whether
-  /// the store exists at all, not what is in it.
-  ///
-  /// That distinction is the reason this is safe: it reveals that the
-  /// user once configured a vault, which the Vault entry in the interface
-  /// already reveals, and says nothing about how many environments there
-  /// are or whether either holds anything.
-  Future<bool> hasBeenSetUp() async {
-    try {
-      return await _slotFile(0).exists();
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<void> init() async {
     await _slotsDir.create(recursive: true);
     await _entriesDir.create(recursive: true);
@@ -240,7 +251,16 @@ class VaultStore {
   /// it for every passphrase it tries. This method always returns a
   /// [WrappedKey] for a well-formed slot file — distinguishing real from
   /// filler is the unlock path's job, not this store's.
+  /// Throws [VaultNotSetUpException] when there is no store on disk at
+  /// all — before the first [init], or after [deleteEverything]. That is a
+  /// different condition from a slot that does not open, and conflating
+  /// the two would be the one place this class leaks: "no vault here" is
+  /// public (the interface shows it), while "this slot holds nothing" must
+  /// never be observable.
   Future<List<WrappedKey?>> readSlots() async {
+    if (!await _slotFile(0).exists()) {
+      throw VaultNotSetUpException();
+    }
     final result = <WrappedKey?>[];
     for (var i = 0; i < 2; i++) {
       final bytes = await _slotFile(i).readAsBytes();
@@ -534,6 +554,49 @@ class VaultStore {
   /// file is untouched.
   Future<void> destroySlot(int slot) async {
     await _writeAtomic(_slotFile(slot), _emptySlotFiller());
+  }
+
+  /// Removes the entire on-disk store: both slot files, every entry, and
+  /// the directories holding them.
+  ///
+  /// This is the user deliberately erasing the vault, which is a different
+  /// act from [destroySlot]'s self-destruct. Self-destruct runs under an
+  /// attacker's hands and must leave a device that looks like it never had
+  /// a vault *in use* — so it discards keys and leaves the shape alone.
+  /// Here the user is at the controls and wants the thing gone, so the
+  /// shape goes too.
+  ///
+  /// Both environments go together, always. Erasing only the slot that was
+  /// unlocked would leave the other slot file behind, and a vault with one
+  /// slot where every untouched vault has two is itself the disclosure the
+  /// decoy exists to prevent: it says there was a second environment.
+  ///
+  /// What this does not claim is erasure of the bytes. On flash with
+  /// wear-levelling an unlinked file's blocks may survive until the
+  /// controller reuses them, and no userspace write can force that. What
+  /// it does guarantee is that the wrapped keys are gone, so the sealed
+  /// content is unrecoverable whatever the flash still holds —
+  /// docs/security.md says the same, at length.
+  Future<void> deleteEverything() async {
+    for (var slot = 0; slot < 2; slot++) {
+      // Overwrite the keys before unlinking. The unlink is what the
+      // filesystem may defer or leave recoverable; a write of the same
+      // size at the same path is the one thing likely to land on the
+      // blocks that held key material.
+      try {
+        await _writeAtomic(_slotFile(slot), _emptySlotFiller());
+      } catch (_) {
+        // A slot that cannot be overwritten still gets deleted below.
+      }
+    }
+    for (final dir in [_entriesDir, _slotsDir]) {
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    }
+    if (await root.exists() && (await root.list().isEmpty)) {
+      await root.delete();
+    }
   }
 
   /// Generates a random, unguessable entry id — hex-encoded so it is a
