@@ -375,11 +375,30 @@ final sendProvider = StateNotifierProvider<SendNotifier, SendState>((ref) {
 // Send Page (step-by-step guided flow)
 // ---------------------------------------------------------------------------
 
-class SendPage extends ConsumerWidget {
+class SendPage extends ConsumerStatefulWidget {
   const SendPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SendPage> createState() => _SendPageState();
+}
+
+class _SendPageState extends ConsumerState<SendPage> {
+  @override
+  void dispose() {
+    // Leaving the page ends the transfer. sendProvider is global, so
+    // without this a file picked and then abandoned was still selected
+    // the next time Send was opened — the user had moved on, the app
+    // had not.
+    //
+    // Deferred past this frame because dispose runs during a build, and
+    // changing provider state there throws.
+    final notifier = ref.read(sendProvider.notifier);
+    Future.microtask(notifier.resetTransfer);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(sendProvider);
     final notifier = ref.read(sendProvider.notifier);
 
