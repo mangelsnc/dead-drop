@@ -161,12 +161,36 @@ void main() {
     );
   }
 
+  testWidgets('the save buttons fit a narrow phone without overflowing',
+      (tester) async {
+    // Reported from a device: three buttons sharing one row were too
+    // narrow to read, which is why the labels had been cut to single
+    // words. Stacked full-width, each one has the whole screen. 320
+    // logical pixels is about the narrowest phone still sold.
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(wrap(const ReceivePage(), vaultDir: tempDir));
+    await tester.pumpAndSettle();
+
+    // A RenderFlex overflow paints a yellow-and-black banner and logs an
+    // exception; takeException surfaces it rather than letting it pass.
+    expect(tester.takeException(), isNull);
+
+    for (final label in ['Save to this device', 'New transfer']) {
+      final size = tester.getSize(find.text(label));
+      expect(size.width, lessThanOrEqualTo(320),
+          reason: '"$label" must fit the screen, not be clipped');
+    }
+  });
+
   testWidgets('with no vault, only Save to device is offered', (tester) async {
     await tester.pumpWidget(wrap(const ReceivePage(), vaultDir: tempDir));
     await tester.pumpAndSettle();
 
-    expect(find.text('Device'), findsOneWidget);
-    expect(find.text('Vault'), findsNothing);
+    expect(find.text('Save to this device'), findsOneWidget);
+    expect(find.text('Save to the vault'), findsNothing);
   });
 
   testWidgets('with a vault, both destinations are offered', (tester) async {
@@ -200,8 +224,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Device'), findsOneWidget);
-    expect(find.text('Vault'), findsOneWidget);
+    expect(find.text('Save to this device'), findsOneWidget);
+    expect(find.text('Save to the vault'), findsOneWidget);
   });
 
   test('saving to the vault writes no plaintext to disk', () async {
