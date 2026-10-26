@@ -176,6 +176,26 @@ class VaultStore {
   /// has. Swept here rather than in [list] or [get] — on every read would
   /// be wasted work for a condition [init] already clears once per process
   /// lifetime (or app launch), and widens the surface for no benefit.
+  /// Whether a vault has ever been set up in this directory.
+  ///
+  /// True once [init] has run, which happens when the user creates a
+  /// vault and never otherwise. The slot files themselves cannot answer
+  /// this — an empty slot is deliberately indistinguishable from a full
+  /// one, which is the whole basis of the decoy — so this asks whether
+  /// the store exists at all, not what is in it.
+  ///
+  /// That distinction is the reason this is safe: it reveals that the
+  /// user once configured a vault, which the Vault entry in the interface
+  /// already reveals, and says nothing about how many environments there
+  /// are or whether either holds anything.
+  Future<bool> hasBeenSetUp() async {
+    try {
+      return await _slotFile(0).exists();
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> init() async {
     await _slotsDir.create(recursive: true);
     await _entriesDir.create(recursive: true);
