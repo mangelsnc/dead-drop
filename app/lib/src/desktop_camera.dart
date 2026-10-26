@@ -69,6 +69,43 @@ class DesktopCameraScanner {
   int get framesSeen => _framesSeen;
   int get framesDecoded => _framesDecoded;
 
+  /// Outcomes of the last [_windowSize] frames: true when a code was read.
+  ///
+  /// A rolling window rather than a running total, because what matters is
+  /// how the camera is doing *now*. Totals since the scan began keep
+  /// reporting a bad start long after the user has fixed their aim, which
+  /// is the opposite of useful for a live indicator.
+  final List<bool> _recent = [];
+  static const int _windowSize = 30;
+
+  /// When the first frame arrived, for measuring the real frame rate.
+  DateTime? _firstFrameAt;
+
+  /// Share of the last 30 frames that held a readable code, or null
+  /// before there are enough to mean anything.
+  ///
+  /// The most honest signal available: it reflects focus, lighting,
+  /// distance and a steady hand all at once, none of which resolution or
+  /// frame rate reveal on their own.
+  double? get recentDecodeRate {
+    if (_recent.length < 10) return null;
+    final hits = _recent.where((ok) => ok).length;
+    return hits / _recent.length;
+  }
+
+  /// Frames per second this camera actually delivers, or null before
+  /// there is enough to measure.
+  ///
+  /// Measured rather than taken from the camera's own claim, which is a
+  /// maximum under good light and not what a dim room produces.
+  double? get measuredFps {
+    final start = _firstFrameAt;
+    if (start == null || _framesSeen < 10) return null;
+    final seconds = DateTime.now().difference(start).inMilliseconds / 1000;
+    if (seconds <= 0) return null;
+    return _framesSeen / seconds;
+  }
+
   /// Fires whenever [framesSeen] or [framesDecoded] changes, so a widget
   /// can rebuild without polling.
   final _activity = StreamController<void>.broadcast();
@@ -168,9 +205,12 @@ class DesktopCameraScanner {
     if (_decoding || _payloads.isClosed) return;
     _decoding = true;
     _framesSeen++;
+    _firstFrameAt ??= DateTime.now();
     if (!_activity.isClosed) _activity.add(null);
     try {
       final payload = await compute(decodeFrame, frame);
+      _recent.add(payload != null);
+      if (_recent.length > _windowSize) _recent.removeAt(0);
       if (payload != null && !_payloads.isClosed) {
         _framesDecoded++;
         _activity.add(null);
