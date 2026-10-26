@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:sodium_libs/sodium_libs.dart' show SodiumInit;
-import 'package:sodium_libs/sodium_libs_sumo.dart';
+import 'package:sodium/sodium.dart' show SodiumInit;
+import 'package:sodium/sodium_sumo.dart';
 
 import 'src/identity_store.dart';
 import 'src/tofu_store.dart';
@@ -66,21 +66,22 @@ final tofuStoreProvider = Provider<TofuStore>((ref) {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Sumo can be unavailable on a given platform build (SodiumSumoUnavailable).
-  // The vault is the only feature that needs it — Send and Receive do not —
-  // so a sumo failure must degrade to "no vault", never block startup. When
-  // sumo is unavailable we still need *some* Sodium instance for
-  // sodiumProvider (Identity, Send, Receive all depend on it), so we fall
-  // back to the plain, non-sumo init in that case.
+  // Sumo can be unavailable on a given platform build
+  // (SodiumSumoUnavailable). The vault is the only feature that needs it —
+  // Send and Receive do not — so a sumo failure must degrade to "no vault",
+  // never block startup.
+  //
+  // sodium 4.x bundles libsodium as a native asset and initialises
+  // synchronously, so there is no loader to supply and nothing to await.
+  // The fallback stays: a build where sumo is genuinely missing should open
+  // without a vault rather than not open at all.
   SodiumSumo? sumo;
-  Sodium sodium;
   try {
     sumo = await SodiumSumoInit.init();
-    sodium = sumo;
   } on SodiumSumoUnavailable {
     sumo = null;
-    sodium = await SodiumInit.init();
   }
+  final Sodium sodium = sumo ?? await SodiumInit.init();
 
   final overrides = <Override>[
     sodiumProvider.overrideWithValue(sodium),

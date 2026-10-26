@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:sodium_libs/sodium_libs.dart';
+import 'package:sodium/sodium.dart';
 
 import '../../src/crypto.dart';
 import '../../src/handshake.dart';
@@ -692,7 +692,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.green[900]!.withOpacity(0.3),
+                          color: Colors.green[900]!.withValues(alpha: 0.3),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.green[700]!),
                         ),
@@ -811,7 +811,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red[900]!.withOpacity(0.3),
+                  color: Colors.red[900]!.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.red[700]!),
                 ),
@@ -1226,10 +1226,10 @@ class _SenderIdentityCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: DeadDropColors.warning.withOpacity(0.15),
+                color: DeadDropColors.warning.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: DeadDropColors.warning.withOpacity(0.4),
+                  color: DeadDropColors.warning.withValues(alpha: 0.4),
                 ),
               ),
               child: Row(

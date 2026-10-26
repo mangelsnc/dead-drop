@@ -4,24 +4,40 @@ publish_to: 'none'
 version: 0.3.0+97
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'
+  sdk: '>=3.13.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
   # QR rendering
   qr_flutter: ^4.1.0
-  # Camera / QR scanning
+  # Camera / QR scanning.
+  #
+  # mobile_scanner covers android, ios and macos. It has no Linux or Windows
+  # implementation and the maintainers have not answered the request since
+  # 2022, so the desktop builds get their scanner from two small pieces
+  # instead: camera_desktop for V4L2/Media Foundation capture, and zxing2 to
+  # decode the frames in pure Dart.
+  #
+  # flutter_zxing would do both in one package, but it pulls image_picker,
+  # which pulls file_selector, which pulls `http` — a network client in the
+  # dependency graph of an app whose whole claim is that it has no network
+  # code. Measured on this project's own frames (704-char DD1 payload,
+  # 640x480): zxing2 decodes in 5.3 ms median against an 83 ms budget at
+  # 12 fps, so the pure-Dart path is not a compromise on speed.
   mobile_scanner: ^5.2.3
-  # Crypto (libsodium bindings). Pinned to 2.2.1+6 exactly: 2.2.1+8 bumps
-  # sodium to ^3.0.0 which requires a newer Dart SDK than Flutter 3.24.5 ships.
-  sodium_libs: 2.2.1+6
-  # Argon2id (crypto_pwhash) for the vault's passphrase-derived key. `pwhash`
-  # is SUMO-ONLY — not exposed by sodium_libs's plain Sodium — so the vault
-  # imports package:sodium/sodium_sumo.dart directly (app/lib/src/vault/pwhash.dart).
-  # Moved here from dev_dependencies: lib/ code now depends on it directly,
-  # not just tests. Version matches what sodium_libs 2.2.1+6 depends on.
-  sodium: ^2.3.1
+  camera_desktop: ^2.0.0
+  zxing2: ^0.2.4
+  # Crypto (libsodium bindings).
+  #
+  # sodium_libs was discontinued upstream and folded into `sodium` itself,
+  # which now ships the platform binaries that used to need the separate
+  # package. One dependency instead of two, and no longer a discontinued one
+  # at the centre of a cryptography project.
+  #
+  # Argon2id (crypto_pwhash) is SUMO-ONLY, so the vault imports
+  # package:sodium/sodium_sumo.dart directly (app/lib/src/vault/pwhash.dart).
+  sodium: ^4.1.2
   # File picking
   file_picker: ^8.1.2
   # Path utilities

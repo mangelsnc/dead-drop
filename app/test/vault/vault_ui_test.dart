@@ -9,7 +9,6 @@
 /// in this file matters; that one matters most.
 library;
 
-import 'dart:ffi';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,79 +22,6 @@ import 'package:dead_drop/ui/vault/vault_controller.dart';
 import 'package:dead_drop/ui/vault/vault_setup_page.dart';
 import 'package:dead_drop/ui/settings/settings_page.dart';
 
-/// Loads the native libsodium library for the current test platform. See
-/// vault_controller_test.dart for why this is necessary under `flutter test`.
-DynamicLibrary _loadLibsodium() {
-  for (final candidate in _libsodiumCandidates()) {
-    try {
-      return DynamicLibrary.open(candidate);
-    } on ArgumentError {
-      // Not found / not loadable — try next candidate.
-    }
-  }
-  throw StateError(
-    'Could not load libsodium on ${Platform.operatingSystem}. '
-    'Tried: ${_libsodiumCandidates().join(', ')}',
-  );
-}
-
-List<String> _libsodiumCandidates() {
-  final bundled = _bundledSodiumLibsBinary();
-
-  if (Platform.isLinux) {
-    return [
-      if (bundled != null) bundled,
-      'libsodium.so.23',
-      'libsodium.so',
-    ];
-  }
-  if (Platform.isWindows) {
-    return [
-      if (bundled != null) bundled,
-      'libsodium.dll',
-    ];
-  }
-  if (Platform.isMacOS) {
-    return [
-      if (bundled != null) bundled,
-      '/opt/homebrew/lib/libsodium.dylib',
-      '/usr/local/lib/libsodium.dylib',
-      'libsodium.dylib',
-    ];
-  }
-  throw UnsupportedError(
-      'Unsupported test platform: ${Platform.operatingSystem}');
-}
-
-String? _bundledSodiumLibsBinary() {
-  final pubCache = Platform.environment['PUB_CACHE'];
-  if (pubCache == null) return null;
-
-  final hostedDir = Directory('$pubCache/hosted/pub.dev');
-  if (!hostedDir.existsSync()) return null;
-
-  Directory? pkgDir;
-  for (final entry in hostedDir.listSync()) {
-    if (entry is Directory && entry.path.contains('sodium_libs-')) {
-      pkgDir = entry;
-      break;
-    }
-  }
-  if (pkgDir == null) return null;
-
-  final relPath = Platform.isLinux
-      ? 'linux/lib/x86_64/libsodium.so'
-      : Platform.isWindows
-          ? 'windows/lib/Release/v143/libsodium.dll'
-          : Platform.isMacOS
-              ? 'macos/Libraries/libsodium.dylib'
-              : null;
-  if (relPath == null) return null;
-
-  final binary = File('${pkgDir.path}/$relPath');
-  return binary.existsSync() ? binary.path : null;
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -103,7 +29,7 @@ void main() {
   late Directory tempDir;
 
   setUpAll(() async {
-    sodium = await SodiumSumoInit.init2(_loadLibsodium);
+    sodium = await SodiumSumoInit.init();
   });
 
   setUp(() {

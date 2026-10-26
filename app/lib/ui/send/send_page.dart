@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:sodium_libs/sodium_libs.dart';
+import 'package:sodium/sodium.dart';
 
 import '../../src/chunking.dart';
 import '../../src/crypto.dart';
@@ -793,7 +793,7 @@ class _InfoButton extends StatelessWidget {
               width: 1.5,
             ),
             color: expanded
-                ? DeadDropColors.accent.withOpacity(0.15)
+                ? DeadDropColors.accent.withValues(alpha: 0.15)
                 : Colors.transparent,
           ),
           child: Icon(
@@ -879,7 +879,7 @@ class _ReceiverKeySection extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: DeadDropColors.success.withOpacity(0.15),
+              color: DeadDropColors.success.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: DeadDropColors.success),
             ),
@@ -1048,7 +1048,7 @@ class _KeyScanPageState extends State<_KeyScanPage> {
               margin: const EdgeInsets.all(24),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
+                color: Colors.black.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Text(

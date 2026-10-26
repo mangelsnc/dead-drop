@@ -12,7 +12,7 @@
 FROM ubuntu:22.04
 
 # Pinned toolchain versions — keep in sync with .github/workflows/build.yml
-ARG FLUTTER_VERSION=3.24.5
+ARG FLUTTER_VERSION=3.47.8
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708_latest
 ARG ANDROID_PLATFORM_VERSION=34
 ARG ANDROID_BUILD_TOOLS_VERSION=34.0.0
@@ -42,6 +42,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         clang \
         cmake \
         ninja-build \
+        # sodium 4.x builds libsodium from source through Dart's native
+        # assets hook, which runs libsodium's autotools ./configure. That
+        # needs make and the autotools, which clang and cmake do not supply.
+        make \
+        autoconf \
+        automake \
+        libtool \
         pkg-config \
         libgtk-3-dev \
         liblzma-dev \

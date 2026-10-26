@@ -9,7 +9,7 @@
 /// a passphrase.
 ///
 /// `pwhash` is SUMO-ONLY in the `sodium` package: it is not exposed by
-/// `package:sodium_libs/sodium_libs.dart` (the plain `Sodium` the rest of
+/// `package:sodium/sodium.dart` (the plain `Sodium` the rest of
 /// the app uses today), only by `package:sodium/sodium_sumo.dart`'s
 /// `SodiumSumo`. See the spike findings recorded in
 /// docs/superpowers/plans/2026-10-24-vault-coercion.md for why, and for the
@@ -67,7 +67,11 @@ SecureKey deriveKek(SodiumSumo sodium, String passphrase, Uint8List salt) {
   final password = Int8List.view(
       passwordBytes.buffer, passwordBytes.offsetInBytes, passwordBytes.length);
 
-  return sodium.crypto.pwhash(
+  // callRaw, not the callable shorthand: sodium 4.x deprecated `call` in
+  // favour of the explicit names. Same parameters, same return type — this
+  // is a rename, not a change of algorithm. Existing vaults still open,
+  // which the round-trip tests check.
+  return sodium.crypto.pwhash.callRaw(
     outLen: _kekBytes,
     password: password,
     salt: salt,
