@@ -24,6 +24,7 @@ import '../theme.dart';
 import '../passphrase_field.dart';
 import '../technical_text.dart';
 import '../settings/settings_page.dart';
+import 'delete_vault_dialog.dart';
 import 'vault_controller.dart';
 import 'vault_setup_page.dart';
 
@@ -42,7 +43,7 @@ class VaultPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Vault'),
         actions: [
-          if (state.unlocked)
+          if (state.unlocked) ...[
             IconButton(
               icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
@@ -50,6 +51,15 @@ class VaultPage extends ConsumerWidget {
                 MaterialPageRoute(builder: (_) => const SettingsPage()),
               ),
             ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete vault',
+              onPressed: () async {
+                final erased = await showDeleteVaultDialog(context);
+                if (erased && context.mounted) Navigator.of(context).pop();
+              },
+            ),
+          ],
         ],
       ),
       body: SafeArea(
@@ -180,6 +190,27 @@ class _LockedViewState extends ConsumerState<_LockedView> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Text('Unlock'),
+            ),
+            const SizedBox(height: 8),
+            // Reachable while locked on purpose. Someone who has forgotten
+            // the passphrase still needs a way to clear the vault off their
+            // device, and the button leaks nothing the screen behind it
+            // does not already show: that a vault exists here. It still
+            // asks for a passphrase, so being reachable is not the same as
+            // being usable by whoever holds the phone.
+            TextButton(
+              onPressed: _submitting
+                  ? null
+                  : () async {
+                      final erased = await showDeleteVaultDialog(context);
+                      if (erased && context.mounted) {
+                        Navigator.of(context).pop();
+                      }
+                    },
+              child: const Text(
+                'Delete vault',
+                style: TextStyle(color: DeadDropColors.textSecondary),
+              ),
             ),
           ],
         ),

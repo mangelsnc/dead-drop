@@ -129,6 +129,156 @@ void main() {
     return VaultController(sodium, store);
   }
 
+  group('deleting the vault', () {
+    test('erases both environments, whichever passphrase opened it',
+        () async {
+      // The property the whole design rests on. Erasing only the
+      // environment whose passphrase was typed would leave the other
+      // behind — and a user coerced into deleting "their vault" with the
+      // decoy passphrase would have handed the attacker a device that
+      // still holds the real one.
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple six');
+      await controller.addDecoy('seven eight nine ten eleven twelve');
+
+      final store = VaultStore(tempDir, sodium);
+      final realKey =
+          tryUnlockFor(sodium, 'correct horse battery staple six',
+              await store.readSlots());
+      await store.put(realKey, 0, 'real.txt', _bytes([1, 2, 3]));
+
+      controller.lock();
+
+      // Deleted with the DECOY passphrase.
+      expect(
+        await controller.deleteVault('seven eight nine ten eleven twelve'),
+        isTrue,
+      );
+
+      // Neither passphrase opens anything afterwards.
+      expect(await controller.unlock('seven eight nine ten eleven twelve'),
+          isFalse);
+      expect(await controller.unlock('correct horse battery staple six'),
+          isFalse);
+    });
+
+    test('leaves nothing on disk', () async {
+      // Not a tidiness check: a directory still holding one slot file, or
+      // an entries/ directory with sealed files in it, says a vault was
+      // here and roughly how much was in it. "Deleted" has to mean the
+      // shape is gone too.
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple six');
+      await controller.addDecoy('seven eight nine ten eleven twelve');
+
+      final store = VaultStore(tempDir, sodium);
+      final slots = await store.readSlots();
+      await store.put(tryUnlockFor(sodium, 'correct horse battery staple six',
+              slots), 0, 'real.txt', _bytes([1, 2, 3]));
+      await store.put(tryUnlockFor(sodium, 'seven eight nine ten eleven twelve',
+              slots), 1, 'decoy.txt', _bytes([4, 5, 6]));
+
+      expect(await controller.deleteVault('correct horse battery staple six'),
+          isTrue);
+
+      final survivors = tempDir.existsSync()
+          ? tempDir.listSync(recursive: true).map((e) => e.path).toList()
+          : <String>[];
+      expect(survivors, isEmpty, reason: 'survivors: $survivors');
+    });
+
+    test('a wrong passphrase deletes nothing', () async {
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple six');
+      controller.lock();
+
+      expect(await controller.deleteVault('not the passphrase at all'),
+          isFalse);
+      expect(controller.state.error, 'Incorrect passphrase');
+
+      // The vault is untouched: the real passphrase still opens it.
+      expect(await controller.unlock('correct horse battery staple six'),
+          isTrue);
+    });
+
+    test('an erased vault leaves no vault for the next launch to find',
+        () async {
+      // The restore-on-start path reads the store directly. If deletion
+      // left it answering "yes" the home screen would offer a vault that
+      // cannot be opened — the mirror of the bug that made a real vault
+      // invisible after a restart.
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple six');
+      expect(await VaultStore(tempDir, sodium).hasBeenSetUp(), isTrue);
+
+      await controller.deleteVault('correct horse battery staple six');
+
+      expect(await VaultStore(tempDir, sodium).hasBeenSetUp(), isFalse);
+      expect(controller.state.exists, isFalse);
+      expect(controller.state.unlocked, isFalse);
+    });
+
+    test('drops the open data key', () async {
+      // Deleting while unlocked must not leave the key for the erased
+      // environment sitting in memory.
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple six');
+      expect(await controller.unlock('correct horse battery staple six'),
+          isTrue);
+      expect(controller.debugHasDataKey, isTrue);
+
+      await controller.deleteVault('correct horse battery staple six');
+
+      expect(controller.debugHasDataKey, isFalse);
+    });
+
+    test('a vault created afterwards does not inherit self-destruct',
+        () async {
+      // Self-destruct is opt-in and destructive. A preference surviving
+      // the vault it was set on would arm a new vault nobody armed.
+      keychain.data[kSelfDestructStorageKey] = 'true';
+
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple six');
+      await controller.deleteVault('correct horse battery staple six');
+
+      expect(keychain.data[kSelfDestructStorageKey], isNot('true'));
+    });
+
+    test('a failed delete counts as a failed attempt', () async {
+      // Otherwise the delete dialog is a rate-limit-free oracle for
+      // guessing a passphrase: unlimited guesses, and each one reports
+      // whether it was right.
+      final guard = AttemptGuard(
+        storage: const FlutterSecureStorage(),
+        penaltyStep: Duration.zero,
+      );
+      final controller =
+          VaultController(sodium, VaultStore(tempDir, sodium),
+              attemptGuard: guard);
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple six');
+      final before = await guard.failureCount();
+
+      await controller.deleteVault('wrong');
+
+      expect(await guard.failureCount(), greaterThan(before));
+    });
+  });
+
   test(
       'self-destruct at the threshold destroys every slot, and says nothing '
       'an ordinary wrong passphrase would not', () async {

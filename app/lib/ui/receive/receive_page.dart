@@ -424,11 +424,21 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   /// cracked screen, focus issues) and needs to type or paste the key.
   bool _showKeyAsText = false;
 
+  /// Captured in initState so dispose can use it.
+  ///
+  /// `ref` is unusable from dispose: by then the element is finalizing and
+  /// reading it throws "Cannot use ref after the widget was disposed". The
+  /// notifier itself outlives this widget — the provider is global — so
+  /// holding it is safe, and it is the only way to reset state on the way
+  /// out.
+  late final ReceiveNotifier _notifier;
+
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(receiveProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(receiveProvider.notifier).initKeypair();
+      _notifier.initKeypair();
     });
   }
 
@@ -442,8 +452,14 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     // reset() keeps the receiver keypair, so the sender does not have to
     // re-scan the handshake QR — that pairing is not what the user
     // walked away from.
-    final notifier = ref.read(receiveProvider.notifier);
-    Future.microtask(notifier.reset);
+    // Guarded: when the whole ProviderScope is being torn down — the app
+    // closing, or a test ending — the notifier may already be disposed by
+    // the time this microtask runs, and touching its state then throws.
+    // Nothing is lost in that case: state that is about to be discarded
+    // does not need resetting.
+    Future.microtask(() {
+      if (_notifier.mounted) _notifier.reset();
+    });
     super.dispose();
   }
 
