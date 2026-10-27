@@ -1,0 +1,15 @@
+- generic [ref=f79e2]:
+  - generic [ref=f79e3]:
+    - paragraph [ref=f79e4]: "PROYECTO #CRYPTOGRAFREE · ROOTEDCON + CRIPTORED"
+    - heading "DeadDrop" [level=1] [ref=f79e5]
+    - paragraph [ref=f79e6]: Transferencia de ficheros entre dos dispositivos sin red, sin cables y sin Bluetooth. Solo una pantalla y una cámara.
+  - generic [ref=f79e7]:
+    - generic [ref=f79e8]:
+      - paragraph [ref=f79e9]: 0 bytes
+      - paragraph [ref=f79e10]: por la red, en toda la transferencia
+    - generic [ref=f79e11]:
+      - paragraph [ref=f79e12]: X25519
+      - paragraph [ref=f79e13]: cifrado extremo a extremo
+    - generic [ref=f79e14]:
+      - paragraph [ref=f79e15]: MIT
+      - paragraph [ref=f79e16]: software libre, auditable

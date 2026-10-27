@@ -3,8 +3,8 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  camera_desktop
   flutter_secure_storage_windows
-  sodium_libs
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

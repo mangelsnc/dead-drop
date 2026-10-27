@@ -1,0 +1,14 @@
+- generic [ref=f1e2]:
+  - heading "Una transferencia completa, paso a paso" [level=2] [ref=f1e3]
+  - generic [ref=f1e4]:
+    - paragraph [ref=f1e5]: 1 · ReceptorGenera un par de claves X25519 y muestra su clave pública en un QR fijo.
+    - paragraph [ref=f1e6]: 2 · EmisorEscanea ese QR y obtiene la clave pública del receptor.
+    - paragraph [ref=f1e7]: 3 · EmisorElige el fichero, deriva la clave de sesión y lo trocea.
+    - paragraph [ref=f1e8]: 4 · EmisorEmite la cabecera firmada en un QR de arranque.
+    - paragraph [ref=f1e9]: 5 · EmisorEmite tramas cifradas en bucle, sin parar y sin esperar respuesta.
+    - paragraph [ref=f1e10]: 6 · ReceptorLa cámara captura las tramas que puede. Las perdidas no importan.
+    - paragraph [ref=f1e11]: 7 · ReceptorDescifra cada trama y alimenta el decodificador del código fuente.
+    - paragraph [ref=f1e12]: 8 · ReceptorAl reunir suficientes tramas, reconstruye el fichero completo.
+    - paragraph [ref=f1e13]: 9 · Verificación — se comprueba el hash BLAKE2b contra la cabecera firmada. Si no coincide, el fichero se descarta.
+    - paragraph [ref=f1e14]: "El canal es unidireccional: el emisor nunca sabe qué ha llegado. No hay confirmaciones ni reenvíos — por eso el paso 5 emite en bucle indefinidamente."
+  - paragraph [ref=f1e15]: Los pasos 1 y 2 solo se repiten si cambia el receptor. Los pasos 4 a 9 son una transferencia.

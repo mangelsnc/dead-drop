@@ -166,6 +166,22 @@ class AttemptGuard {
     }
   }
 
+  /// Forgets everything this guard holds: the failure counter and the
+  /// self-destruct preference.
+  ///
+  /// Called when the vault itself is erased. Leaving the preference behind
+  /// would mean a vault created later silently inherits self-destruct from
+  /// one its owner deleted — a destructive setting nobody turned on for it.
+  /// Writes rather than deletes, for the reason [recordSuccess] gives.
+  Future<void> reset() async {
+    try {
+      await _storage.write(key: kAttemptCounterStorageKey, value: '0');
+      await _storage.write(key: kSelfDestructStorageKey, value: 'false');
+    } catch (_) {
+      // Unreachable keychain: see [failureCount].
+    }
+  }
+
   Future<bool> _selfDestructEnabled() async {
     try {
       final raw = await _storage.read(key: kSelfDestructStorageKey);
