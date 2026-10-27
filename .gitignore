@@ -96,3 +96,8 @@ GoogleService-Info.plist
 # OS noise
 **/.DS_Store
 Thumbs.db
+
+# Working screenshots from slide and diagram iteration. These landed in the
+# repository root once already, via a broad `git add`; they are scratch
+# output, never referenced by anything, and belong in the scratchpad.
+/*.png
