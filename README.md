@@ -121,6 +121,7 @@ DeadDrop is in active development for the **#cryptograFREE** challenge (RootedCO
 | [docs/security.md](docs/security.md) | What DeadDrop protects and what it doesn't — in plain language and in a technical version |
 | [docs/technical-spec.md](docs/technical-spec.md) | The wire protocol, the crypto, and the test vectors |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute (code, translations, documentation) |
+| [docs/versioning.md](docs/versioning.md) | How versions are decided, tagged and released |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community rules |
 
 ## Licence

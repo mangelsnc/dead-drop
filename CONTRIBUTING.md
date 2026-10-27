@@ -24,7 +24,7 @@ Thanks for wanting to help. DeadDrop is a free software project (MIT) built for 
 
 1. **Open or comment on an issue** before starting work, to avoid duplicating effort.
 2. **Fork and create a descriptive branch:** `fix/qr-reading-low-light`, `docs/faq-legality`, etc.
-3. **Clear commits:** format `type: brief description` (e.g. `feat: resume transfer after pause`, `docs: user guide screenshots`). Types: `feat`, `fix`, `docs`, `test`, `refactor`, `ci`.
+3. **Clear commits:** format `type: brief description` (e.g. `feat: resume transfer after pause`, `docs: user guide screenshots`). Types: `feat`, `fix`, `docs`, `test`, `refactor`, `ci`. The type decides the next version number — `feat:` is a minor, a `!` or a `BREAKING CHANGE` body is a major, anything else is a patch — so get it right and the release takes care of itself. See [docs/versioning.md](docs/versioning.md).
 4. **Open a Pull Request** against `main` describing what it changes and why. If it touches UX, include screenshots. If it touches cryptography, expect an extra-rigorous review — and be ready to justify why default libsodium is not enough (hint: it almost always is).
 5. CI must pass (tests + build on Windows, macOS and Linux).
 
