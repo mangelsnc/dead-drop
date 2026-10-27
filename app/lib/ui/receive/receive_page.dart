@@ -21,6 +21,8 @@ import '../theme.dart';
 import '../technical_text.dart';
 import '../passphrase_field.dart';
 import '../desktop_scanner_view.dart';
+import '../../src/camera_measurement_store.dart';
+import '../../src/capability_hint.dart';
 import '../../src/desktop_scanner.dart';
 import '../vault/vault_controller.dart';
 
@@ -377,6 +379,12 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   }
 }
 
+/// The last camera measurement this device took, shared so the handshake
+/// QR and the scanner agree on one store.
+final cameraMeasurementStoreProvider = Provider<CameraMeasurementStore>(
+  (ref) => CameraMeasurementStore(),
+);
+
 final receiveProvider =
     StateNotifierProvider<ReceiveNotifier, ReceiveState>((ref) {
   final sodium = ref.watch(sodiumProvider);
@@ -433,13 +441,33 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   /// out.
   late final ReceiveNotifier _notifier;
 
+  /// The hint this device will put in its handshake QR, from the last
+  /// reception. Null on a first run, which simply means no hint.
+  EmissionHint? _hint;
+
   @override
   void initState() {
     super.initState();
     _notifier = ref.read(receiveProvider.notifier);
+    _loadHint();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notifier.initKeypair();
     });
+  }
+
+  Future<void> _loadHint() async {
+    final stored = await ref.read(cameraMeasurementStoreProvider).read();
+    if (!mounted || stored == null) return;
+    setState(() => _hint = suggestEmission(stored.capability));
+  }
+
+  /// Remembers what the camera managed, for the next handshake.
+  ///
+  /// Written as it improves rather than once at the end: the scanner can
+  /// be closed at any moment, and a measurement that only lands on a
+  /// clean exit would mostly never land.
+  void _rememberMeasurement(CameraCapability capability) {
+    unawaited(ref.read(cameraMeasurementStoreProvider).write(capability));
   }
 
   @override
@@ -534,7 +562,15 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                           ),
                           child: QrImageView(
                             data: encodeHandshakeQr(
-                                state.receiverKeypair!.publicKey),
+                              state.receiverKeypair!.publicKey,
+                              hint: _hint == null
+                                  ? null
+                                  : HandshakeHint(
+                                      fps: _hint!.fps,
+                                      chunkSize: _hint!.chunkSize,
+                                      ecLevel: _hint!.ecLevel,
+                                    ),
+                            ),
                             version: QrVersions.auto,
                             size: 200,
                             backgroundColor: Colors.white,
@@ -548,9 +584,15 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               'copy it or type it in manually. It contains only '
                               'your public key — the file itself is encrypted '
                               'end-to-end.'
-                          : 'Show this QR to the sender. It contains only your '
-                              'public key — the file itself is encrypted '
-                              'end-to-end.',
+                          : _hint == null
+                              ? 'Show this QR to the sender. It contains only '
+                                  'your public key — the file itself is '
+                                  'encrypted end-to-end.'
+                              : 'Show this QR to the sender. It contains your '
+                                  'public key and a suggestion for how fast to '
+                                  'send, based on what this camera managed last '
+                                  'time — the file itself is encrypted '
+                                  'end-to-end.',
                       style: Theme.of(context).textTheme.bodySmall,
                       textAlign: TextAlign.center,
                     ),
@@ -593,6 +635,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                         child: usesDesktopScanner
                             ? DesktopScannerView(
                                 onDetect: notifier.processRawQr,
+                                onMeasured: _rememberMeasurement,
                               )
                             : MobileScanner(
                           controller: _scannerController,

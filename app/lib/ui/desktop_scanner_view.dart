@@ -8,6 +8,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../src/capability_hint.dart';
 import '../src/desktop_camera.dart';
 import 'theme.dart';
 
@@ -21,6 +22,7 @@ class DesktopScannerView extends StatefulWidget {
   const DesktopScannerView({
     super.key,
     required this.onDetect,
+    this.onMeasured,
     this.scanner,
   });
 
@@ -28,6 +30,14 @@ class DesktopScannerView extends StatefulWidget {
   /// the sender repeats frames by design and the caller decides what is
   /// new.
   final void Function(String payload) onDetect;
+
+  /// Called when this camera has been measured well enough to describe.
+  ///
+  /// Fires as the reading improves, so the last call before the scanner
+  /// closes is the best one. The caller decides what to do with it —
+  /// receive_page stores it, so the next handshake QR can tell the
+  /// sender what this camera manages.
+  final void Function(CameraCapability)? onMeasured;
 
   /// Injectable for tests; production creates its own.
   final DesktopCameraScanner? scanner;
@@ -60,6 +70,8 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       // Frame counts and the aspect ratio both arrive after start().
       _scanner.activity.listen((_) {
         if (mounted) setState(() {});
+        final measured = _scanner.capability;
+        if (measured != null) widget.onMeasured?.call(measured);
       });
       if (mounted) setState(() => _ready = true);
     } on DesktopCameraException catch (e) {
