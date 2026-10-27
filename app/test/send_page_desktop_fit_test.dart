@@ -20,7 +20,6 @@ import 'package:dead_drop/main.dart';
 import 'package:dead_drop/ui/send/send_page.dart';
 import 'package:dead_drop/ui/theme.dart';
 
-import 'support/libsodium.dart';
 
 /// Logical size of a Linux/Windows window at its default
 /// (see app/linux/my_application.cc: gtk_window_set_default_size).
@@ -68,7 +67,7 @@ void main() {
   late SodiumSumo sodium;
 
   setUpAll(() async {
-    sodium = await SodiumSumoInit.init2(loadLibsodiumForTests);
+    sodium = await SodiumSumoInit.init();
   });
 
   testWidgets('fits a 1280x720 desktop window without scrolling',

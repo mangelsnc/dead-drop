@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:sodium_libs/sodium_libs.dart';
+import 'package:sodium/sodium.dart';
 
 import '../../src/crypto.dart';
 import '../../src/handshake.dart';
@@ -18,6 +18,12 @@ import '../../src/transport.dart';
 import '../../src/utils.dart';
 import '../../main.dart';
 import '../theme.dart';
+import '../technical_text.dart';
+import '../passphrase_field.dart';
+import '../desktop_scanner_view.dart';
+import '../../src/camera_measurement_store.dart';
+import '../../src/capability_hint.dart';
+import '../../src/desktop_scanner.dart';
 import '../vault/vault_controller.dart';
 
 /// State for the receive flow.
@@ -312,19 +318,17 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
       // reach from a file manager. Passing the bytes gets the system
       // document picker, so any folder they can write to is available.
       //
-      // On desktop `saveFile` returns a path and writes nothing, so we write
-      // the bytes ourselves. Hence the two branches.
-      final chosen = await FilePicker.platform.saveFile(
+      // file_picker 13 takes the bytes on every platform and writes the
+      // file itself, so the desktop branch that used to write them by
+      // hand is gone. It returns a Uri rather than a path.
+      final chosen = await FilePicker.saveFile(
         dialogTitle: 'Save received file',
         fileName: name,
-        bytes: Platform.isAndroid || Platform.isIOS ? bytes : null,
+        bytes: bytes,
       );
       if (chosen == null) return; // cancelled
 
-      if (!Platform.isAndroid && !Platform.isIOS) {
-        await File(chosen).writeAsBytes(bytes);
-      }
-      state = state.copyWith(savedPath: chosen);
+      state = state.copyWith(savedPath: chosen.toFilePath());
     } catch (e) {
       // A failed save must say so. Swallowing it leaves the user believing
       // a file they may have crossed a border for is on disk when it is not.
@@ -375,6 +379,12 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   }
 }
 
+/// The last camera measurement this device took, shared so the handshake
+/// QR and the scanner agree on one store.
+final cameraMeasurementStoreProvider = Provider<CameraMeasurementStore>(
+  (ref) => CameraMeasurementStore(),
+);
+
 final receiveProvider =
     StateNotifierProvider<ReceiveNotifier, ReceiveState>((ref) {
   final sodium = ref.watch(sodiumProvider);
@@ -422,17 +432,62 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   /// cracked screen, focus issues) and needs to type or paste the key.
   bool _showKeyAsText = false;
 
+  /// Captured in initState so dispose can use it.
+  ///
+  /// `ref` is unusable from dispose: by then the element is finalizing and
+  /// reading it throws "Cannot use ref after the widget was disposed". The
+  /// notifier itself outlives this widget — the provider is global — so
+  /// holding it is safe, and it is the only way to reset state on the way
+  /// out.
+  late final ReceiveNotifier _notifier;
+
+  /// The hint this device will put in its handshake QR, from the last
+  /// reception. Null on a first run, which simply means no hint.
+  EmissionHint? _hint;
+
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(receiveProvider.notifier);
+    _loadHint();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(receiveProvider.notifier).initKeypair();
+      _notifier.initKeypair();
     });
+  }
+
+  Future<void> _loadHint() async {
+    final stored = await ref.read(cameraMeasurementStoreProvider).read();
+    if (!mounted || stored == null) return;
+    setState(() => _hint = suggestEmission(stored.capability));
+  }
+
+  /// Remembers what the camera managed, for the next handshake.
+  ///
+  /// Written as it improves rather than once at the end: the scanner can
+  /// be closed at any moment, and a measurement that only lands on a
+  /// clean exit would mostly never land.
+  void _rememberMeasurement(CameraCapability capability) {
+    unawaited(ref.read(cameraMeasurementStoreProvider).write(capability));
   }
 
   @override
   void dispose() {
     _stopScanner();
+    // Leaving the page ends the reception, for the same reason as the
+    // send side: receiveProvider is global, so a half-finished transfer
+    // was still on screen when the user came back having moved on.
+    //
+    // reset() keeps the receiver keypair, so the sender does not have to
+    // re-scan the handshake QR — that pairing is not what the user
+    // walked away from.
+    // Guarded: when the whole ProviderScope is being torn down — the app
+    // closing, or a test ending — the notifier may already be disposed by
+    // the time this microtask runs, and touching its state then throws.
+    // Nothing is lost in that case: state that is about to be discarded
+    // does not need resetting.
+    Future.microtask(() {
+      if (_notifier.mounted) _notifier.reset();
+    });
     super.dispose();
   }
 
@@ -507,7 +562,15 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                           ),
                           child: QrImageView(
                             data: encodeHandshakeQr(
-                                state.receiverKeypair!.publicKey),
+                              state.receiverKeypair!.publicKey,
+                              hint: _hint == null
+                                  ? null
+                                  : HandshakeHint(
+                                      fps: _hint!.fps,
+                                      chunkSize: _hint!.chunkSize,
+                                      ecLevel: _hint!.ecLevel,
+                                    ),
+                            ),
                             version: QrVersions.auto,
                             size: 200,
                             backgroundColor: Colors.white,
@@ -521,9 +584,15 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               'copy it or type it in manually. It contains only '
                               'your public key — the file itself is encrypted '
                               'end-to-end.'
-                          : 'Show this QR to the sender. It contains only your '
-                              'public key — the file itself is encrypted '
-                              'end-to-end.',
+                          : _hint == null
+                              ? 'Show this QR to the sender. It contains only '
+                                  'your public key — the file itself is '
+                                  'encrypted end-to-end.'
+                              : 'Show this QR to the sender. It contains your '
+                                  'public key and a suggestion for how fast to '
+                                  'send, based on what this camera managed last '
+                                  'time — the file itself is encrypted '
+                                  'end-to-end.',
                       style: Theme.of(context).textTheme.bodySmall,
                       textAlign: TextAlign.center,
                     ),
@@ -563,7 +632,12 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: MobileScanner(
+                        child: usesDesktopScanner
+                            ? DesktopScannerView(
+                                onDetect: notifier.processRawQr,
+                                onMeasured: _rememberMeasurement,
+                              )
+                            : MobileScanner(
                           controller: _scannerController,
                           onDetect: (capture) {
                             for (final barcode in capture.barcodes) {
@@ -573,7 +647,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               }
                             }
                           },
-                          errorBuilder: (context, error, child) {
+                          errorBuilder: (context, error) {
                             return Center(
                               child: Padding(
                                 padding: const EdgeInsets.all(16),
@@ -692,7 +766,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.green[900]!.withOpacity(0.3),
+                          color: Colors.green[900]!.withValues(alpha: 0.3),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.green[700]!),
                         ),
@@ -704,11 +778,13 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                                 Icon(Icons.check_circle,
                                     color: Colors.green[400]),
                                 const SizedBox(width: 8),
-                                Text(
-                                  'Transfer complete!',
-                                  style: TextStyle(
-                                    color: Colors.green[400],
-                                    fontWeight: FontWeight.bold,
+                                Expanded(
+                                  child: Text(
+                                    'Transfer complete!',
+                                    style: TextStyle(
+                                      color: Colors.green[400],
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -739,62 +815,57 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                               ),
                             ],
                             const SizedBox(height: 12),
-                            // Each button takes half the width rather than
-                            // its intrinsic size: on a phone the two labels
-                            // plus icons overflow a bare Row, which pushed
-                            // "New transfer" out of place.
-                            Row(
-                              children: [
-                                // Each button is Expanded rather than
-                                // intrinsically sized: with the vault option
-                                // present this row holds three labelled
-                                // buttons, which overflows a phone-width
-                                // screen if the buttons just size to their
-                                // text (see fix/receive-save-and-layout,
-                                // PR #60, for the same fix applied to the
-                                // two-button case).
-                                Expanded(
-                                  child: FilledButton.icon(
-                                    onPressed: state.savedPath == null
-                                        ? notifier.saveFile
-                                        : null,
-                                    icon: const Icon(Icons.save),
-                                    label: const Text('Device'),
-                                  ),
+                            // Stacked, not side by side. Three labelled
+                            // buttons sharing a phone's width left each one
+                            // too narrow to read, and the labels had been
+                            // cut to single words ("Device", "New") to make
+                            // them fit at all. Full width each costs a
+                            // little vertical space on a screen that has it
+                            // — the file has arrived, nothing else is
+                            // competing for room — and buys labels that say
+                            // what they do.
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: state.savedPath == null
+                                    ? notifier.saveFile
+                                    : null,
+                                icon: const Icon(Icons.save),
+                                label: const Text('Save to this device'),
+                              ),
+                            ),
+                            // The vault destination is offered only once a
+                            // vault exists in this session — never shown
+                            // disabled. A greyed-out option would itself
+                            // tell an attacker the feature exists and the
+                            // user set it up, which is exactly the kind of
+                            // tell the vault's coercion-resistance is built
+                            // to avoid (see home_page.dart's identical
+                            // treatment of its Vault entry).
+                            if (vaultExists) ...[
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: state.savedToVault
+                                      ? null
+                                      : () => _saveToVault(context, ref),
+                                  icon: const Icon(Icons.lock_outline),
+                                  label: const Text('Save to the vault'),
                                 ),
-                                // The vault destination is offered only once
-                                // a vault exists in this session — never
-                                // shown disabled. A greyed-out option would
-                                // itself tell an attacker the feature exists
-                                // and the user set it up, which is exactly
-                                // the kind of tell the vault's
-                                // coercion-resistance is built to avoid (see
-                                // home_page.dart's identical treatment of
-                                // its Vault entry).
-                                if (vaultExists) ...[
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: state.savedToVault
-                                          ? null
-                                          : () => _saveToVault(context, ref),
-                                      icon: const Icon(Icons.lock_outline),
-                                      label: const Text('Vault'),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: () {
-                                      notifier.reset();
-                                      _stopScanner();
-                                    },
-                                    icon: const Icon(Icons.refresh),
-                                    label: const Text('New'),
-                                  ),
-                                ),
-                              ],
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  notifier.reset();
+                                  _stopScanner();
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('New transfer'),
+                              ),
                             ),
                           ],
                         ),
@@ -811,7 +882,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red[900]!.withOpacity(0.3),
+                  color: Colors.red[900]!.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.red[700]!),
                 ),
@@ -934,9 +1005,13 @@ class _StepCard extends StatelessWidget {
                   child: Text('$step'),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
+                // Expanded, not a bare Text: a title at its natural size
+                // overflows the row on a narrow phone.
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ],
             ),
@@ -952,7 +1027,7 @@ class _StepCard extends StatelessWidget {
 /// Text view of the receiver public key: selectable hex grouped in blocks
 /// of four characters (easy to read out loud or type by hand), plus a
 /// copy-to-clipboard button. Used when the sender cannot scan the QR.
-class _PublicKeyTextView extends StatelessWidget {
+class _PublicKeyTextView extends ConsumerWidget {
   const _PublicKeyTextView({required this.publicKey});
 
   final Uint8List publicKey;
@@ -975,7 +1050,7 @@ class _PublicKeyTextView extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final hexKey = bytesToHex(publicKey);
     final grouped = _groupHex(hexKey);
 
@@ -992,13 +1067,9 @@ class _PublicKeyTextView extends StatelessWidget {
           SelectableText(
             grouped,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 14,
-              height: 1.6,
-              letterSpacing: 0.5,
-              color: DeadDropColors.textPrimary,
-            ),
+            style: technicalTextStyle(ref, relativeTo: 1.08,
+                    letterSpacing: 0.5)
+                .copyWith(height: 1.6),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1035,7 +1106,7 @@ class _PublicKeyTextView extends StatelessWidget {
 /// The copy deliberately avoids "public key", "fingerprint of the Ed25519
 /// identity" and similar: the user is asked to compare a code with the
 /// person in front of them, which is the whole action.
-class _UnknownSenderPrompt extends StatefulWidget {
+class _UnknownSenderPrompt extends ConsumerStatefulWidget {
   const _UnknownSenderPrompt({
     required this.fingerprint,
     required this.onAccept,
@@ -1049,10 +1120,11 @@ class _UnknownSenderPrompt extends StatefulWidget {
   final VoidCallback onReject;
 
   @override
-  State<_UnknownSenderPrompt> createState() => _UnknownSenderPromptState();
+  ConsumerState<_UnknownSenderPrompt> createState() =>
+      _UnknownSenderPromptState();
 }
 
-class _UnknownSenderPromptState extends State<_UnknownSenderPrompt> {
+class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
   final _nameController = TextEditingController();
 
   @override
@@ -1092,12 +1164,8 @@ class _UnknownSenderPromptState extends State<_UnknownSenderPrompt> {
             Center(
               child: SelectableText(
                 widget.fingerprint,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 18,
-                  letterSpacing: 2,
-                  color: DeadDropColors.textPrimary,
-                ),
+                style: technicalTextStyle(ref, relativeTo: 1.4,
+                    letterSpacing: 2),
               ),
             ),
             const SizedBox(height: 16),
@@ -1161,7 +1229,7 @@ class _UnknownSenderPromptState extends State<_UnknownSenderPrompt> {
 /// Ed25519 signature has already been validated by the time this widget
 /// appears. The TOFU warning prompts the user to verify the fingerprint
 /// through a separate channel (in person, phone call, etc.).
-class _SenderIdentityCard extends StatelessWidget {
+class _SenderIdentityCard extends ConsumerWidget {
   const _SenderIdentityCard({
     required this.fingerprint,
     required this.isNewSender,
@@ -1175,7 +1243,7 @@ class _SenderIdentityCard extends StatelessWidget {
   final String? name;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // A known sender collapses to one line.
     //
     // This card used to sit between the camera preview and the progress
@@ -1214,22 +1282,18 @@ class _SenderIdentityCard extends StatelessWidget {
             Center(
               child: SelectableText(
                 fingerprint,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 18,
-                  letterSpacing: 2,
-                  color: DeadDropColors.textPrimary,
-                ),
+                style: technicalTextStyle(ref, relativeTo: 1.4,
+                    letterSpacing: 2),
               ),
             ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: DeadDropColors.warning.withOpacity(0.15),
+                color: DeadDropColors.warning.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: DeadDropColors.warning.withOpacity(0.4),
+                  color: DeadDropColors.warning.withValues(alpha: 0.4),
                 ),
               ),
               child: Row(
@@ -1260,14 +1324,14 @@ class _SenderIdentityCard extends StatelessWidget {
 
 /// One line for a sender the user has already checked: who it is, and a tap
 /// to see the fingerprint again.
-class _KnownSenderLine extends StatelessWidget {
+class _KnownSenderLine extends ConsumerWidget {
   const _KnownSenderLine({required this.fingerprint, this.name});
 
   final String fingerprint;
   final String? name;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final label = name ?? 'Known sender';
 
     return InkWell(
@@ -1281,11 +1345,8 @@ class _KnownSenderLine extends StatelessWidget {
             children: [
               SelectableText(
                 fingerprint,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 18,
-                  letterSpacing: 2,
-                ),
+                style: technicalTextStyle(ref, relativeTo: 1.4,
+                    letterSpacing: 2),
               ),
               const SizedBox(height: 12),
               Text(
@@ -1392,12 +1453,10 @@ class _VaultUnlockDialogState extends ConsumerState<_VaultUnlockDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
+          PassphraseField(
             controller: _passphraseController,
-            obscureText: true,
             autofocus: true,
-            decoration: const InputDecoration(labelText: 'Passphrase'),
-            onSubmitted: (_) => _submitting ? null : _unlock(),
+            onSubmitted: () => _submitting ? null : _unlock(),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),

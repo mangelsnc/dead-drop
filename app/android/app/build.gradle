@@ -21,7 +21,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "dev.deaddrop.dead_drop"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

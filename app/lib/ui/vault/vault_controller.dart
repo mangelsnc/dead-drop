@@ -100,6 +100,34 @@ class VaultController extends StateNotifier<VaultState>
       : _attemptGuard = attemptGuard ?? AttemptGuard(),
         super(const VaultState()) {
     WidgetsBinding.instance.addObserver(this);
+    _restoreExistence();
+  }
+
+  /// Notices a vault configured in a previous run.
+  ///
+  /// `exists` used to be set only by createVault and unlock, both of
+  /// which happen within one session — so after the app was fully closed
+  /// and reopened, a configured vault looked like no vault at all: no
+  /// entry on the home screen, no unlock prompt, and no vault option when
+  /// saving a received file. The data was never lost, but nothing in the
+  /// interface could reach it.
+  ///
+  /// Asks the store whether it was ever set up, which is a different
+  /// question from what the slots contain. An empty slot is deliberately
+  /// indistinguishable from a full one — that is the decoy — so this
+  /// learns only that a vault exists, never how many environments there
+  /// are or whether either holds anything.
+  Future<void> _restoreExistence() async {
+    final store = _store;
+    if (store == null) return;
+    try {
+      if (await store.hasBeenSetUp() && mounted && !state.exists) {
+        state = state.copyWith(exists: true);
+      }
+    } catch (_) {
+      // An unreadable store means the UI offers no vault, which is the
+      // safe direction: better than an entry that cannot be opened.
+    }
   }
 
   final SodiumSumo? _sodium;
@@ -195,7 +223,15 @@ class VaultController extends StateNotifier<VaultState>
       await Future<void>.delayed(penalty);
     }
 
-    final slots = await store.readSlots();
+    final List<WrappedKey?> slots;
+    try {
+      slots = await store.readSlots();
+    } on VaultNotSetUpException {
+      // No vault on disk: deleted, or never created. Nothing to open, and
+      // nothing secret about saying so — the home screen shows it too.
+      state = state.copyWith(exists: false, error: 'No vault on this device');
+      return false;
+    }
     final result = tryUnlock(sodium, passphrase, slots);
     if (!result.ok) {
       final shouldSelfDestruct = await _attemptGuard.recordFailure();
@@ -239,6 +275,71 @@ class VaultController extends StateNotifier<VaultState>
       entries: entries,
       clearError: true,
     );
+    return true;
+  }
+
+  /// Erases the vault entirely: both environments, every stored file,
+  /// and the store's own directories.
+  ///
+  /// Returns whether it happened. False means the passphrase did not open
+  /// any environment, and nothing was touched.
+  ///
+  /// **Both environments go, whichever passphrase opened the door.** The
+  /// decoy's passphrase erases the real environment too, and the user is
+  /// told so before confirming. Anything else would make the interface
+  /// the informant: an option to erase "this one" only exists where there
+  /// is more than one, and a vault left holding a single environment
+  /// announces that a second one was removed. A coerced user handing over
+  /// the decoy passphrase and being made to erase "their vault" destroys
+  /// everything, which is the honest outcome — not a decoy wiped while
+  /// the real environment waits to be found.
+  ///
+  /// Erasing requires a passphrase for the same reason unlocking does: an
+  /// unlocked phone in someone else's hands must not be enough to destroy
+  /// the owner's data. The attempt runs through [AttemptGuard] like any
+  /// other, so this cannot be used as a free oracle for guessing — and a
+  /// wrong guess that trips self-destruct destroys what the user was
+  /// asking to destroy anyway.
+  Future<bool> deleteVault(String passphrase) async {
+    final sodium = _sodium;
+    final store = _store;
+    if (sodium == null || store == null) {
+      state = state.copyWith(error: 'Vault unavailable on this device');
+      return false;
+    }
+
+    final wipe = _wipe;
+    if (wipe != null) await wipe;
+
+    final penalty = await _attemptGuard.penaltyBeforeNextAttempt();
+    if (penalty > Duration.zero) {
+      await Future<void>.delayed(penalty);
+    }
+
+    final List<WrappedKey?> slots;
+    try {
+      slots = await store.readSlots();
+    } on VaultNotSetUpException {
+      // Already gone. Report success: the caller asked for there to be no
+      // vault, and there is none.
+      state = const VaultState();
+      return true;
+    }
+    if (!tryUnlock(sodium, passphrase, slots).ok) {
+      final shouldSelfDestruct = await _attemptGuard.recordFailure();
+      if (shouldSelfDestruct) {
+        _wipe = _destroyEverySlot(store);
+      }
+      state = state.copyWith(error: 'Incorrect passphrase');
+      return false;
+    }
+
+    await _attemptGuard.recordSuccess();
+    await store.deleteEverything();
+    await _attemptGuard.reset();
+
+    _dataKey = null;
+    state = const VaultState();
     return true;
   }
 
