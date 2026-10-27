@@ -5,6 +5,11 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-10-27
+
+### Fixed
+
+- *(ci)* Make the Android job survive its first two failures
 ## [0.5.0] — 2026-10-27
 
 ### Added
