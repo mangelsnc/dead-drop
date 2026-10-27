@@ -117,7 +117,7 @@ DeadDrop is in active development for the **#cryptograFREE** challenge (RootedCO
 | [docs/user-guide.md](docs/user-guide.md) | Anyone who wants to use the app, step by step with screenshots |
 | [docs/faq.md](docs/faq.md) | Answers to the questions everyone asks |
 | [docs/security.md](docs/security.md) | What DeadDrop protects and what it doesn't — in plain language and in a technical version |
-| [docs/value-proposition.md](docs/value-proposition.md) | Why the project exists and what makes it different |
+| [docs/technical-spec.md](docs/technical-spec.md) | The wire protocol, the crypto, and the test vectors |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute (code, translations, documentation) |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community rules |
 

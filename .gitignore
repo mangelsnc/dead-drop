@@ -24,19 +24,14 @@ build/
 *.iml
 
 # ---------------------------------------------------------------------------
-# Firebase / Google services credentials — NEVER commit
+# Google services credentials — NEVER commit
 # ---------------------------------------------------------------------------
-# These files identify the Firebase project and carry its API keys. They are
-# supplied to CI from secrets and written at build time; a copy committed here
-# would stay in the git history of a public repository for good.
+# The Firebase integration was removed on 2026-10-27: the challenge requires
+# the app to make no network calls, and a distribution SDK linked into the
+# binary would contradict that in the one place a reviewer checks first.
 #
-# app/.gitignore already ignores both at the two paths the build actually uses.
-# These are the repo-wide net: they catch a copy dropped anywhere else, which
-# is the case the path-specific rules miss.
-#
-# The Firebase integration is itself temporary — it exists only to distribute
-# test builds and is to be removed before submission, since the challenge
-# requires the app to make no network calls. Until then these rules stand.
+# These rules stay as a net. If one of these files is ever reintroduced by a
+# tool or a tutorial, it must not reach the history of a public repository.
 google-services.json
 GoogleService-Info.plist
 **/google-services.json
@@ -96,3 +91,26 @@ GoogleService-Info.plist
 # OS noise
 **/.DS_Store
 Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Agent and tooling scratch — local only
+# ---------------------------------------------------------------------------
+# Working material for AI assistants and local tooling. It is kept on disk but
+# never committed: it is not part of the software, and the repository should
+# carry only what builds and documents the app.
+.claude/
+.claude-*/
+CLAUDE.md
+**/CLAUDE.md
+AGENTS.md
+**/AGENTS.md
+.superpowers/
+.playwright-mcp/
+.serena/
+.aider*
+.cursor/
+.windsurfrules
+.github/copilot-instructions.md
+
+# Stray screenshots dropped in the repository root by iteration work.
+/*.png

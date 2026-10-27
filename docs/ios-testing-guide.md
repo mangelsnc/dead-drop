@@ -15,14 +15,16 @@ You need:
 
 ## Installation
 
-### Via Firebase App Distribution
+### Via a direct build (.ipa)
 
-1. **Check your email** — you'll receive an invitation from Firebase App Distribution
-2. **Tap the link** in the email on your iPhone/iPad
-3. **Sign in** with your Google account
-4. **Tap "Download"** to install the DeadDrop beta
-5. If prompted, go to **Settings → General → VPN & Device Management** and trust the developer profile
-6. **Open DeadDrop** from your home screen
+1. **Get the `.ipa`** handed to you directly, along with its SHA-256.
+2. **Check the SHA-256 matches** before you install it:
+   `shasum -a 256 DeadDrop.ipa`
+3. **Install it** with Apple Configurator, or by dragging it onto your
+   device in Finder.
+4. If prompted, go to **Settings → General → VPN & Device Management** and
+   trust the developer profile.
+5. **Open DeadDrop** from your home screen.
 
 > **Note:** The first time you open the app, iOS may show a warning about an untrusted developer. Go to **Settings → General → VPN & Device Management → [Developer Name] → Trust** to allow the app to run.
 

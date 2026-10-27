@@ -155,103 +155,58 @@ See the `build-ios-signed` job in `.github/workflows/build.yml` for the implemen
 
 ---
 
-## 5. Distribution options
+## 5. Distribution
 
-### Option A: Firebase App Distribution (recommended for now)
+Releases are built and uploaded by hand. There is no distribution service
+wired into this repository and no automation that uploads a build anywhere:
+the challenge requires the app to make no network calls, and a distribution
+SDK linked into the binary would contradict that claim in the one place a
+reviewer is most likely to check.
 
-**Pros:** Free, no Apple review, fast iteration, email/link install
-**Cons:** Requires Firebase project, testers need Google account, 100-device limit per year (Ad-Hoc provisioning)
+### Option A: TestFlight
 
-**Setup:**
-
-```bash
-# Install Firebase CLI
-npm install -g firebase-tools
-
-# Login
-firebase login
-
-# Create project (one time)
-firebase projects:create deaddrop-app
-
-# Add iOS app in Firebase console
-# Download GoogleService-Info.plist → place in ios/Runner/
-
-# Install Fastlane plugin
-fastlane add_plugin firebase_app_distribution
-
-# Distribute
-fastlane ios distribute_firebase
-```
-
-### Option B: TestFlight (recommended for production)
-
-**Pros:** Official Apple channel, 10,000 testers, no device limit, professional
-**Cons:** $99/year Apple Developer account, 1-2 day review for first build
-
-**Setup:**
+**Pros:** Official Apple channel, 10,000 testers, no device limit
+**Cons:** $99/year Apple Developer account, 1-2 day review for the first build
 
 ```bash
-# Requires Apple Developer Program membership
-
-# Build and upload
-fastlane ios distribute_testflight
-
-# Or manually:
 flutter build ipa --release --export-method app-store
-# Upload via Xcode → Window → Organizer → Distribute App
+# Upload via Xcode -> Window -> Organizer -> Distribute App
 ```
 
-### Option C: Ad-Hoc (not recommended)
+### Option B: Ad-Hoc
 
 **Pros:** No review, direct install
-**Cons:** 100 devices/year, must collect UDIDs, complex management, profiles expire
+**Cons:** 100 devices/year, UDIDs collected by hand, profiles expire yearly
 
-Only use if Firebase and TestFlight are not viable.
+```bash
+flutter build ipa --release --export-method ad-hoc
+# Hand the .ipa to the tester directly.
+```
 
 ### Comparison
 
-| Feature | Firebase App Distribution | TestFlight | Ad-Hoc |
-|---------|--------------------------|------------|--------|
-| Cost | Free | $99/year | $99/year |
-| Apple review | No | Yes (first build) | No |
-| Max testers | 100 devices | 10,000 testers | 100 devices |
-| Install method | Email/link | TestFlight app | Direct IPA |
-| Device registration | Automatic (via profile) | Not needed | Manual UDID |
-| Expiration | Never (while provisioned) | 90 days per build | 1 year (profile) |
-| **Recommendation** | **Use now** | **Migrate later** | Avoid |
+| Feature | TestFlight | Ad-Hoc |
+|---------|------------|--------|
+| Cost | $99/year | $99/year |
+| Apple review | Yes (first build) | No |
+| Max testers | 10,000 testers | 100 devices |
+| Install method | TestFlight app | Direct IPA |
+| Device registration | Not needed | Manual UDID |
+| Expiration | 90 days per build | 1 year (profile) |
 
 ---
 
-## 6. Fastlane
+## 6. Release checksums
 
-Fastlane automates the iOS build and distribution process.
-
-### Setup
-
-```bash
-cd app/ios
-fastlane init
-# Choose "Manual" when prompted
-```
-
-### Available lanes
+Publish a SHA-256 for every artefact you hand out, so a tester can verify
+the build they install is the one you built:
 
 ```bash
-# Build for simulator (no signing needed)
-fastlane ios build_simulator
-
-# Build signed IPA for device
-fastlane ios build_release
-
-# Distribute via Firebase App Distribution
-fastlane ios distribute_firebase
-
-# Distribute via TestFlight
-fastlane ios distribute_testflight
+shasum -a 256 build/ios/ipa/*.ipa
 ```
 
-See `ios/fastlane/Fastfile` for the full configuration.
+See `docs/reproducible-builds.md` for how this fits the wider verification
+story.
 
 ---
 
@@ -275,9 +230,7 @@ See `ios/fastlane/Fastfile` for the full configuration.
 - [ ] Bundle ID configured (`com.deaddrop.app`)
 - [ ] Camera permission description in `Info.plist`
 - [ ] Apple Developer account created (if using TestFlight)
-- [ ] Firebase project created (if using App Distribution)
-- [ ] Fastlane configured (`fastlane init` in `ios/`)
 - [ ] Test build on simulator: `flutter build ios --debug --no-codesign`
 - [ ] Test build for device: `flutter build ipa --release`
-- [ ] Distribution lane tested: `fastlane ios distribute_firebase`
+- [ ] SHA-256 published for the artefact handed to testers
 - [ ] Tester guide shared with testers
