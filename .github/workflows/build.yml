@@ -259,6 +259,31 @@ jobs:
         working-directory: app
         run: flutter pub get
 
+      # Fetch the NDK before gradle needs it, retrying on a bad download.
+      # libsodium ships native libraries, so the NDK is genuinely required;
+      # sdkmanager fetched a truncated archive once ("Archive is not a ZIP
+      # archive") and took a whole release build down with it. Gradle does
+      # not retry that, so do it here, where a flake costs 30 seconds.
+      - name: Pre-fetch the Android NDK
+        run: |
+          # The version Flutter pins for this SDK. When Flutter moves its
+          # pin, gradle downloads the new one itself and this step has
+          # simply warmed the wrong cache — which costs a minute, not a
+          # build. Keep it in step with flutter.ndkVersion on a Flutter bump.
+          NDK="28.2.13676358"
+          for attempt in 1 2 3; do
+            if yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
+                 "ndk;${NDK}" >/dev/null; then
+              echo "NDK $NDK installed on attempt $attempt"
+              exit 0
+            fi
+            echo "::warning::NDK download failed (attempt $attempt), retrying"
+            rm -rf "${ANDROID_HOME}/ndk/${NDK}"
+            sleep 10
+          done
+          echo "::error::Could not install NDK $NDK after 3 attempts"
+          exit 1
+
       # build.gradle reads android/key.properties and falls back to the debug
       # key when it is absent. On a fork, or before the secrets are set, that
       # fallback would quietly publish an uninstallable APK — so decide here,
@@ -305,14 +330,27 @@ jobs:
           APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -name apksigner \
                       | sort -V | tail -n1)
           echo "Using $APKSIGNER"
-          SIGNER=$("$APKSIGNER" verify --print-certs "$APK" \
-                   | grep -m1 'Signer #1 certificate DN')
-          echo "$SIGNER"
-          if echo "$SIGNER" | grep -q 'CN=Android Debug'; then
+
+          # Capture everything and decide afterwards. Piping straight into
+          # grep makes an unexpected output format look like a signing
+          # failure: grep exits non-zero, `set -e` kills the step, and the
+          # log shows no reason why.
+          CERTS=$("$APKSIGNER" verify --print-certs "$APK" 2>&1) || {
+            echo "::error::apksigner could not verify the APK:"
+            echo "$CERTS"
+            exit 1
+          }
+          echo "$CERTS"
+
+          if echo "$CERTS" | grep -q 'CN=Android Debug'; then
             echo "::error::The APK is signed with the debug key. Check the ANDROID_* secrets."
             exit 1
           fi
-          echo "✔ Signed with the upload key"
+          if ! echo "$CERTS" | grep -qi 'certificate DN'; then
+            echo "::error::apksigner reported no signing certificate at all."
+            exit 1
+          fi
+          echo "✔ Signed, and not with the debug key"
 
       - name: Package
         if: steps.signing.outputs.signed == 'true'
