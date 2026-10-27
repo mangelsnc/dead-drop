@@ -602,13 +602,17 @@ If the attacker navigates to Settings:
 
 | Platform | Priority | Status | Notes |
 |---|---|---|---|
-| **Windows** | P0 (MVP) | Planned | Windows 10+ (64-bit), Flutter desktop |
-| **macOS** | P0 (MVP) | Planned | macOS 11+ (Big Sur and later), Flutter desktop |
-| **Linux** | P0 (MVP) | Planned | Ubuntu 20.04+, Fedora 35+, AppImage + .deb |
-| **Android** | P1 (post-MVP) | Stretch goal | Android 8.0+ (API 26+), if time allows |
-| **iOS** | P1 (post-MVP) | Stretch goal | iOS 14+, if time allows |
+| **Windows** | P0 (MVP) | Builds in CI, published | `deaddrop-windows-x64.zip` on each release |
+| **macOS** | P0 (MVP) | Builds in CI, published | Apple Silicon; `deaddrop-macos-arm64.tar.gz` |
+| **Linux** | P0 (MVP) | Builds in CI, published | `deaddrop-linux-x64.tar.gz` |
+| **Android** | P1 (post-MVP) | Builds in CI, published | Signed APK on each release |
+| **iOS** | P1 (post-MVP) | Builds in CI, not published | Compile check only; distributing an `.ipa` needs a paid Apple certificate |
 
-**MVP focus:** Windows, macOS, Linux (desktop). Mobile is a stretch goal — the core use case (journalist with a laptop) is desktop-first.
+All five compile on every push, and four of them produce a binary that a
+release publishes with its SHA-256. "Published" is a statement about the
+build pipeline, not about device testing: what has actually been exercised by
+hand is recorded in [security.md](security.md), and the vault has not been
+run on Apple hardware.
 
 **Platform priority is inverted for the vault/coercion feature specifically.** The table above is the project's general MVP priority and is unchanged for the transfer feature. For the vault, decoy environment and self-destruct described in §4, Android and iOS are the primary targets and desktop follows — recorded here as a deliberate, documented departure from this section's own general priority, not an oversight. Two reasons:
 - **Threat fit:** the coercion scenario this feature defends against (a border checkpoint, a police search, an abusive partner) is a phone-in-hand scenario. The phone is also the natural device for a camera-and-screen transfer in the first place.

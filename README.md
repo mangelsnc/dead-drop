@@ -115,7 +115,8 @@ DeadDrop is in active development for the **#cryptograFREE** challenge (RootedCO
 - ✅ E2E-encrypted air-gapped transfer prototype (v0.1)
 - ✅ Vault: passphrase-protected storage, decoy environment, optional self-destruct (tested on Android and Linux; iOS/macOS pending — see [docs/security.md](docs/security.md))
 - 🚧 MVP in development (delivery: February 2027)
-- 📋 Roadmap: Android/iOS mobile apps after the MVP for the transfer feature. The vault/decoy/self-destruct feature specifically targets Android/iOS **first** (the coercion scenario it defends against is a phone-in-hand scenario) — see `docs/technical-spec.md` §5.1.
+- ✅ Builds for Windows, macOS, Linux and Android published on every release, each with its SHA-256
+- 📋 iOS is built and checked in CI but not distributed: an `.ipa` outside the App Store needs a paid Apple certificate — see [docs/ios-build.md](docs/ios-build.md)
 
 ## Documentation
 
