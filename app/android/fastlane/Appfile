@@ -1,8 +1,0 @@
-# Android Appfile for DeadDrop
-# Generated for Firebase App Distribution
-
-# Path to the json secret file for Google Play (not needed for Firebase App Distribution)
-# json_key_file("path/to/key.json")
-
-# Package name
-package_name("dev.deaddrop.dead_drop")
