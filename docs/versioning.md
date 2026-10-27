@@ -55,6 +55,7 @@ Neither is set by hand.
 | Android | `versionName` / `versionCode` | `flutter.versionName`, `flutter.versionCode` |
 | iOS / macOS | `CFBundleShortVersionString` / `CFBundleVersion` | `$(FLUTTER_BUILD_NAME)`, `$(FLUTTER_BUILD_NUMBER)` |
 | Linux / Windows | artifact filename | the release workflow |
+| Android APK | `versionCode` in the manifest | `flutter build apk` reads pubspec |
 | Git | the `vX.Y.Z` tag | the release workflow |
 
 A release never edits `pubspec.yaml` by hand. The workflow writes it and fails
@@ -88,8 +89,16 @@ That is the whole strategy. The automation reads what you already have to write.
 3. git-cliff writes `CHANGELOG.md` and the release notes.
 4. It commits the version bump as `chore(release): vX.Y.Z [skip release]`.
 5. It creates the annotated tag, with the release notes as the tag message.
-6. It triggers `build.yml` for that tag, which builds Linux, Windows and macOS,
-   collects the SHA-256 of each artifact, and publishes the GitHub Release.
+6. It triggers `build.yml` for that tag, which builds Linux, Windows, macOS and
+   Android, collects the SHA-256 of each artifact, and publishes the GitHub
+   Release.
+
+The Android APK is signed with the upload key held in repository secrets, and
+the build fails if it ends up signed with the debug key instead — gradle falls
+back to debug when the signing config is missing, and an APK signed that way
+cannot be installed over a previous one. iOS is built in CI as a compile check
+only: distributing an `.ipa` needs a paid Apple certificate, so those builds go
+out by hand (see [ios-build.md](ios-build.md)).
 
 Steps 1-6 need no human. The `[skip release]` marker and the
 `chore(release):` prefix stop the bump commit from triggering another release.
