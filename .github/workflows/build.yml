@@ -122,6 +122,36 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           sha256sum deaddrop-linux-x64.tar.gz > deaddrop-linux-x64.tar.gz.sha256
 
+      # Pack the same bundle a second time and require the same hash.
+      #
+      # docs/reproducible-builds.md tells a user they can rebuild this
+      # artifact and compare checksums; that promise was already false once,
+      # when the pipeline shipped a plain `tar czf` while the documentation
+      # described deterministic flags. A claim nothing checks rots quietly,
+      # and this is the one claim the challenge scores under build
+      # verifiability.
+      #
+      # This proves the packaging layer only. Whether the compiler emits an
+      # identical binary from identical source is verified separately — see
+      # docs/reproducibility-verification.md.
+      - name: Packaging is deterministic
+        run: |
+          cd app/build/linux/x64/release/bundle
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+              --format=gnu -cf - . \
+              | gzip -n9 > "${RUNNER_TEMP}/repack.tar.gz"
+          cd "${GITHUB_WORKSPACE}"
+          FIRST=$(cut -d' ' -f1 deaddrop-linux-x64.tar.gz.sha256)
+          SECOND=$(sha256sum "${RUNNER_TEMP}/repack.tar.gz" | cut -d' ' -f1)
+          echo "first:  $FIRST"
+          echo "second: $SECOND"
+          if [ "$FIRST" != "$SECOND" ]; then
+            echo "::error::Packaging the same bundle twice gave two different hashes. The published SHA-256 cannot be reproduced, and docs/reproducible-builds.md promises that it can."
+            exit 1
+          fi
+          rm -f "${RUNNER_TEMP}/repack.tar.gz"
+          echo "✔ Two packings of the same bundle agree"
+
       - uses: actions/upload-artifact@v4
         with:
           name: deaddrop-linux-x64
