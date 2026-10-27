@@ -61,19 +61,24 @@ No accounts, no configuration, no servers, no logs.
 Download the installer for your system from the [Releases](../../releases) page (or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md)):
 
 ### Windows
-1. Download `DeadDrop-x.y.z-windows.exe`.
-2. Run it (if Windows SmartScreen warns you, click "More info" → "Run anyway").
-3. Open DeadDrop from the Start menu.
+1. Download `deaddrop-windows-x64.zip`.
+2. Unzip it anywhere and run `dead_drop.exe` (if SmartScreen warns you, click "More info" → "Run anyway").
 
 ### macOS
-1. Download `DeadDrop-x.y.z-macos.dmg`.
-2. Drag DeadDrop to the Applications folder.
+1. Download `deaddrop-macos-arm64.tar.gz` (Apple Silicon).
+2. Unpack it and move DeadDrop to Applications.
 3. The first time, open it with right-click → "Open" (Gatekeeper requires this for non-notarized apps).
 
 ### Linux
-1. Download `DeadDrop-x.y.z-linux.AppImage` (or `.deb`).
-2. Make it executable: `chmod +x DeadDrop-*.AppImage`.
-3. Run it with a double click.
+1. Download `deaddrop-linux-x64.tar.gz`.
+2. Unpack it: `tar xzf deaddrop-linux-x64.tar.gz`.
+3. Run `./dead_drop`.
+
+### Android
+1. Download `deaddrop-android.apk`.
+2. Open it on the phone. Android will ask you to allow installing from this
+   source the first time — there is no app store listing, by design.
+3. Open DeadDrop from the home screen.
 
 > **Verification:** each release publishes the SHA-256 checksums of the binaries and instructions to reproduce the build from source. See [docs/security.md](docs/security.md).
 

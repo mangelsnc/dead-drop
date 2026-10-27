@@ -222,6 +222,121 @@ jobs:
             deaddrop-macos-arm64.tar.gz
             deaddrop-macos-arm64.tar.gz.sha256
 
+  build-android:
+    # Produces the installable APK that ships with a release.
+    #
+    # Signed with the upload key from secrets, not the debug key: debug keys
+    # differ per machine, so an APK signed with one cannot be installed over
+    # a previous build. An unsigned-in-practice APK is worse than none — the
+    # user hits "App not installed" on their second download and has no way
+    # to tell why.
+    #
+    # Only one APK, targeting every ABI. A split per ABI would be smaller,
+    # but a person handed a download link has no idea whether their phone is
+    # arm64 or x86, and picking wrong gives them a file that will not run.
+    # Size is the right thing to trade for that.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # On a workflow_dispatch from release.yml this builds the tag
+          # just pushed; on push/PR `inputs.tag` is empty and checkout
+          # falls back to the triggering ref.
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get
+
+      # build.gradle reads android/key.properties and falls back to the debug
+      # key when it is absent. On a fork, or before the secrets are set, that
+      # fallback would quietly publish an uninstallable APK — so decide here,
+      # once, and tell the later steps which case we are in.
+      - name: Write the signing config
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Android signing secrets available — building an unsigned APK, which will not be published."
+            exit 0
+          fi
+
+          echo "$KEYSTORE_B64" | base64 -d > "${RUNNER_TEMP}/upload-keystore.jks"
+          cat > app/android/key.properties <<EOF
+          storeFile=${RUNNER_TEMP}/upload-keystore.jks
+          storePassword=${STORE_PASSWORD}
+          keyPassword=${KEY_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          EOF
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "Signing config written"
+
+      - name: Build release APK
+        working-directory: app
+        run: flutter build apk --release
+
+      # Prove the APK is signed with the upload key rather than the debug
+      # fallback. build.gradle swaps the key silently when key.properties is
+      # missing, so without this check a misconfigured secret ships an APK
+      # that nobody can install as an update, and CI stays green.
+      - name: Verify it is not debug-signed
+        if: steps.signing.outputs.signed == 'true'
+        run: |
+          APK=app/build/app/outputs/flutter-apk/app-release.apk
+          # Pick whatever build-tools the runner image ships rather than
+          # pinning a version: a hardcoded path turns an image bump into a
+          # failure that looks like a signing problem and is not.
+          APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -name apksigner \
+                      | sort -V | tail -n1)
+          echo "Using $APKSIGNER"
+          SIGNER=$("$APKSIGNER" verify --print-certs "$APK" \
+                   | grep -m1 'Signer #1 certificate DN')
+          echo "$SIGNER"
+          if echo "$SIGNER" | grep -q 'CN=Android Debug'; then
+            echo "::error::The APK is signed with the debug key. Check the ANDROID_* secrets."
+            exit 1
+          fi
+          echo "✔ Signed with the upload key"
+
+      - name: Package
+        if: steps.signing.outputs.signed == 'true'
+        run: |
+          cp app/build/app/outputs/flutter-apk/app-release.apk \
+             "${GITHUB_WORKSPACE}/deaddrop-android.apk"
+          cd "${GITHUB_WORKSPACE}"
+          sha256sum deaddrop-android.apk > deaddrop-android.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        if: steps.signing.outputs.signed == 'true'
+        with:
+          name: deaddrop-android
+          path: |
+            deaddrop-android.apk
+            deaddrop-android.apk.sha256
+
+      # The keystore and the passwords must not outlive the job, even though
+      # the runner is torn down: a later step added to this job would
+      # otherwise find them lying in the workspace.
+      - name: Remove signing material
+        if: always()
+        run: rm -f app/android/key.properties "${RUNNER_TEMP}/upload-keystore.jks"
+
   build-ios:
     # Compile-only check. Distributing an .ipa needs an Apple signing
     # certificate, which requires the paid Developer Program and is not
@@ -271,7 +386,7 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       startsWith(inputs.tag, 'v')
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows, build-macos, build-android]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -336,6 +451,8 @@ jobs:
             artifacts/deaddrop-windows-x64/deaddrop-windows-x64.zip.sha256
             artifacts/deaddrop-macos-arm64/deaddrop-macos-arm64.tar.gz
             artifacts/deaddrop-macos-arm64/deaddrop-macos-arm64.tar.gz.sha256
+            artifacts/deaddrop-android/deaddrop-android.apk
+            artifacts/deaddrop-android/deaddrop-android.apk.sha256
             SHA256SUMS.txt
           prerelease: ${{ steps.tag.outputs.prerelease }}
         env:
