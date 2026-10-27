@@ -24,7 +24,12 @@ Yes, and it always will be. DeadDrop is free software under the MIT licence: any
 
 ### What systems does it support?
 
-Windows, macOS and Linux. Android and iOS versions are on the roadmap after the initial release.
+Windows, macOS, Linux and Android. Each release publishes a binary for all
+four.
+
+iOS is built and checked on every change but is not distributed: putting an
+app on an iPhone outside the App Store needs a paid Apple certificate, so for
+now an iPhone build has to be made by hand from source.
 
 ### Can I send any type of file?
 
