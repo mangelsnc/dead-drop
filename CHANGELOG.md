@@ -5,6 +5,11 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] — 2026-10-27
+
+### Miscellaneous
+
+- Prove the Linux packaging is deterministic instead of asserting it
 ## [0.5.3] — 2026-10-27
 
 ### Documentation
