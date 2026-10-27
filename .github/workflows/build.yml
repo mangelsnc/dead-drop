@@ -113,8 +113,12 @@ jobs:
           # uid/gid and directory order, and gzip stamps the time into its
           # header. docs/reproducible-builds.md promises a reproducible
           # .tar.gz, and these flags are what make that true.
+          # --format=gnu is part of the verified command: the tar format
+          # changes the bytes, so dropping it would not reproduce the hash
+          # recorded in docs/reproducibility-verification.md.
           tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-              -cf - . | gzip -n9 > "${GITHUB_WORKSPACE}/deaddrop-linux-x64.tar.gz"
+              --format=gnu -cf - . \
+              | gzip -n9 > "${GITHUB_WORKSPACE}/deaddrop-linux-x64.tar.gz"
           cd "${GITHUB_WORKSPACE}"
           sha256sum deaddrop-linux-x64.tar.gz > deaddrop-linux-x64.tar.gz.sha256
 

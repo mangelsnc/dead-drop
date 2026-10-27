@@ -647,15 +647,24 @@ This inversion applies only to the vault/coercion feature. It does not change th
 
 ### 5.4 Build matrix
 
-| Platform | Build tool | Output format | CI |
+| Platform | Build tool | Published artifact | CI |
 |---|---|---|---|
-| **Windows** | Flutter build windows | `.exe` installer (Inno Setup) | GitHub Actions |
-| **macOS** | Flutter build macos | `.dmg` (unsigned, Gatekeeper bypass documented) | GitHub Actions |
-| **Linux** | Flutter build linux | `.AppImage` + `.deb` | GitHub Actions |
-| **Android** | Flutter build apk | `.apk` (unsigned, sideload) | GitHub Actions |
-| **iOS** | Flutter build ios | `.ipa` (unsigned, TestFlight) | GitHub Actions (macOS runner) |
+| **Windows** | `flutter build windows` | `deaddrop-windows-x64.zip` (unsigned) | GitHub Actions |
+| **macOS** | `flutter build macos` | `deaddrop-macos-arm64.tar.gz` (unsigned, Gatekeeper bypass documented) | GitHub Actions |
+| **Linux** | `flutter build linux` | `deaddrop-linux-x64.tar.gz` (reproducible) | GitHub Actions |
+| **Android** | `flutter build apk` | `deaddrop-android.apk`, signed with the upload key | GitHub Actions |
+| **iOS** | `flutter build ios` | none — compile check only | GitHub Actions (macOS runner) |
 
-**Reproducible builds:** all builds must be reproducible (same source -> same binary hash). CI publishes SHA-256 checksums; users can verify locally.
+An installer (Inno Setup on Windows, a `.dmg`, an AppImage or a `.deb`) is
+not built: an archive the user unpacks needs no installer privileges and
+nothing to uninstall, which suits a tool somebody may want to leave no trace
+of. iOS publishes nothing because an `.ipa` outside the App Store needs a
+paid Apple certificate.
+
+**Reproducible builds:** the Linux build is reproducible bit for bit, verified
+experimentally — see [reproducibility-verification.md](reproducibility-verification.md).
+Windows and macOS are not yet verified to that standard. CI publishes SHA-256
+checksums for every artifact and users can verify them locally.
 
 ### 5.5 Platform-specific considerations
 
@@ -669,8 +678,7 @@ This inversion applies only to the vault/coercion feature. It does not change th
 - Notarization is out of scope for MVP (requires Apple Developer account, $99/year)
 
 **Linux:**
-- AppImage is the primary distribution format (no installation required)
-- `.deb` for Debian/Ubuntu users who prefer package managers
+- A plain `.tar.gz` the user unpacks and runs; no installation required
 - libsecret for secure storage (GNOME Keyring / KDE Wallet)
 
 **Android:**
