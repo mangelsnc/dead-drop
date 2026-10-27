@@ -20,6 +20,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'capability_hint.dart';
 import 'desktop_scanner.dart';
 
 /// What went wrong, in words a person can act on.
@@ -58,6 +59,14 @@ class DesktopCameraScanner {
   /// counterproductive: a squashed QR is harder for the user to aim at.
   double? _aspectRatio;
   double? get aspectRatio => _aspectRatio;
+
+  /// Capture resolution, once the backend has published it.
+  ///
+  /// Kept alongside [aspectRatio] because the two answer different
+  /// questions: the ratio shapes the preview, the pixel count decides
+  /// whether this camera can resolve a dense code at all.
+  int? _previewWidth;
+  int? _previewHeight;
 
   /// How many frames have been looked at, and how many held a code.
   ///
@@ -104,6 +113,26 @@ class DesktopCameraScanner {
     final seconds = DateTime.now().difference(start).inMilliseconds / 1000;
     if (seconds <= 0) return null;
     return _framesSeen / seconds;
+  }
+
+  /// Everything measured about this camera, or null when there is not yet
+  /// enough to be worth sending.
+  ///
+  /// Null until both the frame rate and the resolution are known. A
+  /// partial measurement is worse than none: [suggestEmission] reasons
+  /// about resolution, and a zero there would read as "tiny camera" and
+  /// suggest a needlessly slow stream.
+  CameraCapability? get capability {
+    final fps = measuredFps;
+    final width = _previewWidth;
+    final height = _previewHeight;
+    if (fps == null || width == null || height == null) return null;
+    return CameraCapability(
+      framesPerSecond: fps,
+      width: width,
+      height: height,
+      decodeRate: recentDecodeRate,
+    );
   }
 
   /// Fires whenever [framesSeen] or [framesDecoded] changes, so a widget
@@ -178,6 +207,8 @@ class DesktopCameraScanner {
         _initialised = _platform.onCameraInitialized(id).listen((event) {
           if (event.previewHeight > 0) {
             _aspectRatio = event.previewWidth / event.previewHeight;
+            _previewWidth = event.previewWidth.round();
+            _previewHeight = event.previewHeight.round();
             if (!_activity.isClosed) _activity.add(null);
           }
         });

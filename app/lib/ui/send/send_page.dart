@@ -43,6 +43,7 @@ class SendState {
     this.currentQrData,
     this.showingBootstrap = false,
     this.sendError,
+    this.appliedHint,
   });
 
   final String? fileName;
@@ -56,6 +57,12 @@ class SendState {
   final String? filePath;
 
   final Uint8List? receiverPk;
+
+  /// The receiver's suggestion, when their QR carried one and it was
+  /// applied. Held so the screen can say where these settings came from:
+  /// numbers that changed by themselves are indistinguishable from a bug.
+  final HandshakeHint? appliedHint;
+
   final Emitter? emitter;
   final Identity? identity;
   final int chunkSize;
@@ -112,8 +119,10 @@ class SendState {
     String? currentQrData,
     bool? showingBootstrap,
     String? sendError,
+    HandshakeHint? appliedHint,
     bool clearSendError = false,
     bool clearReceiverPk = false,
+    bool clearHint = false,
   }) {
     return SendState(
       fileName: fileName ?? this.fileName,
@@ -132,6 +141,7 @@ class SendState {
       currentQrData: currentQrData ?? this.currentQrData,
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
       sendError: clearSendError ? null : (sendError ?? this.sendError),
+      appliedHint: clearHint ? null : (appliedHint ?? this.appliedHint),
     );
   }
 }
@@ -178,8 +188,41 @@ class SendNotifier extends StateNotifier<SendState> {
     );
   }
 
-  void setReceiverPk(Uint8List pk) {
-    state = state.copyWith(receiverPk: pk);
+  /// Loads the receiver's public key, and applies the emission hint its
+  /// QR carried, when it had one.
+  ///
+  /// Applied by default rather than merely offered: the receiver measured
+  /// a real camera and the sender measured nothing, so the receiver's
+  /// numbers are the better starting point. Every one of them stays
+  /// adjustable, and the screen says where they came from — a suggestion
+  /// the user cannot see the origin of is just an unexplained change to
+  /// their settings.
+  ///
+  /// The chunk size is the exception. [pickFile] picks the smallest size
+  /// that can carry the file at all, and a smaller suggestion would make
+  /// the transfer impossible rather than slow, so a hint may only lower
+  /// it within what the file allows.
+  void setReceiverPk(Uint8List pk, {HandshakeHint? hint}) {
+    if (hint == null) {
+      state = state.copyWith(receiverPk: pk, clearHint: true);
+      return;
+    }
+
+    final bytes = state.fileBytes;
+    var chunkSize = hint.chunkSize;
+    if (bytes != null && fileSizeError(bytes.length, chunkSize) != null) {
+      // The suggestion cannot carry this file. Keep what pickFile chose:
+      // a slower transfer beats one that cannot start.
+      chunkSize = state.chunkSize;
+    }
+
+    state = state.copyWith(
+      receiverPk: pk,
+      fps: hint.fps,
+      chunkSize: chunkSize,
+      ecLevel: hint.ecLevel,
+      appliedHint: hint,
+    );
   }
 
   /// Forgets the loaded receiver key, returning step 2 to its initial state.
@@ -1018,11 +1061,11 @@ class _ReceiverKeySection extends StatelessWidget {
   }
 
   Future<void> _scanReceiverKey(BuildContext context) async {
-    final pk = await Navigator.of(context).push<Uint8List>(
+    final payload = await Navigator.of(context).push<HandshakePayload>(
       MaterialPageRoute(builder: (_) => const _KeyScanPage()),
     );
-    if (pk != null) {
-      notifier.setReceiverPk(pk);
+    if (payload != null) {
+      notifier.setReceiverPk(payload.publicKey, hint: payload.hint);
     }
   }
 }
@@ -1068,10 +1111,10 @@ class _KeyScanPageState extends State<_KeyScanPage> {
   /// it recognises.
   void _onRaw(String raw) {
     if (_found) return;
-    final pk = decodeHandshakeQr(raw);
-    if (pk == null) return;
+    final payload = decodeHandshakePayload(raw);
+    if (payload == null) return;
     _found = true;
-    Navigator.of(context).pop(pk);
+    Navigator.of(context).pop(payload);
   }
 
   @override
@@ -1293,12 +1336,36 @@ class _ConfigSection extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           subtitle: Text(
-            'Transfer parameters',
-            style: Theme.of(context).textTheme.bodySmall,
+            // Said on the collapsed tile on purpose. The panel starts
+            // closed, so a note about changed settings placed inside it
+            // would only be read by someone who already went looking —
+            // and settings that changed by themselves, unexplained, read
+            // as a bug.
+            state.appliedHint == null
+                ? 'Transfer parameters'
+                : 'Set from the receiver\'s camera — tap to adjust',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: state.appliedHint == null
+                      ? null
+                      : DeadDropColors.success,
+                ),
           ),
           initiallyExpanded: false,
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
+            if (state.appliedHint != null) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'The receiver\'s QR carried these settings, measured from '
+                  'their camera. They are a suggestion — change anything '
+                  'here if the transfer is not reading well.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: DeadDropColors.textSecondary,
+                      ),
+                ),
+              ),
+            ],
             _ChunkSizeSelector(state: state, notifier: notifier),
             _ParamSlider(
               label: 'Frame rate',
