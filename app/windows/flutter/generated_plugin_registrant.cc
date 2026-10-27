@@ -6,12 +6,12 @@
 
 #include "generated_plugin_registrant.h"
 
+#include <camera_desktop/camera_desktop_plugin.h>
 #include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>
-#include <sodium_libs/sodium_libs_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
+  CameraDesktopPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("CameraDesktopPlugin"));
   FlutterSecureStorageWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterSecureStorageWindowsPlugin"));
-  SodiumLibsPluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("SodiumLibsPluginCApi"));
 }

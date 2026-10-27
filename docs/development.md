@@ -86,6 +86,48 @@ Without FVM they fall back to the `flutter` on your `PATH`, and the same
 check still runs — so a mismatch is reported in seconds instead of after a
 five-minute Xcode build.
 
+### Docker housekeeping
+
+Everything this project creates in Docker carries the label
+`dev.deaddrop.project=dead-drop` — the image (set in the Dockerfile) and
+the two cache volumes (created by the Makefile, because `docker run -v
+name:/path` would otherwise conjure them with no labels at all).
+
+That label is the point. Without it, an image orphaned by a Flutter bump
+looks exactly like someone else's 7 GB image, and the only way to tell
+them apart is to remember which is which.
+
+| Command | What it does |
+|---|---|
+| `make docker-status` | What this project is using, and which of its images are stale |
+| `make docker-clean` | Removes this project's stale images. Keeps the current image and both caches |
+| `make docker-clean-all` | The above, plus the cache volumes. The next build re-downloads everything |
+| `make docker-cache-report` | Breaks the build cache down by age, so a prune filter can be chosen from data |
+| `make docker-prune-hint` | Prints the commands for machine-wide cleanup, which this Makefile will not run for you |
+
+**A Flutter bump orphans an image.** The tag follows `.fvmrc`, so changing
+the version builds a new image and leaves the old one — around 7 GB —
+behind. Run `make docker-clean` after one.
+
+**What is deliberately not automated.** `docker builder prune` and
+`docker volume prune` act on everything on the machine, including other
+projects' work, so they are printed by `make docker-prune-hint` rather
+than run. The cache volumes survive `make docker-clean` on purpose:
+removing them costs a slow rebuild and saves nothing you cannot
+re-download.
+
+**Pruning the build cache by age, and why the obvious filter may free
+nothing.** The build cache is machine-wide and layers are shared between
+images, so age is the safe axis: a layer nothing has touched in months is
+one nothing is building against. `make docker-cache-report` buckets it by
+last use and prints what each cut-off would actually free.
+
+Worth running before choosing a number. After a day of rebuilding this
+image the entire cache was under a week old, so `--filter until=6570h`
+(nine months) would have freed nothing at all — the bulk was recent work,
+and the only way to reclaim it was to accept a slow next build. The
+report tells you which case you are in instead of guessing.
+
 ### Upgrading
 
 Not a one-line change. `sodium_libs` is pinned to `2.2.1+6` because newer
@@ -105,7 +147,9 @@ A single Ubuntu 22.04 image with everything pinned:
 - **Flutter SDK 3.24.5** (the version in `.fvmrc` — see
   [Flutter version](#flutter-version) below)
 - **Linux desktop toolchain**: `clang`, `cmake`, `ninja-build`, `pkg-config`,
-  `libgtk-3-dev` (+ `liblzma-dev`, `libstdc++-12-dev`)
+  `libgtk-3-dev` (+ `liblzma-dev`, `libstdc++-12-dev`), and the
+  GStreamer development packages that camera_desktop needs to capture
+  from a webcam
 - **Android SDK**: command-line tools, platform 34, build-tools 34.0.0, JDK 17
 
 The container runs as a **non-root user** whose UID/GID are matched to your host

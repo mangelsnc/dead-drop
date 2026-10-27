@@ -12,10 +12,22 @@
 FROM ubuntu:22.04
 
 # Pinned toolchain versions — keep in sync with .github/workflows/build.yml
-ARG FLUTTER_VERSION=3.24.5
+ARG FLUTTER_VERSION=3.47.8
+
+# Marks every image this project builds, so `make docker-clean` (and the
+# command in docs/development.md) can find them by label rather than by a
+# name pattern that drifts when the tag changes. Without this, an image
+# orphaned by a version bump is indistinguishable from someone else's.
+LABEL dev.deaddrop.project="dead-drop"
+
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708_latest
-ARG ANDROID_PLATFORM_VERSION=34
-ARG ANDROID_BUILD_TOOLS_VERSION=34.0.0
+# Android 36 is what Flutter 3.47 targets, and plugins built against it
+# refuse to link into an app compiled against an older platform — the
+# failure names file_picker or whichever plugin is checked first, not the
+# missing SDK, so it reads as a dependency problem rather than a toolchain
+# one.
+ARG ANDROID_PLATFORM_VERSION=36
+ARG ANDROID_BUILD_TOOLS_VERSION=36.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     FLUTTER_HOME=/opt/flutter \
@@ -42,8 +54,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         clang \
         cmake \
         ninja-build \
+        # sodium 4.x builds libsodium from source through Dart's native
+        # assets hook, which runs libsodium's autotools ./configure. That
+        # needs make and the autotools, which clang and cmake do not supply.
+        make \
+        autoconf \
+        automake \
+        libtool \
         pkg-config \
         libgtk-3-dev \
+        # camera_desktop's Linux capture backend. Needed at build
+        # time (pkg-config) and at run time (the V4L2 element).
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-good \
         liblzma-dev \
         libstdc++-12-dev \
         libsecret-1-dev \

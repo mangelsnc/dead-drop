@@ -19,7 +19,7 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:sodium_libs/sodium_libs.dart';
+import 'package:sodium/sodium.dart';
 
 import 'crypto.dart';
 import 'fountain.dart';

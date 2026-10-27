@@ -1,0 +1,12 @@
+- generic [ref=f12e2]:
+  - 'heading "La lectura: cada fotograma pasa cinco filtros" [level=2] [ref=f12e3]'
+  - generic [ref=f12e4]:
+    - paragraph [ref=f12e5]: 1 · DecodificarEl lector extrae el texto del QR. Si no hay QR legible, se descarta.
+    - paragraph [ref=f12e6]: "2 · Prefijo¿Empieza por DD1.? Si no, es un QR ajeno: se ignora sin más."
+    - paragraph [ref=f12e7]: 3 · Estructura¿Magic correcto, versión soportada, longitudes coherentes?
+    - paragraph [ref=f12e8]: 4 · Sesión¿El file_id coincide con la sesión activa? Si no, es de otra transferencia.
+    - paragraph [ref=f12e9]: 5 · Autenticación¿Poly1305 valida? Si no, la trama se descarta.
+    - paragraph [ref=f12e10]: 6 · Al decodificadorSe despeja por propagación.
+    - paragraph [ref=f12e11]: 7 · ¿Completo?Reconstruir y verificar el hash.
+    - paragraph [ref=f12e12]: "Descartar nunca es un error.En este canal, perder tramas es lo normal: desenfoque, reflejo, movimiento de la mano. Una trama que falla cualquiera de los cinco filtros simplemente no se usa — no se avisa, no se aborta, no se reintenta.El código fuente digital es lo que convierte esa pérdida constante en un detalle sin importancia. Mientras lleguen suficientes tramas cualesquiera, el fichero se reconstruye."
+    - paragraph [ref=f12e13]: app/lib/src/receiver.dart — probado con 50% de pérdida de tramas

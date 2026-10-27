@@ -135,6 +135,15 @@ Read this before turning it on:
 
 If any of this is unacceptable for your situation, leave self-destruct off and rely on passphrase strength alone — a strong passphrase is secure against an offline attacker whether or not self-destruct is enabled, while self-destruct carries a real risk of accidental, irreversible data loss and no benefit against that same offline attacker.
 
+## Deleting a vault, and what that promises
+
+Deleting a vault is a different act from self-destruct, with a different promise. Self-destruct runs under an attacker's hands and must leave a device that looks like it never had a vault *in use*, so it discards keys and leaves the on-disk shape alone. Deleting is the owner at the controls asking for the thing to be gone, so the directories and files go too.
+
+- **Both environments always go together.** Any environment's passphrase deletes the whole vault, and the dialog says so beforehand without ever naming a decoy. This is not a convenience: an option to erase "just this one" can only exist where there is more than one, and a vault left holding a single slot where every untouched vault holds two announces that a second environment was removed. A user coerced into deleting "their vault" with the decoy passphrase therefore destroys everything, which is the honest outcome — not a decoy wiped while the real environment waits to be found.
+- **It asks for a passphrase.** An unlocked phone in someone else's hands must not be enough to destroy the owner's files. The attempt goes through the same rate limiter as an unlock, so the dialog is not an unlimited oracle for guessing a passphrase.
+- **If you have forgotten every passphrase, the app cannot delete the vault for you.** Delete the application's data through your operating system instead. This is the deliberate cost of the previous point.
+- **It does not promise the bytes are gone.** The wrapped keys are overwritten before the files are unlinked, which makes the sealed content unrecoverable to anyone without the passphrase. The file contents themselves are unlinked, not overwritten, and on flash storage with wear-levelling even overwriting would not guarantee erasure — the same structural limit described under self-destruct above.
+
 ## Build verifiability
 
 - **Reproducible builds:** the binary published in Releases can be regenerated from the source code and the pinned toolchain (pinned versions), obtaining a byte-for-byte identical result. Instructions in each release.
@@ -148,4 +157,4 @@ If you find a security issue, **do not open a public issue**. Contact us through
 
 ---
 
-*Last updated: 2026-10-25 — the vault, decoy environment and self-destruct moved from planned to implemented; documented their actual shipped shape (user-supplied decoy content, passphrase rather than PIN, self-destruct off by default) and the limits that come with it (flash erasure, deliberate triggering, clipboard exposure, phrase predictability, offline attack, iOS/macOS untested). This document is versioned with the project.*
+*Last updated: 2026-10-27 — documented deleting a vault (both environments always, passphrase required, what erasure does and does not promise). 2026-10-25 — the vault, decoy environment and self-destruct moved from planned to implemented; documented their actual shipped shape (user-supplied decoy content, passphrase rather than PIN, self-destruct off by default) and the limits that come with it (flash erasure, deliberate triggering, clipboard exposure, phrase predictability, offline attack, iOS/macOS untested). This document is versioned with the project.*

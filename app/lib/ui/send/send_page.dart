@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:sodium_libs/sodium_libs.dart';
+import 'package:sodium/sodium.dart';
 
 import '../../src/chunking.dart';
 import '../../src/crypto.dart';
@@ -19,6 +19,9 @@ import '../../src/identity_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
 import '../theme.dart';
+import '../technical_text.dart';
+import '../desktop_scanner_view.dart';
+import '../../src/desktop_scanner.dart';
 import '../responsive.dart';
 
 /// State for the send flow.
@@ -40,6 +43,7 @@ class SendState {
     this.currentQrData,
     this.showingBootstrap = false,
     this.sendError,
+    this.appliedHint,
   });
 
   final String? fileName;
@@ -53,6 +57,12 @@ class SendState {
   final String? filePath;
 
   final Uint8List? receiverPk;
+
+  /// The receiver's suggestion, when their QR carried one and it was
+  /// applied. Held so the screen can say where these settings came from:
+  /// numbers that changed by themselves are indistinguishable from a bug.
+  final HandshakeHint? appliedHint;
+
   final Emitter? emitter;
   final Identity? identity;
   final int chunkSize;
@@ -109,8 +119,10 @@ class SendState {
     String? currentQrData,
     bool? showingBootstrap,
     String? sendError,
+    HandshakeHint? appliedHint,
     bool clearSendError = false,
     bool clearReceiverPk = false,
+    bool clearHint = false,
   }) {
     return SendState(
       fileName: fileName ?? this.fileName,
@@ -129,6 +141,7 @@ class SendState {
       currentQrData: currentQrData ?? this.currentQrData,
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
       sendError: clearSendError ? null : (sendError ?? this.sendError),
+      appliedHint: clearHint ? null : (appliedHint ?? this.appliedHint),
     );
   }
 }
@@ -141,11 +154,15 @@ class SendNotifier extends StateNotifier<SendState> {
   Timer? _timer;
 
   Future<void> pickFile() async {
-    final result = await FilePicker.platform.pickFiles(withData: true);
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
+    // file_picker 13 made these static and returns the files directly;
+    // `withData` is gone because bytes always come back.
+    final files = await FilePicker.pickFiles();
+    if (files.isEmpty) return;
+    final file = files.first;
+    // PlatformFile.bytes is gone in file_picker 13: reading is explicit
+    // now, so a picker no longer loads the whole file into memory before
+    // anyone asks for it.
+    final bytes = await file.readAsBytes();
     _stopTimer();
 
     // Auto-select the smallest chunk size that can carry this file without
@@ -171,8 +188,41 @@ class SendNotifier extends StateNotifier<SendState> {
     );
   }
 
-  void setReceiverPk(Uint8List pk) {
-    state = state.copyWith(receiverPk: pk);
+  /// Loads the receiver's public key, and applies the emission hint its
+  /// QR carried, when it had one.
+  ///
+  /// Applied by default rather than merely offered: the receiver measured
+  /// a real camera and the sender measured nothing, so the receiver's
+  /// numbers are the better starting point. Every one of them stays
+  /// adjustable, and the screen says where they came from — a suggestion
+  /// the user cannot see the origin of is just an unexplained change to
+  /// their settings.
+  ///
+  /// The chunk size is the exception. [pickFile] picks the smallest size
+  /// that can carry the file at all, and a smaller suggestion would make
+  /// the transfer impossible rather than slow, so a hint may only lower
+  /// it within what the file allows.
+  void setReceiverPk(Uint8List pk, {HandshakeHint? hint}) {
+    if (hint == null) {
+      state = state.copyWith(receiverPk: pk, clearHint: true);
+      return;
+    }
+
+    final bytes = state.fileBytes;
+    var chunkSize = hint.chunkSize;
+    if (bytes != null && fileSizeError(bytes.length, chunkSize) != null) {
+      // The suggestion cannot carry this file. Keep what pickFile chose:
+      // a slower transfer beats one that cannot start.
+      chunkSize = state.chunkSize;
+    }
+
+    state = state.copyWith(
+      receiverPk: pk,
+      fps: hint.fps,
+      chunkSize: chunkSize,
+      ecLevel: hint.ecLevel,
+      appliedHint: hint,
+    );
   }
 
   /// Forgets the loaded receiver key, returning step 2 to its initial state.
@@ -274,6 +324,28 @@ class SendNotifier extends StateNotifier<SendState> {
     );
   }
 
+  /// Clears everything about this transfer and returns to step 1.
+  ///
+  /// stopEmitting keeps the file and the key so the user can retune and
+  /// start again; this is the other case — done with that file, on to the
+  /// next. Without it the only way back to an empty form was to close the
+  /// app, which is a poor answer to "send another one".
+  ///
+  /// Keeps the identity, which belongs to the device rather than to any
+  /// transfer, and keeps the emission settings: having just tuned fps and
+  /// chunk size for the receiver's camera, being handed the defaults back
+  /// would be a step backwards.
+  void resetTransfer() {
+    _stopTimer();
+    unawaited(allowScreenSleep());
+    state = SendState(
+      identity: state.identity,
+      chunkSize: state.chunkSize,
+      ecLevel: state.ecLevel,
+      fps: state.fps,
+    );
+  }
+
   /// Stops and immediately starts again, rebuilding the emitter so the
   /// current fps, chunk size and EC level apply. The session gets a new
   /// file_id, so the receiver — which filters frames by that id — treats it
@@ -346,11 +418,45 @@ final sendProvider = StateNotifierProvider<SendNotifier, SendState>((ref) {
 // Send Page (step-by-step guided flow)
 // ---------------------------------------------------------------------------
 
-class SendPage extends ConsumerWidget {
+class SendPage extends ConsumerStatefulWidget {
   const SendPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SendPage> createState() => _SendPageState();
+}
+
+class _SendPageState extends ConsumerState<SendPage> {
+  /// Captured here so dispose can use it: `ref` throws once the element
+  /// is finalizing, and the provider is global so the notifier outlives
+  /// this widget anyway.
+  late final SendNotifier _notifier;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifier = ref.read(sendProvider.notifier);
+  }
+
+  @override
+  void dispose() {
+    // Leaving the page ends the transfer. sendProvider is global, so
+    // without this a file picked and then abandoned was still selected
+    // the next time Send was opened — the user had moved on, the app
+    // had not.
+    //
+    // Deferred past this frame because dispose runs during a build, and
+    // changing provider state there throws.
+    // Guarded for the same reason as the receive side: a ProviderScope
+    // torn down with the page leaves a disposed notifier behind, and
+    // state about to be discarded needs no reset.
+    Future.microtask(() {
+      if (_notifier.mounted) _notifier.resetTransfer();
+    });
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(sendProvider);
     final notifier = ref.read(sendProvider.notifier);
 
@@ -793,7 +899,7 @@ class _InfoButton extends StatelessWidget {
               width: 1.5,
             ),
             color: expanded
-                ? DeadDropColors.accent.withOpacity(0.15)
+                ? DeadDropColors.accent.withValues(alpha: 0.15)
                 : Colors.transparent,
           ),
           child: Icon(
@@ -858,7 +964,10 @@ class _MetadataRow extends StatelessWidget {
 /// web only — there is no Linux or Windows scanner. Where this is false the
 /// scan button is not offered (it could only fail) and manual entry is the
 /// primary path rather than a disclosed fallback.
-bool get _canScanQr => Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+// Which platforms can scan is decided in src/desktop_scanner.dart, where
+// both implementations live: mobile_scanner on android/ios/macos, and the
+// camera_desktop + zxing2 pair on linux/windows.
+bool get _canScanQr => canScanQr;
 
 class _ReceiverKeySection extends StatelessWidget {
   const _ReceiverKeySection({
@@ -879,7 +988,7 @@ class _ReceiverKeySection extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: DeadDropColors.success.withOpacity(0.15),
+              color: DeadDropColors.success.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: DeadDropColors.success),
             ),
@@ -952,11 +1061,11 @@ class _ReceiverKeySection extends StatelessWidget {
   }
 
   Future<void> _scanReceiverKey(BuildContext context) async {
-    final pk = await Navigator.of(context).push<Uint8List>(
+    final payload = await Navigator.of(context).push<HandshakePayload>(
       MaterialPageRoute(builder: (_) => const _KeyScanPage()),
     );
-    if (pk != null) {
-      notifier.setReceiverPk(pk);
+    if (payload != null) {
+      notifier.setReceiverPk(payload.publicKey, hint: payload.hint);
     }
   }
 }
@@ -979,19 +1088,33 @@ class _KeyScanPageState extends State<_KeyScanPage> {
   @override
   void initState() {
     super.initState();
-    // On desktop, use the default camera (no "back" facing concept).
-    final isDesktop =
-        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    if (usesDesktopScanner) return;
+    // macOS has mobile_scanner but no "back" camera concept.
     _controller = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
+      facing: Platform.isMacOS ? CameraFacing.front : CameraFacing.back,
     );
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    // Only created on the mobile_scanner path; disposing an uninitialised
+    // late field would throw.
+    if (!usesDesktopScanner) _controller.dispose();
     super.dispose();
+  }
+
+  /// Handles one decoded QR string, from either camera implementation.
+  ///
+  /// Ignores anything that is not a handshake QR — the user may well be
+  /// pointing at some other code on the way — and returns the first key
+  /// it recognises.
+  void _onRaw(String raw) {
+    if (_found) return;
+    final payload = decodeHandshakePayload(raw);
+    if (payload == null) return;
+    _found = true;
+    Navigator.of(context).pop(payload);
   }
 
   @override
@@ -1001,22 +1124,20 @@ class _KeyScanPageState extends State<_KeyScanPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          MobileScanner(
+          if (usesDesktopScanner)
+            DesktopScannerView(onDetect: _onRaw)
+          else
+            MobileScanner(
             controller: _controller,
             onDetect: (capture) {
               if (_found) return;
               for (final barcode in capture.barcodes) {
                 final raw = barcode.rawValue;
                 if (raw == null) continue;
-                final pk = decodeHandshakeQr(raw);
-                if (pk != null) {
-                  _found = true;
-                  Navigator.of(context).pop(pk);
-                  return;
-                }
+                _onRaw(raw);
               }
             },
-            errorBuilder: (context, error, child) {
+            errorBuilder: (context, error) {
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -1048,7 +1169,7 @@ class _KeyScanPageState extends State<_KeyScanPage> {
               margin: const EdgeInsets.all(24),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
+                color: Colors.black.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Text(
@@ -1085,16 +1206,16 @@ class _KeyScanPageState extends State<_KeyScanPage> {
 // Manual key input (advanced fallback)
 // ---------------------------------------------------------------------------
 
-class _ManualKeyInput extends StatefulWidget {
+class _ManualKeyInput extends ConsumerStatefulWidget {
   const _ManualKeyInput({required this.onKeyLoaded});
 
   final ValueChanged<Uint8List> onKeyLoaded;
 
   @override
-  State<_ManualKeyInput> createState() => _ManualKeyInputState();
+  ConsumerState<_ManualKeyInput> createState() => _ManualKeyInputState();
 }
 
-class _ManualKeyInputState extends State<_ManualKeyInput> {
+class _ManualKeyInputState extends ConsumerState<_ManualKeyInput> {
   /// Starts expanded where there is no camera to scan with. On Linux and
   /// Windows `mobile_scanner` has no implementation at all, so typing or
   /// pasting the key is not an "advanced fallback" there — it is the only
@@ -1149,7 +1270,7 @@ class _ManualKeyInputState extends State<_ManualKeyInput> {
               onPressed: _pasteFromClipboard,
             ),
           ),
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          style: technicalTextStyle(ref),
           maxLength: 64,
           onChanged: _validate,
         ),
@@ -1215,12 +1336,36 @@ class _ConfigSection extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           subtitle: Text(
-            'Transfer parameters',
-            style: Theme.of(context).textTheme.bodySmall,
+            // Said on the collapsed tile on purpose. The panel starts
+            // closed, so a note about changed settings placed inside it
+            // would only be read by someone who already went looking —
+            // and settings that changed by themselves, unexplained, read
+            // as a bug.
+            state.appliedHint == null
+                ? 'Transfer parameters'
+                : 'Set from the receiver\'s camera — tap to adjust',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: state.appliedHint == null
+                      ? null
+                      : DeadDropColors.success,
+                ),
           ),
           initiallyExpanded: false,
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
+            if (state.appliedHint != null) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'The receiver\'s QR carried these settings, measured from '
+                  'their camera. They are a suggestion — change anything '
+                  'here if the transfer is not reading well.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: DeadDropColors.textSecondary,
+                      ),
+                ),
+              ),
+            ],
             _ChunkSizeSelector(state: state, notifier: notifier),
             _ParamSlider(
               label: 'Frame rate',
@@ -1384,6 +1529,22 @@ class _SendingScreen extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              // Done with this file, on to the next. Stop keeps the file
+              // and the key so the user can retune and start again; this
+              // clears both. Without it the only way back to an empty
+              // form was to close the app.
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () {
+                    notifier.resetTransfer();
+                    Navigator.of(context).popUntil((r) => r.isFirst);
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('New transfer'),
+                ),
               ),
             ],
           ),
@@ -1596,12 +1757,8 @@ class _IdentityFingerprintCard extends ConsumerWidget {
                     Center(
                       child: SelectableText(
                         snapshot.data!,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 18,
-                          letterSpacing: 2,
-                          color: DeadDropColors.textPrimary,
-                        ),
+                        style: technicalTextStyle(ref, relativeTo: 1.4,
+                            letterSpacing: 2),
                       ),
                     ),
                     const SizedBox(height: 8),
