@@ -21,10 +21,6 @@ ios/Flutter/Flutter.framework
 ios/Flutter/Flutter.podspec
 ios/Flutter/ephemeral/
 ios/build/
-ios/fastlane/report.xml
-ios/fastlane/Preview.html
-ios/fastlane/screenshots/
-ios/fastlane/test_output/
 
 # macOS
 macos/Flutter/ephemeral/
@@ -39,7 +35,9 @@ linux/local.properties
 # Test coverage
 coverage/
 
-# Firebase config (contains API keys — do NOT commit)
+# Google services config (contains API keys — do NOT commit).
+# The Firebase integration was removed on 2026-10-27; these rules stay as a
+# net in case a tool or a tutorial ever drops one of these files back in.
 ios/Runner/GoogleService-Info.plist
 android/app/google-services.json
 
