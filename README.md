@@ -33,17 +33,19 @@ DeadDrop solves this: one device's screen shows animated QR codes, the other dev
 
 ## How it works in 30 seconds
 
-```
-  Device A (sends)                       Device B (receives)
-┌─────────────────────┐                  ┌─────────────────────┐
-│                     │                  │                     │
-│   ▓▓▓▓▓  ▓▓▓▓▓     │   light only,   │                     │
-│   ▓ QR ▓→▓ QR ▓→   │ ═══════════════► │      📷 camera      │
-│   ▓▓▓▓▓  ▓▓▓▓▓     │   no radio,     │                     │
-│                     │   no network    │                     │
-└─────────────────────┘                  └─────────────────────┘
-   Pick a file → the screen               Point the camera
-   shows animated codes                  → receive the file
+```mermaid
+flowchart LR
+    subgraph A["📱 Device A — sends"]
+        direction TB
+        A1["Pick a file"] --> A2["Screen shows<br/>animated QR codes"]
+    end
+
+    subgraph B["📷 Device B — receives"]
+        direction TB
+        B1["Point the camera"] --> B2["File received"]
+    end
+
+    A2 ==>|"light only<br/>no radio · no network"| B1
 ```
 
 1. **You pick the file** on the sending device.
