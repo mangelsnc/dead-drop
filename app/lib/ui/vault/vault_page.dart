@@ -16,6 +16,10 @@
 /// unwilling person without their choice the way a typed secret cannot.
 library;
 
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -278,7 +282,7 @@ class _UnlockedView extends ConsumerWidget {
   }
 }
 
-class _EntryTile extends StatelessWidget {
+class _EntryTile extends ConsumerWidget {
   const _EntryTile({required this.entry});
 
   final VaultEntry entry;
@@ -289,8 +293,143 @@ class _EntryTile extends StatelessWidget {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
+  /// Whether this file can be shown inside the app.
+  ///
+  /// Only types that can be rendered from memory qualify. Anything else
+  /// has to leave the vault to be opened, and that is a decision the user
+  /// makes explicitly through Export — never a side effect of tapping a
+  /// row.
+  bool get _previewable =>
+      _isImage || _isText;
+
+  bool get _isImage {
+    final n = entry.name.toLowerCase();
+    return n.endsWith('.png') ||
+        n.endsWith('.jpg') ||
+        n.endsWith('.jpeg') ||
+        n.endsWith('.gif') ||
+        n.endsWith('.webp') ||
+        n.endsWith('.bmp');
+  }
+
+  bool get _isText {
+    final n = entry.name.toLowerCase();
+    return n.endsWith('.txt') ||
+        n.endsWith('.md') ||
+        n.endsWith('.json') ||
+        n.endsWith('.csv') ||
+        n.endsWith('.log') ||
+        n.endsWith('.yaml') ||
+        n.endsWith('.yml');
+  }
+
+  Future<void> _preview(BuildContext context, WidgetRef ref) async {
+    final bytes =
+        await ref.read(vaultControllerProvider.notifier).readFile(entry.id);
+    if (!context.mounted) return;
+    if (bytes == null) {
+      _say(context, 'The vault is locked.');
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _PreviewDialog(
+        name: entry.name,
+        bytes: bytes,
+        isImage: _isImage,
+      ),
+    );
+  }
+
+  /// Writes the file out of the vault, in the clear, where the user says.
+  ///
+  /// Confirmed first, and worded so the consequence is unmistakable: the
+  /// whole point of the vault is that its contents are not sitting on the
+  /// disk readable, and exporting undoes that for this one file.
+  Future<void> _export(BuildContext context, WidgetRef ref) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save outside the vault?'),
+        content: Text(
+          '${entry.name} will be written to the place you choose, '
+          'unencrypted. Anyone who can read that folder can read the file, '
+          'and deleting it later does not undo that.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save outside'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !context.mounted) return;
+
+    final bytes =
+        await ref.read(vaultControllerProvider.notifier).readFile(entry.id);
+    if (!context.mounted) return;
+    if (bytes == null) {
+      _say(context, 'The vault is locked.');
+      return;
+    }
+
+    try {
+      // file_picker, the same path the receive screen uses to save a file.
+      // file_selector would be the obvious alternative but it pulls `http`
+      // into the dependency graph of an app whose claim is that it has no
+      // network code — see the note in pubspec.yaml.
+      final chosen = await FilePicker.saveFile(
+        dialogTitle: 'Save outside the vault',
+        fileName: entry.name,
+        bytes: bytes,
+      );
+      if (chosen == null || !context.mounted) return; // cancelled
+      _say(context, 'Saved outside the vault.');
+    } catch (e) {
+      // A failed export must say so rather than look like a cancel: the
+      // user would otherwise believe a file is on disk when it is not.
+      if (context.mounted) _say(context, 'Could not save the file: $e');
+    }
+  }
+
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this file?'),
+        content: Text(
+          '${entry.name} will be removed from the vault. This cannot be '
+          'undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete',
+                style: TextStyle(color: DeadDropColors.error)),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !context.mounted) return;
+    await ref.read(vaultControllerProvider.notifier).deleteFile(entry.id);
+  }
+
+  static void _say(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.insert_drive_file_outlined),
@@ -298,6 +437,108 @@ class _EntryTile extends StatelessWidget {
         subtitle: Text(
           '${_formatSize(entry.sizeBytes)} · ${entry.addedAt.toLocal()}',
         ),
+        // The same actions in both environments. A menu that offered more
+        // in the real vault than in the decoy would be the tell the whole
+        // feature exists to avoid.
+        trailing: PopupMenuButton<String>(
+          onSelected: (action) => switch (action) {
+            'view' => _preview(context, ref),
+            'export' => _export(context, ref),
+            'delete' => _delete(context, ref),
+            _ => null,
+          },
+          itemBuilder: (context) => [
+            if (_previewable)
+              const PopupMenuItem(value: 'view', child: Text('View')),
+            const PopupMenuItem(
+                value: 'export', child: Text('Save outside the vault')),
+            const PopupMenuItem(value: 'delete', child: Text('Delete')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shows a vault file without it ever reaching the disk.
+///
+/// The bytes come straight from [VaultController.readFile] and are rendered
+/// from memory. Handing the file to the system viewer instead would mean
+/// writing plaintext somewhere outside the vault, which is what the design
+/// forbids — so only types that can be drawn here are offered at all.
+class _PreviewDialog extends StatelessWidget {
+  const _PreviewDialog({
+    required this.name,
+    required this.bytes,
+    required this.isImage,
+  });
+
+  final String name;
+  final Uint8List bytes;
+  final bool isImage;
+
+  /// Text beyond this is truncated in the view. A preview is for checking
+  /// what a file is, and rendering megabytes of text in a dialog janks the
+  /// UI for no benefit.
+  static const int _maxTextChars = 20000;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(name, overflow: TextOverflow.ellipsis),
+      content: SizedBox(
+        width: 480,
+        child: isImage ? _image() : _text(context),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+
+  Widget _image() => InteractiveViewer(
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stack) => const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('This file is not an image the app can show.'),
+          ),
+        ),
+      );
+
+  Widget _text(BuildContext context) {
+    String body;
+    try {
+      body = utf8.decode(bytes);
+    } on FormatException {
+      // Named as binary rather than shown as mojibake: a wall of
+      // replacement characters looks like corruption, which it is not.
+      return const Padding(
+        padding: EdgeInsets.all(8),
+        child: Text('This file is not text the app can show.'),
+      );
+    }
+    final truncated = body.length > _maxTextChars;
+    if (truncated) body = body.substring(0, _maxTextChars);
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(body),
+          if (truncated)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                'Shown: the first $_maxTextChars characters. '
+                'Save it outside the vault to read all of it.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+        ],
       ),
     );
   }

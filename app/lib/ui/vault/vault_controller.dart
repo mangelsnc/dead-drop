@@ -462,6 +462,40 @@ class VaultController extends StateNotifier<VaultState>
     return entry;
   }
 
+  /// Reads one entry's plaintext back out of the open environment.
+  ///
+  /// The counterpart of [saveFile], and kept here for the same reason: the
+  /// data key never leaves this controller, so a caller that wants to show
+  /// or export a file asks for the bytes rather than for the key.
+  ///
+  /// Returns null if the vault is locked. The bytes come back in memory and
+  /// are never written anywhere by this method — whether they reach the
+  /// disk is the caller's decision, which is the point: the design forbids
+  /// silently leaving plaintext outside the vault.
+  Future<Uint8List?> readFile(String id) async {
+    final store = _store;
+    final dataKey = _dataKey;
+    final slot = state.slot;
+    if (store == null || dataKey == null || slot == null) return null;
+    return store.get(dataKey, slot, id);
+  }
+
+  /// Removes one entry from the open environment.
+  ///
+  /// Deletes only within the environment that is open, so a file removed
+  /// from the decoy leaves the real one untouched and vice versa — the two
+  /// must stay unable to reveal anything about each other.
+  Future<bool> deleteFile(String id) async {
+    final store = _store;
+    final dataKey = _dataKey;
+    final slot = state.slot;
+    if (store == null || dataKey == null || slot == null) return false;
+
+    await store.delete(slot, id);
+    state = state.copyWith(entries: await store.list(dataKey, slot));
+    return true;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);

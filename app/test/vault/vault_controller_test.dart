@@ -538,4 +538,88 @@ void main() {
         tryUnlock(sodium, 'a brand new different passphrase', slots.cast());
     expect(result.ok, isFalse);
   });
+
+  group('reading and deleting a file in the open environment', () {
+    test('readFile returns the bytes that were stored', () async {
+      final controller = buildController();
+      addTearDown(controller.dispose);
+      final store = VaultStore(tempDir, sodium);
+
+      await controller.createVault('correct horse battery staple');
+      final slots = await store.readSlots();
+      final dataKey =
+          tryUnlockFor(sodium, 'correct horse battery staple', slots);
+      final entry =
+          await store.put(dataKey, 0, 'note.txt', _bytes([7, 8, 9]));
+      controller.lock();
+      await controller.unlock('correct horse battery staple');
+
+      expect(await controller.readFile(entry.id), equals(_bytes([7, 8, 9])));
+    });
+
+    test('readFile returns null while the vault is locked', () async {
+      final controller = buildController();
+      addTearDown(controller.dispose);
+      final store = VaultStore(tempDir, sodium);
+
+      await controller.createVault('correct horse battery staple');
+      final slots = await store.readSlots();
+      final dataKey =
+          tryUnlockFor(sodium, 'correct horse battery staple', slots);
+      final entry =
+          await store.put(dataKey, 0, 'note.txt', _bytes([7, 8, 9]));
+      controller.lock();
+
+      expect(await controller.readFile(entry.id), isNull,
+          reason: 'a locked vault must not hand out plaintext');
+    });
+
+    test('deleteFile removes it from the list', () async {
+      final controller = buildController();
+      addTearDown(controller.dispose);
+      final store = VaultStore(tempDir, sodium);
+
+      await controller.createVault('correct horse battery staple');
+      final slots = await store.readSlots();
+      final dataKey =
+          tryUnlockFor(sodium, 'correct horse battery staple', slots);
+      final entry = await store.put(dataKey, 0, 'gone.txt', _bytes([1]));
+      controller.lock();
+      await controller.unlock('correct horse battery staple');
+      expect(controller.state.entries, hasLength(1));
+
+      expect(await controller.deleteFile(entry.id), isTrue);
+      expect(controller.state.entries, isEmpty);
+    });
+
+    test('deleting in the decoy leaves the real environment untouched',
+        () async {
+      final controller = buildController();
+      addTearDown(controller.dispose);
+      final store = VaultStore(tempDir, sodium);
+
+      await controller.createVault('correct horse battery staple');
+      await controller.addDecoy('decoy passphrase entirely different');
+
+      final slots = await store.readSlots();
+      final realKey =
+          tryUnlockFor(sodium, 'correct horse battery staple', slots);
+      final decoyKey =
+          tryUnlockFor(sodium, 'decoy passphrase entirely different', slots);
+      await store.put(realKey, 0, 'real.txt', _bytes([1]));
+      final decoyEntry =
+          await store.put(decoyKey, 1, 'decoy.txt', _bytes([2]));
+
+      controller.lock();
+      await controller.unlock('decoy passphrase entirely different');
+      await controller.deleteFile(decoyEntry.id);
+
+      controller.lock();
+      await controller.unlock('correct horse battery staple');
+      expect(controller.state.entries, hasLength(1),
+          reason: 'the two environments must not be able to affect, or '
+              'reveal anything about, each other');
+      expect(controller.state.entries.single.name, 'real.txt');
+    });
+  });
 }
