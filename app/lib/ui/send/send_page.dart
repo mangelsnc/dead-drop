@@ -8,6 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium/sodium.dart';
 
 import '../../src/chunking.dart';
+import '../../src/qrframe.dart';
 import '../../src/crypto.dart';
 import '../../src/screen_wake.dart';
 import '../../src/emitter.dart';
@@ -246,11 +247,21 @@ class SendNotifier extends StateNotifier<SendState> {
       chunkSize = state.chunkSize;
     }
 
+    // The pair has to be renderable. A hint arrives from another device
+    // and knows nothing about the file being sent, so it can name a
+    // combination that produces a QR larger than version 40 — which
+    // displays nothing at all.
+    final ec = chunkFitsQr(chunkSize, hint.ecLevel)
+        ? hint.ecLevel
+        : (ecLevelsFor(chunkSize).isEmpty
+            ? state.ecLevel
+            : ecLevelsFor(chunkSize).first);
+
     state = state.copyWith(
       receiverPk: pk,
       fps: hint.fps,
       chunkSize: chunkSize,
-      ecLevel: hint.ecLevel,
+      ecLevel: ec,
       appliedHint: hint,
     );
   }
@@ -276,14 +287,28 @@ class SendNotifier extends StateNotifier<SendState> {
     // appears / clears immediately as the user moves the slider.
     final bytes = state.fileBytes;
     final error = bytes == null ? null : fileSizeError(bytes.length, size);
+
+    // Weaken the correction if the new chunk will not fit a QR at the
+    // current level. The alternative is a combination that renders
+    // nothing, and the user asked for the chunk size — so that is the
+    // choice to honour, with the level following it.
+    final ec = chunkFitsQr(size, state.ecLevel)
+        ? state.ecLevel
+        : (ecLevelsFor(size).isEmpty ? state.ecLevel : ecLevelsFor(size).first);
+
     state = state.copyWith(
       chunkSize: size,
+      ecLevel: ec,
       sendError: error,
       clearSendError: error == null,
     );
   }
 
   void setEcLevel(String level) {
+    // Ignored when the current chunk could not be rendered at it. The UI
+    // disables those, so this is the guard for anything reaching here
+    // another way — the receiver's hint, most of all.
+    if (!chunkFitsQr(state.chunkSize, level)) return;
     state = state.copyWith(ecLevel: level);
   }
 
@@ -1336,11 +1361,22 @@ class _ConfigSection extends StatelessWidget {
             const Text('Error correction'),
             const SizedBox(height: 8),
             SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'L', label: Text('L (7%)')),
-                ButtonSegment(value: 'M', label: Text('M (15%)')),
-                ButtonSegment(value: 'Q', label: Text('Q (25%)')),
-                ButtonSegment(value: 'H', label: Text('H (30%)')),
+              // A level is disabled when the current chunk would not fit
+              // in a QR with that much correction. Stronger correction
+              // leaves less room for data, so at 2048 bytes only L has
+              // the capacity — offering the others rendered nothing.
+              segments: [
+                for (final ec in const [
+                  ('L', 'L (7%)'),
+                  ('M', 'M (15%)'),
+                  ('Q', 'Q (25%)'),
+                  ('H', 'H (30%)'),
+                ])
+                  ButtonSegment(
+                    value: ec.$1,
+                    label: Text(ec.$2),
+                    enabled: chunkFitsQr(state.chunkSize, ec.$1),
+                  ),
               ],
               selected: {state.ecLevel},
               onSelectionChanged: (s) => notifier.setEcLevel(s.first),
@@ -1596,10 +1632,16 @@ class _ChunkSizeSelector extends StatelessWidget {
               ChoiceChip(
                 label: Text('$size'),
                 selected: state.chunkSize == size,
-                // Disable sizes that cannot fit the picked file.
+                // Disabled when it cannot carry the picked file, and
+                // when the frame would not fit in a QR at the chosen
+                // error correction. The second case used to be
+                // selectable and simply broke the display: 2048 bytes
+                // encodes to about 2,860 characters, which only level L
+                // can hold.
                 onSelected: state.isEmitting ||
                         (fileSize != null &&
-                            fileSize > maxFileSizeForChunkSize(size))
+                            fileSize > maxFileSizeForChunkSize(size)) ||
+                        !chunkFitsQr(size, state.ecLevel)
                     ? null
                     : (_) => notifier.setChunkSize(size),
               ),

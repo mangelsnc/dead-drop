@@ -336,7 +336,10 @@ void main() {
 
       // Past the comfortable count, step up rather than add codes.
       expect(recommendedChunkSize(653 * 1024), 1024);
-      expect(recommendedChunkSize(4 * 1024 * 1024), 4096);
+      // 2048, not 4096: a 4096-byte frame encodes to about 5,600
+      // characters and the largest QR holds 2,953, so that size was
+      // removed from the options entirely.
+      expect(recommendedChunkSize(4 * 1024 * 1024), 2048);
 
       // Whatever is chosen must be able to carry the file.
       for (final bytes in [1024, 653 * 1024, 32 * 1024 * 1024]) {

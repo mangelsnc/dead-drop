@@ -21,7 +21,16 @@ import 'crypto.dart';
 /// Chunk sizes offered in the UI, ascending. Larger chunks fit larger files
 /// (the uint16 `chunkCount` caps a transfer at [maxChunkCount] chunks) but
 /// produce denser QR codes that are harder for the camera to scan reliably.
-const List<int> kChunkSizeOptions = [256, 512, 1024, 2048, 4096];
+/// 4096 is absent deliberately: a frame that size encodes to about
+/// 5,600 characters, and the largest QR holds 2,953 even at the weakest
+/// error correction. It was offered in the UI and could never work —
+/// selecting it asked for a code bigger than version 40 and the render
+/// failed outright.
+///
+/// 2048 is kept but only works at EC level L (about 2,860 characters
+/// against L's 2,953). The UI must not offer it alongside a stronger
+/// level; see [ecLevelsFor].
+const List<int> kChunkSizeOptions = [256, 512, 1024, 2048];
 
 /// The chunk size used when the user has not chosen one. Matches the value
 /// the spike validated as the best throughput / scannability trade-off.
