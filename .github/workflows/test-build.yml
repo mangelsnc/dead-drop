@@ -1,4 +1,5 @@
-## Builds a signed APK from any branch, for testing on a real device.
+## Builds installable artifacts from any branch, for testing on real
+## devices.
 ##
 ## The release pipeline only builds main and publishes to a tag, which is
 ## right for releases and useless for the case this exists to serve:
@@ -6,10 +7,14 @@
 ## scanner is one of those — whether it reads as well as ML Kit cannot be
 ## answered by CI, only by someone holding a phone.
 ##
-## The APK is attached to the run as an artifact rather than published as
-## a release: it is a build to try, not a version anybody should install
-## expecting support.
-name: Test APK
+## Android and macOS, because a transfer needs both ends: the emission
+## parameters are chosen by the SENDER, so testing a change to them with
+## an old build on the other side measures nothing.
+##
+## Artifacts are attached to the run rather than published as a release:
+## these are builds to try, not versions anybody should install expecting
+## support.
+name: Test build
 
 on:
   workflow_dispatch:
@@ -19,6 +24,12 @@ on:
         required: true
         type: string
         default: main
+      platforms:
+        description: 'What to build'
+        required: true
+        default: both
+        type: choice
+        options: [both, android, macos]
 
 env:
   # Must match .fvmrc, as in build.yml.
@@ -26,6 +37,7 @@ env:
 
 jobs:
   apk:
+    if: inputs.platforms == 'both' || inputs.platforms == 'android'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -131,3 +143,51 @@ jobs:
       - name: Remove signing material
         if: always()
         run: rm -f app/android/key.properties "${RUNNER_TEMP}/upload-keystore.jks"
+
+  macos:
+    if: inputs.platforms == 'both' || inputs.platforms == 'macos'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build release
+        working-directory: app
+        run: flutter build macos --release
+
+      # Ad-hoc signed, like the published releases: distributing a .app
+      # that Gatekeeper accepts without a right-click needs a paid Apple
+      # certificate, which this project does not have. Said here so the
+      # tester is not surprised by the warning.
+      - name: Package
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          REF_SLUG=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')
+          cd app/build/macos/Build/Products/Release
+          APP=$(ls -d *.app | head -1)
+          test -n "$APP" || { echo "::error::no .app bundle"; exit 1; }
+          tar czf "${GITHUB_WORKSPACE}/deaddrop-${REF_SLUG}-macos.tar.gz" "$APP"
+          cd "${GITHUB_WORKSPACE}"
+          shasum -a 256 "deaddrop-${REF_SLUG}-macos.tar.gz" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deaddrop-macos
+          path: deaddrop-*-macos.tar.gz
+          retention-days: 14
