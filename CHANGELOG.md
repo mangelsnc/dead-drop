@@ -5,6 +5,16 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-10-28
+
+### Added
+
+- *(vault)* Search and sort the file list, and keep the identity stable
+
+### Other
+
+- Vault list controls, a visible save confirmation, and a stable identity
+
 ## [0.8.0] — 2026-10-28
 
 ### Added
