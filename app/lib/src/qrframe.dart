@@ -138,6 +138,36 @@ class Frame {
   }
 }
 
+/// The largest QR a version-40 code can carry at [ec], in characters.
+const _maxQrChars = {'L': 2953, 'M': 2331, 'Q': 1663, 'H': 1273};
+
+/// How many characters a data frame of [chunkSize] becomes once packed,
+/// encrypted and base64url-encoded for a QR.
+///
+/// A fountain frame of degree d carries d chunk ids, but the payload is
+/// one chunk's worth however many were XORed into it, so the size is
+/// dominated by the chunk itself. Degree is bounded in practice; a
+/// generous allowance keeps this an upper bound rather than a guess.
+int encodedFrameChars(int chunkSize, {int maxDegree = 16}) {
+  final raw = frameHeaderSize + maxDegree * 2 + nonceSize + chunkSize + 16;
+  // base64 is 4 characters per 3 bytes, plus the "DD1." prefix.
+  return ((raw + 2) ~/ 3) * 4 + 4;
+}
+
+/// Whether [chunkSize] can be rendered as a QR at [ec].
+///
+/// A chunk that does not fit has no fallback: the renderer is asked for
+/// a code larger than version 40 and fails outright, which is what
+/// "the screen breaks when showing QRs" meant when 2048-byte chunks
+/// were selected at the default error correction.
+bool chunkFitsQr(int chunkSize, String ec) =>
+    encodedFrameChars(chunkSize) <= (_maxQrChars[ec] ?? _maxQrChars['M']!);
+
+/// The error-correction levels that can carry [chunkSize], strongest
+/// first. Empty when no level can.
+List<String> ecLevelsFor(int chunkSize) =>
+    ['H', 'Q', 'M', 'L'].where((ec) => chunkFitsQr(chunkSize, ec)).toList();
+
 int qrCapacityAt(int version, String ec) {
   final versions = qrCapacity.keys.toList()..sort();
   final v = versions.lastWhere((x) => x <= version, orElse: () => versions.first);

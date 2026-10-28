@@ -244,7 +244,7 @@ void main() {
       notifier.state = SendState(
         fileName: 'big.bin',
         fileBytes: big,
-        chunkSize: 4096,
+        chunkSize: 2048,
       );
 
       notifier.setReceiverPk(
@@ -252,12 +252,13 @@ void main() {
         hint: const HandshakeHint(fps: 6, chunkSize: 256, ecLevel: 'Q'),
       );
 
-      expect(notifier.state.chunkSize, 4096,
+      expect(notifier.state.chunkSize, 2048,
           reason: 'a file that cannot fit 256-byte chunks must keep its own');
-      // The rest of the hint still applies: only the impossible part is
-      // refused.
       expect(notifier.state.fps, 6);
-      expect(notifier.state.ecLevel, 'Q');
+      // 'Q' is refused here, not because of the hint but because a
+      // 2048-byte frame only fits a QR at level L. Obeying it would
+      // produce a code too large to draw.
+      expect(notifier.state.ecLevel, 'L');
     });
 
     test('a hint that the file can carry is applied', () {
@@ -267,7 +268,7 @@ void main() {
       notifier.state = SendState(
         fileName: 'small.txt',
         fileBytes: Uint8List(1000),
-        chunkSize: 4096,
+        chunkSize: 2048,
       );
 
       notifier.setReceiverPk(

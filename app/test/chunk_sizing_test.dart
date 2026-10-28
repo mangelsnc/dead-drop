@@ -39,7 +39,11 @@ void main() {
     // Up to the point where the largest chunk is already in use, the
     // count stays within reach. Beyond that it can only grow with the
     // file, which is a property of the format, not a choice.
-    for (final kb in [64, 256, 653, 1024, 4096]) {
+    // Up to 2 MB the count stays within reach. Past that it can only
+    // grow: 2048 bytes is the largest chunk a QR can carry at any error
+    // correction, so a bigger file simply needs more codes. That is a
+    // property of the format, not a choice this function makes.
+    for (final kb in [64, 256, 653, 1024]) {
       final bytes = kb * 1024;
       expect(chunksFor(bytes), lessThanOrEqualTo(1100),
           reason: '$kb KB produced ${chunksFor(bytes)} codes');
@@ -50,6 +54,14 @@ void main() {
     // The fallback used to return the FIRST fitting size, which is
     // always the default, so a 16 MB file came out as 32,768 codes.
     expect(recommendedChunkSize(16 * 1024 * 1024), kChunkSizeOptions.last);
+  });
+
+  test('a big file is slow, and that is the format, not a bug', () {
+    // Worth stating: 2048 bytes is the ceiling a QR can carry, so a
+    // 4 MB file is 2,048 codes however it is sliced. Anyone surprised
+    // by a long transfer should find the reason written down.
+    expect(chunksFor(4 * 1024 * 1024), 2048);
+    expect(kChunkSizeOptions.last, 2048);
   });
 
   test('the chosen size can always carry the file', () {
