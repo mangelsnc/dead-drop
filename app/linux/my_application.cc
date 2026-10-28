@@ -47,6 +47,24 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "DeadDrop");
   }
 
+  // The window and taskbar icon. GTK finds it by theme name only once the
+  // app is installed into a desktop's icon directories, which a plain
+  // tarball never is — so load the file that ships inside the bundle and
+  // set it directly. Without this the user sees the generic placeholder.
+  //
+  // Failing to load it is not worth aborting over: a missing icon is a
+  // cosmetic problem and the app is perfectly usable.
+  g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
+  g_autofree gchar* exe_dir =
+      exe_path != nullptr ? g_path_get_dirname(exe_path) : g_strdup(".");
+  g_autofree gchar* icon_path =
+      g_build_filename(exe_dir, "data", "deaddrop.png", nullptr);
+  g_autoptr(GError) icon_error = nullptr;
+  if (!gtk_window_set_icon_from_file(window, icon_path, &icon_error)) {
+    g_warning("Could not load the window icon from %s: %s", icon_path,
+              icon_error->message);
+  }
+
   gtk_window_set_default_size(window, 1280, 720);
   gtk_widget_show(GTK_WIDGET(window));
 
