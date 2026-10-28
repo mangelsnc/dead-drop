@@ -61,8 +61,6 @@ class Receiver {
     if (session == null || decoder == null) {
       throw StateError('call startSession() first');
     }
-    if (decoder!.done) return false;
-
     Frame frame;
     try {
       frame = Frame.unpack(frameBytes);
@@ -70,6 +68,13 @@ class Receiver {
       framesDropped++;
       return false;
     }
+
+    // Once decoding is finished there is nothing left to feed it — except
+    // the metadata frame, which carries the file name and no chunks. A
+    // small file can finish decoding before the first repeat of that frame
+    // comes round, and dropping it here is how a complete transfer still
+    // ended up saved as deaddrop_received_<timestamp> with no extension.
+    if (decoder!.done && frame.chunkIds.isNotEmpty) return false;
 
     if (!constantTimeEquals(frame.fileId, session!.header.fileId)) {
       framesIgnoredOtherSession++;
@@ -84,9 +89,17 @@ class Receiver {
       return false;
     }
 
-    // Sequence 0 carries the encrypted file metadata (original file name).
-    // It is not a fountain frame: degree is 0 and it never advances decoding.
-    if (frame.seq == 0) {
+    // The metadata frame (original file name). Recognised by its empty
+    // chunk list rather than by sequence number: the emitter repeats it
+    // periodically, because sending it once — before the receiver's
+    // camera had locked on — meant the name was usually lost and the file
+    // arrived unnamed. Keying on the shape rather than on seq 0 keeps the
+    // two sides from drifting apart if that interval ever changes.
+    //
+    // It is not a fountain frame: degree is 0 and it never advances
+    // decoding. Receiving it more than once is harmless — the name is
+    // simply set again to the same value.
+    if (frame.chunkIds.isEmpty) {
       final meta = parseFileMetadataPayload(payload);
       final name = meta['name'];
       if (name is String && name.isNotEmpty) {

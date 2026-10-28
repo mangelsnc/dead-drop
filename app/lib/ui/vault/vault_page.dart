@@ -23,10 +23,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../src/file_metadata.dart';
 import '../../src/vault/vault_store.dart';
 import '../theme.dart';
 import '../passphrase_field.dart';
 import '../technical_text.dart';
+import '../send/send_page.dart';
 import '../settings/settings_page.dart';
 import 'delete_vault_dialog.dart';
 import 'vault_controller.dart';
@@ -293,35 +295,21 @@ class _EntryTile extends ConsumerWidget {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
-  /// Whether this file can be shown inside the app.
+  /// Decides from the bytes, not the name.
   ///
-  /// Only types that can be rendered from memory qualify. Anything else
-  /// has to leave the vault to be opened, and that is a decision the user
-  /// makes explicitly through Export — never a side effect of tapping a
-  /// row.
-  bool get _previewable =>
-      _isImage || _isText;
+  /// A file whose name was lost in transit arrives called
+  /// `deaddrop_received_<timestamp>` with no extension, and deciding
+  /// previewability from that would refuse to show a perfectly ordinary
+  /// PNG. `guessMimeType` reads the magic bytes first and only falls back
+  /// to the extension, which is the right order here.
+  static bool _isImageMime(String? mime) =>
+      mime != null && mime.startsWith('image/');
 
-  bool get _isImage {
-    final n = entry.name.toLowerCase();
-    return n.endsWith('.png') ||
-        n.endsWith('.jpg') ||
-        n.endsWith('.jpeg') ||
-        n.endsWith('.gif') ||
-        n.endsWith('.webp') ||
-        n.endsWith('.bmp');
-  }
-
-  bool get _isText {
-    final n = entry.name.toLowerCase();
-    return n.endsWith('.txt') ||
-        n.endsWith('.md') ||
-        n.endsWith('.json') ||
-        n.endsWith('.csv') ||
-        n.endsWith('.log') ||
-        n.endsWith('.yaml') ||
-        n.endsWith('.yml');
-  }
+  static bool _isTextMime(String? mime) =>
+      mime != null &&
+      (mime.startsWith('text/') ||
+          mime == 'application/json' ||
+          mime == 'application/xml');
 
   Future<void> _preview(BuildContext context, WidgetRef ref) async {
     final bytes =
@@ -331,12 +319,26 @@ class _EntryTile extends ConsumerWidget {
       _say(context, 'The vault is locked.');
       return;
     }
+
+    final dot = entry.name.lastIndexOf('.');
+    final extension = dot > 0 ? entry.name.substring(dot + 1) : null;
+    final mime = guessMimeType(bytes, extension);
+
+    if (!_isImageMime(mime) && !_isTextMime(mime)) {
+      _say(
+        context,
+        'This file cannot be shown here. Save it outside the vault to '
+        'open it.',
+      );
+      return;
+    }
+
     await showDialog<void>(
       context: context,
       builder: (context) => _PreviewDialog(
         name: entry.name,
         bytes: bytes,
-        isImage: _isImage,
+        isImage: _isImageMime(mime),
       ),
     );
   }
@@ -397,6 +399,27 @@ class _EntryTile extends ConsumerWidget {
     }
   }
 
+  /// Stages this file on the send screen without it touching the disk.
+  ///
+  /// The alternative — export, pick, send, delete — would write the
+  /// plaintext out just to read it straight back in, undoing the vault
+  /// for as long as that copy existed.
+  Future<void> _send(BuildContext context, WidgetRef ref) async {
+    final bytes =
+        await ref.read(vaultControllerProvider.notifier).readFile(entry.id);
+    if (!context.mounted) return;
+    if (bytes == null) {
+      _say(context, 'The vault is locked.');
+      return;
+    }
+
+    ref.read(sendProvider.notifier).loadBytes(entry.name, bytes);
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SendPage()),
+    );
+  }
+
   Future<void> _delete(BuildContext context, WidgetRef ref) async {
     final proceed = await showDialog<bool>(
       context: context,
@@ -443,13 +466,18 @@ class _EntryTile extends ConsumerWidget {
         trailing: PopupMenuButton<String>(
           onSelected: (action) => switch (action) {
             'view' => _preview(context, ref),
+            'send' => _send(context, ref),
             'export' => _export(context, ref),
             'delete' => _delete(context, ref),
             _ => null,
           },
           itemBuilder: (context) => [
-            if (_previewable)
-              const PopupMenuItem(value: 'view', child: Text('View')),
+            // Always offered. Whether a file can be drawn is decided from
+            // its bytes when it is opened, not guessed from its name —
+            // a name lost in transit must not hide a viewable file.
+            const PopupMenuItem(value: 'view', child: Text('View')),
+            const PopupMenuItem(
+                value: 'send', child: Text('Send with DeadDrop')),
             const PopupMenuItem(
                 value: 'export', child: Text('Save outside the vault')),
             const PopupMenuItem(value: 'delete', child: Text('Delete')),
