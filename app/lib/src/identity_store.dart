@@ -17,6 +17,26 @@ import 'package:sodium/sodium.dart';
 
 import 'crypto.dart';
 
+/// The identity could not be stored, so it would not survive a restart.
+///
+/// Thrown rather than swallowed: a device whose fingerprint changes on
+/// every launch asks everyone who has verified it to verify it again,
+/// and the whole point of a persistent identity is that they do not have
+/// to.
+class IdentityNotPersistedException implements Exception {
+  const IdentityNotPersistedException(this.storageKey);
+
+  /// Which key failed, so a bug report can say whether it was the
+  /// unscoped identity or a vault environment's.
+  final String storageKey;
+
+  @override
+  String toString() =>
+      'Could not store the device identity at "$storageKey". It would be '
+      'regenerated on the next launch, and correspondents would see this '
+      'device as a stranger again.';
+}
+
 /// Loads, stores, and provides the device's persistent Ed25519 identity.
 class IdentityStore {
   static const _unscopedStorageKey = 'deaddrop_identity_ed25519';
@@ -79,6 +99,33 @@ class IdentityStore {
     return identity;
   }
 
+  /// Whether the stored identity can actually be read back.
+  ///
+  /// This device's fingerprint is what correspondents check to know they
+  /// are still talking to the same person, so an identity that silently
+  /// fails to persist is not a cosmetic problem: every launch invents a
+  /// new one, everybody who has verified this device has to verify it
+  /// again, and nothing anywhere says why. It is a plausible failure —
+  /// the macOS keychain rejected every write until the entitlements were
+  /// fixed in 0.6.0, and a write that throws leaves [loadOrGenerate]
+  /// generating afresh each time.
+  ///
+  /// Returns false when nothing is stored or what is stored does not
+  /// match the identity in memory.
+  Future<bool> isPersisted() async {
+    final current = _cached;
+    if (current == null) return false;
+    try {
+      final stored = await _storage.read(key: _storageKey);
+      if (stored == null) return false;
+      final bytes = base64Decode(stored);
+      return Identity.fromSecretKeyBytes(_sodium, bytes).fingerprint ==
+          current.fingerprint;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// The identity's public key fingerprint (first 16 hex chars).
   ///
   /// Suitable for display in the UI for out-of-band verification.
@@ -101,8 +148,20 @@ class IdentityStore {
     _cached = null;
   }
 
+  /// Writes the identity, and checks it can be read back.
+  ///
+  /// A write that reports success but stores nothing is indistinguishable
+  /// from a working one until the next launch, when the device turns up
+  /// with a different fingerprint. Reading it straight back costs one
+  /// keychain call at startup and turns that into a thrown error at the
+  /// moment it happens.
   Future<void> _persist(Identity identity) async {
     final bytes = identity.secretKeyBytes;
     await _storage.write(key: _storageKey, value: base64Encode(bytes));
+
+    final readBack = await _storage.read(key: _storageKey);
+    if (readBack == null) {
+      throw IdentityNotPersistedException(_storageKey);
+    }
   }
 }
