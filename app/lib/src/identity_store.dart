@@ -24,7 +24,13 @@ class IdentityStore {
     // On Linux, use libsecret (available on all desktop distros).
     lOptions: LinuxOptions(),
     // On macOS, use the system Keychain.
-    mOptions: MacOsOptions(),
+    //
+    // usesDataProtectionKeychain is off because it requires entitlements
+    // that only a build signed with a real Apple Developer identity can
+    // carry. DeadDrop ships an ad-hoc-signed .app, so with the default
+    // (true) every keychain call fails and the device identity never
+    // loads — which is exactly how it failed on macOS 0.5.4.
+    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
   );
 
   final Sodium _sodium;
