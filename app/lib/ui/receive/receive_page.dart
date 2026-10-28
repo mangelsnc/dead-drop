@@ -354,13 +354,23 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   /// otherwise, in which case this leaves [ReceiveState.savedToVault]
   /// unset. The UI (`_ReceivePageState`) is responsible for getting the
   /// vault unlocked before calling this.
-  Future<void> saveToVault(VaultController vaultController) async {
-    if (state.fileBytes == null) return;
+  /// Returns whether the file actually reached the vault, so the caller
+  /// can tell the user. A silent failure here is the worst outcome
+  /// available: the file is gone from the screen and was never stored,
+  /// and the user has no way to know.
+  Future<bool> saveToVault(VaultController vaultController) async {
+    if (state.fileBytes == null) return false;
     final name = state.fileName ??
         'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
     final entry = await vaultController.saveFile(name, state.fileBytes!);
-    if (entry == null) return;
-    state = state.copyWith(savedToVault: true);
+    if (entry == null) {
+      state = state.copyWith(
+        error: 'Could not save to the vault — it is locked.',
+      );
+      return false;
+    }
+    state = state.copyWith(savedToVault: true, error: null);
+    return true;
   }
 
   /// Clears everything about the current transfer, keeping this device's
@@ -1076,7 +1086,18 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
       if (!unlocked) return;
     }
 
-    await notifier.saveToVault(vaultController);
+    final saved = await notifier.saveToVault(vaultController);
+    if (!context.mounted) return;
+    // Say so. The button disabling itself is too quiet a signal for an
+    // action whose whole point is that the file is now somewhere the user
+    // cannot see, and a failure showed nothing at all.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(saved
+            ? 'Saved to the vault.'
+            : 'Could not save to the vault.'),
+      ),
+    );
   }
 
   /// Shows a small modal asking for the vault passphrase, used when
