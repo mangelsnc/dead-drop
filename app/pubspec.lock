@@ -41,6 +41,30 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.1"
+  camera:
+    dependency: "direct main"
+    description:
+      name: camera
+      sha256: "4a0863bc142f6fbfdca19161205574fd8a8f00d4753b48d214c4dfbdcc534c51"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.12.2"
+  camera_android_camerax:
+    dependency: transitive
+    description:
+      name: camera_android_camerax
+      sha256: faf885ca8140f22df8dc05d1839afc702d0329dd9b0b2f0bc6f9b05f3f20e10c
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.6"
+  camera_avfoundation:
+    dependency: transitive
+    description:
+      name: camera_avfoundation
+      sha256: "971f7b4938ae761797dd667c078af92f1b6a1bb7760774c0cbcf9c9d4a14bdf1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.11.1"
   camera_desktop:
     dependency: "direct main"
     description:
@@ -57,6 +81,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.15.0"
+  camera_web:
+    dependency: transitive
+    description:
+      name: camera_web
+      sha256: "45063367478a53aa6f2d6e8a53b70fce3499f2b1e98d294c9e71c72bcd20ebf0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.5+7"
   characters:
     dependency: transitive
     description:
@@ -222,6 +254,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.0.0"
+  flutter_plugin_android_lifecycle:
+    dependency: transitive
+    description:
+      name: flutter_plugin_android_lifecycle
+      sha256: "3854fe5e3bff0b113c658f260b90c95dea17c92db0f2addeac2e343dd9969785"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.35"
   flutter_riverpod:
     dependency: "direct main"
     description:
@@ -384,14 +424,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.0"
-  mobile_scanner:
-    dependency: "direct main"
-    description:
-      name: mobile_scanner
-      sha256: "5a51ea79f0cf8293f616a5d08baae185b59b5e6bb24df01f2a63037ade0bade0"
-      url: "https://pub.dev"
-    source: hosted
-    version: "7.4.2"
   path:
     dependency: transitive
     description:
@@ -679,4 +711,4 @@ packages:
     version: "0.2.4"
 sdks:
   dart: ">=3.13.0 <4.0.0"
-  flutter: ">=3.41.0"
+  flutter: ">=3.44.0"

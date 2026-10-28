@@ -14,6 +14,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:flutter/foundation.dart';
@@ -44,6 +45,15 @@ class DesktopCameraException implements Exception {
 class DesktopCameraScanner {
   DesktopCameraScanner({CameraPlatform? platform})
       : _platform = platform ?? CameraPlatform.instance;
+
+  /// Whether this is a hand-held device, which changes which camera to
+  /// open and at what resolution.
+  static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+
+  /// The lens to prefer. A phone points its back camera at the other
+  /// screen; everything else has one camera and takes it.
+  static CameraLensDirection get _preferredLens =>
+      _isMobile ? CameraLensDirection.back : CameraLensDirection.front;
 
   final CameraPlatform _platform;
 
@@ -187,15 +197,30 @@ class DesktopCameraScanner {
       );
     }
 
+    // On a phone the back camera is the one pointed at the other screen;
+    // a laptop or an external webcam has no "back" and takes whatever is
+    // there. Picking the first camera unconditionally gave a phone its
+    // selfie camera.
+    final preferred = cameras.firstWhere(
+      (c) => c.lensDirection == _preferredLens,
+      orElse: () => cameras.first,
+    );
+
     try {
-      // Low resolution on purpose. A QR fills the frame, the decoder does
-      // not need detail, and fewer pixels is less work per frame. It also
-      // sidesteps a camera_desktop limitation: on Linux, initialising
-      // above low can fail outright.
+      // Resolution is a trade, and it falls differently per platform.
+      //
+      // Desktop uses low: a webcam fills the frame with the code, fewer
+      // pixels is less work, and camera_desktop on Linux can fail to
+      // initialise above low outright.
+      //
+      // A phone is held further back and its sensor is much larger, so
+      // low there resolves a dense code poorly. Medium is the smallest
+      // setting that reads one reliably at arm's length.
       final id = await _platform.createCameraWithSettings(
-        cameras.first,
-        const MediaSettings(
-          resolutionPreset: ResolutionPreset.low,
+        preferred,
+        MediaSettings(
+          resolutionPreset:
+              _isMobile ? ResolutionPreset.medium : ResolutionPreset.low,
           enableAudio: false,
         ),
       );

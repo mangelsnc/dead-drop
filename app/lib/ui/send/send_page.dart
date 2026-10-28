@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium/sodium.dart';
 
@@ -1114,27 +1112,7 @@ class _KeyScanPage extends StatefulWidget {
 }
 
 class _KeyScanPageState extends State<_KeyScanPage> {
-  late final MobileScannerController _controller;
   bool _found = false;
-
-  @override
-  void initState() {
-    super.initState();
-    if (usesDesktopScanner) return;
-    // macOS has mobile_scanner but no "back" camera concept.
-    _controller = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: Platform.isMacOS ? CameraFacing.front : CameraFacing.back,
-    );
-  }
-
-  @override
-  void dispose() {
-    // Only created on the mobile_scanner path; disposing an uninitialised
-    // late field would throw.
-    if (!usesDesktopScanner) _controller.dispose();
-    super.dispose();
-  }
 
   /// Handles one decoded QR string, from either camera implementation.
   ///
@@ -1156,45 +1134,7 @@ class _KeyScanPageState extends State<_KeyScanPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (usesDesktopScanner)
-            DesktopScannerView(onDetect: _onRaw)
-          else
-            MobileScanner(
-            controller: _controller,
-            onDetect: (capture) {
-              if (_found) return;
-              for (final barcode in capture.barcodes) {
-                final raw = barcode.rawValue;
-                if (raw == null) continue;
-                _onRaw(raw);
-              }
-            },
-            errorBuilder: (context, error) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.videocam_off,
-                          color: DeadDropColors.error, size: 48),
-                      const SizedBox(height: 16),
-                      Text(
-                        _mapScannerError(error),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: DeadDropColors.error),
-                      ),
-                      const SizedBox(height: 16),
-                      OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Go back'),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
+          DesktopScannerView(onDetect: _onRaw),
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
@@ -1216,22 +1156,6 @@ class _KeyScanPageState extends State<_KeyScanPage> {
     );
   }
 
-  static String _mapScannerError(MobileScannerException error) {
-    return switch (error.errorCode) {
-      MobileScannerErrorCode.controllerUninitialized =>
-        'Camera is not ready yet. Please wait.',
-      MobileScannerErrorCode.permissionDenied =>
-        'Camera permission denied. Check your system settings and allow '
-            'camera access for DeadDrop.',
-      MobileScannerErrorCode.unsupported =>
-        'No camera detected on this device.',
-      MobileScannerErrorCode.controllerAlreadyInitialized =>
-        'Camera is already in use by another application. '
-            'Close it and try again.',
-      _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
-          'Try closing other apps that use the camera.',
-    };
-  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium/sodium.dart';
 
@@ -23,8 +21,6 @@ import '../passphrase_field.dart';
 import '../desktop_scanner_view.dart';
 import '../../src/camera_measurement_store.dart';
 import '../../src/capability_hint.dart';
-import '../../src/mobile_camera_measure.dart';
-import '../../src/desktop_scanner.dart';
 import '../vault/vault_controller.dart';
 
 /// State for the receive flow.
@@ -438,7 +434,6 @@ String displayPath(String raw) {
 }
 
 class _ReceivePageState extends ConsumerState<ReceivePage> {
-  MobileScannerController? _scannerController;
 
   /// Whether the receiver public key is shown as text instead of a QR code.
   /// The text view helps when the sender cannot scan (no camera, small or
@@ -458,12 +453,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   /// reception. Null on a first run, which simply means no hint.
   EmissionHint? _hint;
 
-  /// Measures the camera on the `MobileScanner` path, where the scanner
-  /// hands this app detections rather than frames. The desktop view
-  /// measures itself and reports through [_rememberMeasurement]; this is
-  /// the same job for android, ios and macos, which otherwise sent a
-  /// handshake carrying no hint at all and left every sender on defaults.
-  final MobileCameraMeasure _mobileMeasure = MobileCameraMeasure();
 
   @override
   void initState() {
@@ -487,24 +476,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     setState(() => _hint = suggestEmission(stored.capability));
   }
 
-  /// What to show under the mobile camera while it is reading.
-  ///
-  /// Reads per second, not the desktop view's share-of-frames: on this
-  /// path a frame that failed to decode is never reported, so the
-  /// denominator does not exist. Saying "60% of frames" here would be a
-  /// number with nothing behind it.
-  String _mobileScanStatus() {
-    final perSecond = _mobileMeasure.decodesPerSecond;
-    if (perSecond == null) {
-      final seen = _mobileMeasure.detections;
-      return seen == 0
-          ? 'Point at the other screen'
-          : 'Reading… $seen codes so far';
-    }
-    if (perSecond >= 8) return 'Good — hold it there';
-    if (perSecond >= 4) return 'Reading — try holding a little steadier';
-    return 'Slow — move closer, or improve the lighting';
-  }
 
   /// Remembers what the camera managed, for the next handshake.
   ///
@@ -692,86 +663,10 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: usesDesktopScanner
-                              ? DesktopScannerView(
-                                  onDetect: notifier.processRawQr,
-                                  onMeasured: _rememberMeasurement,
-                                )
-                              : Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    MobileScanner(
-                            controller: _scannerController,
-                            onDetect: (capture) {
-                              final size = capture.size;
-                              if (size.width > 0 && size.height > 0) {
-                                _mobileMeasure.recordDetection(
-                                  width: size.width.round(),
-                                  height: size.height.round(),
-                                );
-                                final measured = _mobileMeasure.capability;
-                                if (measured != null) {
-                                  _rememberMeasurement(measured);
-                                }
-                              }
-                              for (final barcode in capture.barcodes) {
-                                final raw = barcode.rawValue;
-                                if (raw != null) {
-                                  notifier.processRawQr(raw);
-                                }
-                              }
-                            },
-                            errorBuilder: (context, error) {
-                              return Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.videocam_off,
-                                          color: DeadDropColors.error, size: 48),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        _mapScannerError(error),
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                            color: DeadDropColors.error),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
+                          child: DesktopScannerView(
+                            onDetect: notifier.processRawQr,
+                            onMeasured: _rememberMeasurement,
                           ),
-                                    // Aim feedback, the mobile counterpart of
-                                    // the desktop quality bar. It reports reads
-                                    // per second rather than a share of frames
-                                    // read: MobileScanner hands this app only
-                                    // successful detections, so the frames that
-                                    // failed cannot be counted and a percentage
-                                    // here would be invented.
-                                    Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Container(
-                                        margin: const EdgeInsets.all(8),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 8),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.65),
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          _mobileScanStatus(),
-                                          style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -1124,41 +1019,16 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     return result ?? false;
   }
 
-  void _startScanner() {
-    // Each scan is measured on its own. Carrying the previous one forward
-    // would average a reading taken in a different room, at a different
-    // distance, and the result decides what the next sender is told.
-    _mobileMeasure.reset();
-    // On desktop, use the default camera (no "back" facing concept).
-    final isDesktop =
-        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
-    _scannerController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
-    );
-  }
+  /// Scanning lifecycle hooks.
+  ///
+  /// [DesktopScannerView] owns the camera: it opens one on mount and
+  /// releases it on dispose, and measures it while it reads. These remain
+  /// as the page's own start/stop points so the call sites stay readable
+  /// and a future need for per-scan state has somewhere to live.
+  void _startScanner() {}
 
-  void _stopScanner() {
-    _scannerController?.dispose();
-    _scannerController = null;
-  }
+  void _stopScanner() {}
 
-  static String _mapScannerError(MobileScannerException error) {
-    return switch (error.errorCode) {
-      MobileScannerErrorCode.controllerUninitialized =>
-        'Camera is not ready yet. Please wait.',
-      MobileScannerErrorCode.permissionDenied =>
-        'Camera permission denied. Check your system settings and allow '
-            'camera access for DeadDrop.',
-      MobileScannerErrorCode.unsupported =>
-        'No camera detected on this device.',
-      MobileScannerErrorCode.controllerAlreadyInitialized =>
-        'Camera is already in use by another application. '
-            'Close it and try again.',
-      _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
-          'Try closing other apps that use the camera.',
-    };
-  }
 }
 
 class _StepCard extends StatelessWidget {
