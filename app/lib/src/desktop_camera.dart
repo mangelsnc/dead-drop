@@ -103,8 +103,12 @@ class DesktopCameraScanner {
   String get debugGeometry {
     final w = _previewWidth, h = _previewHeight;
     if (w == null || h == null) return 'geometry: unknown';
+    final fps = measuredFps;
     return 'sensor ${w}x$h · rot ${_sensorOrientation ?? '?'}°'
-        ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}';
+        ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}\n'
+        'cam ${fps == null ? '?' : fps.toStringAsFixed(1)} fps'
+        ' · seen $_framesSeen · read $_framesDecoded'
+        ' · busy $_framesWhileBusy';
   }
 
   int? _sensorOrientation;
@@ -310,8 +314,19 @@ class DesktopCameraScanner {
         );
   }
 
+  /// Frames the camera delivered while a decode was already running.
+  ///
+  /// The difference between "the camera is slow" and "we cannot keep up
+  /// with it". If this climbs while [_framesSeen] crawls, the decoder is
+  /// the bottleneck; if both crawl, the camera is not delivering.
+  int _framesWhileBusy = 0;
+
   Future<void> _onFrame(CameraImageData frame) async {
-    if (_decoding || _payloads.isClosed) return;
+    if (_decoding) {
+      _framesWhileBusy++;
+      return;
+    }
+    if (_payloads.isClosed) return;
     _decoding = true;
     _framesSeen++;
     _firstFrameAt ??= DateTime.now();
