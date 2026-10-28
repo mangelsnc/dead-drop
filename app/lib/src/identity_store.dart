@@ -37,14 +37,20 @@ class IdentityStore {
   final String _storageKey;
   Identity? _cached;
 
-  /// [environmentSlot] scopes the identity to a vault environment (real or
-  /// decoy) so each one gets its own signing identity and cannot be
-  /// correlated with the others. Leaving it `null` is the no-vault case and
-  /// keeps the original, unsuffixed storage key byte-for-byte — there are no
-  /// vaults in the wild yet, so existing installs must see no behaviour
-  /// change at all.
+  /// [environmentSlot] scopes the identity so the decoy signs as someone
+  /// else: an attacker inside it must not be able to read the real
+  /// environment's fingerprint, or every file the victim ever sent becomes
+  /// attributable to the same install.
+  ///
+  /// The real environment (slot 0) and the no-vault case share one
+  /// identity, because they are one device presenting itself to the same
+  /// people. Giving them separate keys changed this device's fingerprint
+  /// depending on whether the vault happened to be open, so the person
+  /// receiving from it had to re-confirm the same sender as a stranger.
+  /// Only the decoy gets an identity of its own, which is the separation
+  /// the threat model asks for.
   IdentityStore(this._sodium, {int? environmentSlot})
-      : _storageKey = environmentSlot == null
+      : _storageKey = (environmentSlot == null || environmentSlot == 0)
             ? _unscopedStorageKey
             : '${_unscopedStorageKey}_env$environmentSlot';
 

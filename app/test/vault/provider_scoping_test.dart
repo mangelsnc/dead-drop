@@ -145,11 +145,17 @@ void main() {
     expect(fakeStorage.data.keys, isNot(anyElement(contains('_env'))));
   });
 
-  test(
-      'unlocking slot 0 (real) yields an identity different from the '
-      'unscoped one', () async {
-    // Establish the unscoped (no-vault) identity first, the way an existing
-    // install that never opens the vault would have one.
+  test('unlocking slot 0 (real) keeps the same identity as no vault at all',
+      () async {
+    // The coercion hole this file was written for is the decoy seeing the
+    // real fingerprint, which the slot 1 test below still pins. Slot 0 and
+    // the no-vault case are not that: they are one device presenting
+    // itself to the same people.
+    //
+    // Scoping them apart was reported as a bug from a real transfer — this
+    // device's fingerprint changed depending on whether the vault happened
+    // to be open, so correspondents had to confirm the same sender twice,
+    // and the known-senders list went with it.
     final unscopedStore = container.read(identityStoreProvider);
     final unscopedIdentity = await unscopedStore.loadOrGenerate();
 
@@ -160,9 +166,9 @@ void main() {
     final slot0Store = container.read(identityStoreProvider);
     final slot0Identity = await slot0Store.loadOrGenerate();
 
-    expect(
-        slot0Identity.fingerprint, isNot(equals(unscopedIdentity.fingerprint)));
-    expect(fakeStorage.data.keys, contains('deaddrop_identity_ed25519_env0'));
+    expect(slot0Identity.fingerprint, equals(unscopedIdentity.fingerprint));
+    expect(fakeStorage.data.keys,
+        isNot(contains('deaddrop_identity_ed25519_env0')));
   });
 
   test(
