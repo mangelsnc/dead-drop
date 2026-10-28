@@ -70,6 +70,24 @@ class DesktopCameraScanner {
   double? _aspectRatio;
   double? get aspectRatio => _aspectRatio;
 
+  /// The ratio of the image as it appears on screen.
+  ///
+  /// Distinct from [aspectRatio], which describes the sensor. On Android
+  /// the sensor is mounted sideways — a phone's rear camera reports 90 or
+  /// 270 degrees — and `buildPreview` turns the image to match the
+  /// screen, so what the user sees is the sensor's ratio inverted.
+  ///
+  /// This is the one to lay the preview out with. Using the sensor's
+  /// ratio instead put a portrait image into a landscape box and
+  /// stretched it: reported from a phone as `sensor 720x480 · rot 90° ·
+  /// ratio 1.50`, where the displayed image is really 0.67.
+  double? get displayAspectRatio {
+    final r = _aspectRatio;
+    if (r == null) return null;
+    final rotated = (_sensorOrientation ?? 0) % 180 != 0;
+    return rotated ? 1 / r : r;
+  }
+
   /// Capture resolution, once the backend has published it.
   ///
   /// Kept alongside [aspectRatio] because the two answer different
@@ -87,7 +105,7 @@ class DesktopCameraScanner {
     final w = _previewWidth, h = _previewHeight;
     if (w == null || h == null) return 'geometry: unknown';
     return 'sensor ${w}x$h · rot ${_sensorOrientation ?? '?'}°'
-        ' · ratio ${(_aspectRatio ?? 0).toStringAsFixed(2)}';
+        ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}';
   }
 
   int? _sensorOrientation;

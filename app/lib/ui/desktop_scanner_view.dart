@@ -142,7 +142,7 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
     // Stretching is still not an option. A squashed QR is harder to aim
     // at, and the decoder works on the frame rather than this widget, so
     // distortion here would mislead without helping.
-    final ratio = _scanner.aspectRatio;
+    final ratio = _scanner.displayAspectRatio;
 
     return Stack(
       fit: StackFit.expand,
@@ -168,9 +168,12 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
             fit: BoxFit.cover,
             clipBehavior: Clip.hardEdge,
             child: SizedBox(
-              // Any size works: FittedBox scales from it, and the
-              // preview inside keeps its own proportions. What matters
-              // is that both dimensions are real, so nothing collapses.
+              // The box must carry the ratio of the image AS DISPLAYED.
+              // A camera preview is a Texture with no intrinsic size, so
+              // it does not keep any shape of its own — it fills whatever
+              // box it is given, and a wrong one stretches it. Sizing
+              // this from the sensor's ratio put a portrait image into a
+              // landscape box, which is the widening that was reported.
               width: 1000,
               height: ratio == null ? 1000 : 1000 / ratio,
               child: _scanner.preview(),

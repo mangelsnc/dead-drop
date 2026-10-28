@@ -354,6 +354,40 @@ void main() {
       expect(scanner.aspectRatio, closeTo(640 / 480, 0.001));
     });
 
+    test('the displayed ratio is the inverse on a sideways sensor', () async {
+      // The exact case reported from a phone, whose own diagnostics read
+      // "sensor 720x480 · rot 90°". The sensor is landscape; what the
+      // plugin paints is portrait, and laying the preview out with the
+      // sensor's 1.50 squashed the image into a landscape box.
+      final scanner = DesktopCameraScanner(
+        platform: _FakeCameraPlatform(cameras: const [
+          CameraDescription(
+            name: 'rear',
+            lensDirection: CameraLensDirection.front,
+            sensorOrientation: 90,
+          ),
+        ]),
+      );
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.aspectRatio, closeTo(640 / 480, 0.001),
+          reason: 'the sensor is what it is');
+      expect(scanner.displayAspectRatio, closeTo(480 / 640, 0.001),
+          reason: 'but the preview is turned, and layout follows that');
+    });
+
+    test('an upright sensor displays at its own ratio', () async {
+      final scanner = DesktopCameraScanner(platform: _FakeCameraPlatform());
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.displayAspectRatio, closeTo(640 / 480, 0.001),
+          reason: 'a webcam at 0 degrees is not rotated by anyone');
+    });
+
     test('a sideways sensor still reports the sensor ratio', () async {
       // Deliberately NOT rotated here. On Android buildPreview wraps the
       // texture in CameraX's RotatedPreviewDelegate, so the plugin has
