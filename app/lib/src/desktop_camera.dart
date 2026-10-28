@@ -231,7 +231,21 @@ class DesktopCameraScanner {
       try {
         _initialised = _platform.onCameraInitialized(id).listen((event) {
           if (event.previewHeight > 0) {
-            _aspectRatio = event.previewWidth / event.previewHeight;
+            // previewWidth/Height describe the SENSOR, which on a phone
+            // is mounted sideways: the rear camera usually reports 90 or
+            // 270 degrees, and the plugin rotates the preview to match
+            // the screen. The displayed image is then taller than wide,
+            // so using the sensor's ratio directly stretched everything
+            // horizontally — reported from a phone as a squashed laptop
+            // screen filling the box.
+            final rotated = preferred.sensorOrientation % 180 != 0;
+            final w = rotated ? event.previewHeight : event.previewWidth;
+            final h = rotated ? event.previewWidth : event.previewHeight;
+            _aspectRatio = w / h;
+            // The measurement keeps the sensor's own numbers: how many
+            // pixels the camera captures is what decides whether it can
+            // resolve a dense code, and that does not change with how
+            // the image is turned for display.
             _previewWidth = event.previewWidth.round();
             _previewHeight = event.previewHeight.round();
             if (!_activity.isClosed) _activity.add(null);

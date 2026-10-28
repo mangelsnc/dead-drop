@@ -343,4 +343,59 @@ void main() {
       expect(scanner.preview().key, const Key('preview'));
     });
   });
+
+  group('aspect ratio and sensor rotation', () {
+    test('an upright sensor reports its own ratio', () async {
+      final scanner = DesktopCameraScanner(platform: _FakeCameraPlatform());
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.aspectRatio, closeTo(640 / 480, 0.001));
+    });
+
+    test('a sideways sensor reports the ratio as displayed', () async {
+      // A phone's rear camera is mounted at 90 degrees: the sensor is
+      // 640x480 but the preview the user sees is 480x640. Reported from
+      // a phone — using the sensor ratio directly stretched everything
+      // horizontally, so a laptop screen looked squashed.
+      final scanner = DesktopCameraScanner(
+        platform: _FakeCameraPlatform(cameras: const [
+          CameraDescription(
+            name: 'rear',
+            lensDirection: CameraLensDirection.front,
+            sensorOrientation: 90,
+          ),
+        ]),
+      );
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.aspectRatio, closeTo(480 / 640, 0.001),
+          reason: 'the preview is rotated, so the displayed ratio inverts');
+    });
+
+    test('rotation does not change the measured resolution', () async {
+      // suggestEmission reasons about how many pixels the camera
+      // captures, which is a property of the sensor and not of how the
+      // image is turned for display.
+      final scanner = DesktopCameraScanner(
+        platform: _FakeCameraPlatform(cameras: const [
+          CameraDescription(
+            name: 'rear',
+            lensDirection: CameraLensDirection.front,
+            sensorOrientation: 270,
+          ),
+        ]),
+      );
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.aspectRatio, closeTo(480 / 640, 0.001));
+      expect(scanner.capability?.width ?? 640, 640,
+          reason: 'the sensor captured 640 wide however it is displayed');
+    });
+  });
 }
