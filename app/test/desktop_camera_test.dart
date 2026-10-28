@@ -260,9 +260,12 @@ void main() {
       expect(seen, ['DD1.after-blank']);
     });
 
-    test('does not filter repeated payloads', () async {
-      // The sender repeats frames by design; deciding what is new is the
-      // receiver's job. Filtering here would drop a legitimate repeat.
+    test('drops a code read twice in a row', () async {
+      // The camera runs far faster than the sender's display, so it
+      // captures each code several times over. Reported from a phone:
+      // 3,332 frames fed to the decoder for 49 chunks, where the code
+      // needs about 1.15 — most of that work was the same frame again,
+      // and it starved the camera of capacity for new ones.
       final platform = _FakeCameraPlatform();
       final scanner = DesktopCameraScanner(platform: platform);
       addTearDown(scanner.dispose);
@@ -276,7 +279,28 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 150));
       }
 
-      expect(seen, ['DD1.repeat', 'DD1.repeat']);
+      expect(seen, ['DD1.repeat']);
+    });
+
+    test('passes a repeat on once a different code came between', () async {
+      // Only the immediately previous payload is suppressed. The sender
+      // re-emits earlier frames by design — that is how a receiver which
+      // missed one ever gets it — so a longer memory would drop frames
+      // the transfer actually needs.
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      final seen = <String>[];
+      scanner.payloads.listen(seen.add);
+
+      for (final payload in ['DD1.a', 'DD1.b', 'DD1.a']) {
+        platform.frames.add(_frame(payload));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      }
+
+      expect(seen, ['DD1.a', 'DD1.b', 'DD1.a']);
     });
 
     test('surfaces a camera that dies mid-scan', () async {
