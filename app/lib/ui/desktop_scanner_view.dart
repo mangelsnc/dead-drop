@@ -143,22 +143,47 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
     // at, and the decoder works on the frame rather than this widget, so
     // distortion here would mislead without helping.
     final ratio = _scanner.aspectRatio;
-    final preview = ratio == null
-        ? _scanner.preview()
-        : FittedBox(
-            fit: BoxFit.cover,
-            clipBehavior: Clip.hardEdge,
-            child: SizedBox(
-              width: ratio,
-              height: 1,
-              child: _scanner.preview(),
-            ),
-          );
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        ClipRect(child: Center(child: preview)),
+        // Sized against the box this actually occupies rather than
+        // wrapped in a FittedBox. A FittedBox needs its child to have
+        // real dimensions to scale from, and a camera preview reports
+        // none — handing it a 1px-tall SizedBox made the preview vanish
+        // entirely on Android.
+        ClipRect(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (ratio == null) return _scanner.preview();
+
+              // Cover: match the box on whichever axis leaves no gap, and
+              // let the other overflow past the clip. Fitting instead
+              // left black bands above and below on a phone, whose sensor
+              // is far taller than this wide box, and shrank the image —
+              // so the QR got smaller the more space was wasted. The
+              // cropped edges hold nothing; the code is in the middle,
+              // which is where the user points it.
+              final boxRatio = constraints.maxWidth / constraints.maxHeight;
+              final width = ratio > boxRatio
+                  ? constraints.maxHeight * ratio
+                  : constraints.maxWidth;
+              final height = ratio > boxRatio
+                  ? constraints.maxHeight
+                  : constraints.maxWidth / ratio;
+
+              return OverflowBox(
+                maxWidth: width,
+                maxHeight: height,
+                child: SizedBox(
+                  width: width,
+                  height: height,
+                  child: _scanner.preview(),
+                ),
+              );
+            },
+          ),
+        ),
         // How well the camera is placed, as a bar rather than a number.
         //
         // Aim, distance and focus all show up in one figure: the share of
