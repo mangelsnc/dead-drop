@@ -5,41 +5,54 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-10-28
+
+### Added
+
+- The real app icon, on all five platforms
+
 ## [0.5.5] — 2026-10-28
 
 ### Fixed
 
 - *(macos)* The app could not reach the camera, files or the keychain
+
 ## [0.5.4] — 2026-10-27
 
 ### Miscellaneous
 
 - Prove the Linux packaging is deterministic instead of asserting it
+
 ## [0.5.3] — 2026-10-27
 
 ### Documentation
 
 - Describe the artifacts the project actually publishes
+
 ## [0.5.2] — 2026-10-27
 
 ### Fixed
 
 - *(ci)* Package the Linux build reproducibly, as the docs already claim
+
 ## [0.5.1] — 2026-10-27
 
 ### Fixed
 
 - *(ci)* Make the Android job survive its first two failures
+
 ## [0.5.0] — 2026-10-27
 
 ### Added
 
 - *(ci)* Ship a signed Android APK with every release
+
 ## [0.4.0] — 2026-10-27
 
 ### Added
 
 - *(ci)* Tag releases to a written policy, and actually publish them
+
 ## [0.3.0] — 2026-10-27
 
 ### Added
@@ -162,6 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - Integration tests — crypto, fountain, frames, E2E transfers (1KB/100KB/1MB)
+
 ## [0.1.0] — 2026-10-17
 
 ### Added
@@ -194,4 +208,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LICENSE MIT (requisito no negociable del reto)
 - Add CHANGELOG.md (SemVer + Keep a Changelog)
 - Add reproducible builds documentation
+
 
