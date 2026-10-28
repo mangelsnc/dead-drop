@@ -227,16 +227,111 @@ class _LockedViewState extends ConsumerState<_LockedView> {
 
 /// Shown once an environment is unlocked: its entry list, whichever
 /// environment that happens to be.
-class _UnlockedView extends ConsumerWidget {
+/// How the file list is ordered.
+enum _VaultSort {
+  nameAsc('Name A-Z'),
+  nameDesc('Name Z-A'),
+  newestFirst('Newest first'),
+  oldestFirst('Oldest first');
+
+  const _VaultSort(this.label);
+  final String label;
+}
+
+class _UnlockedView extends ConsumerStatefulWidget {
   const _UnlockedView();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_UnlockedView> createState() => _UnlockedViewState();
+}
+
+class _UnlockedViewState extends ConsumerState<_UnlockedView> {
+  final TextEditingController _search = TextEditingController();
+  _VaultSort _sort = _VaultSort.newestFirst;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// Filters and orders the entries for display.
+  ///
+  /// Done in memory, over the entries the controller already decrypted.
+  /// Nothing here touches the disk or the store, so searching cannot
+  /// reveal anything about the environment that is open — and the decoy
+  /// gets exactly the same controls, because a search box present in one
+  /// and absent in the other would be a tell.
+  List<VaultEntry> _visible(List<VaultEntry> entries) {
+    final query = _search.text.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? [...entries]
+        : entries
+            .where((e) => e.name.toLowerCase().contains(query))
+            .toList();
+
+    filtered.sort(switch (_sort) {
+      _VaultSort.nameAsc => (a, b) =>
+          a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      _VaultSort.nameDesc => (a, b) =>
+          b.name.toLowerCase().compareTo(a.name.toLowerCase()),
+      _VaultSort.newestFirst => (a, b) => b.addedAt.compareTo(a.addedAt),
+      _VaultSort.oldestFirst => (a, b) => a.addedAt.compareTo(b.addedAt),
+    });
+    return filtered;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(vaultControllerProvider);
     final theme = Theme.of(context);
+    final visible = _visible(state.entries);
 
     return Column(
       children: [
+        // Search and sort. Shown whenever there is more than one file —
+        // below that they are clutter — and identical in both
+        // environments.
+        if (state.entries.length > 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _search,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Search files',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      suffixIcon: _search.text.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              tooltip: 'Clear',
+                              onPressed: () => setState(_search.clear),
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                PopupMenuButton<_VaultSort>(
+                  initialValue: _sort,
+                  tooltip: 'Sort',
+                  icon: const Icon(Icons.sort),
+                  onSelected: (value) => setState(() => _sort = value),
+                  itemBuilder: (context) => [
+                    for (final option in _VaultSort.values)
+                      PopupMenuItem(
+                        value: option,
+                        child: Text(option.label),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: state.entries.isEmpty
               ? Center(
@@ -263,13 +358,26 @@ class _UnlockedView extends ConsumerWidget {
                     ),
                   ),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: state.entries.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) =>
-                      _EntryTile(entry: state.entries[index]),
-                ),
+              : visible.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'Nothing matches "${_search.text.trim()}".',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: DeadDropColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: visible.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) =>
+                          _EntryTile(entry: visible[index]),
+                    ),
         ),
         Padding(
           padding: const EdgeInsets.all(16),
@@ -391,7 +499,7 @@ class _EntryTile extends ConsumerWidget {
         bytes: bytes,
       );
       if (chosen == null || !context.mounted) return; // cancelled
-      _say(context, 'Saved outside the vault.');
+      _say(context, 'Saved outside the vault.', ok: true);
     } catch (e) {
       // A failed export must say so rather than look like a cancel: the
       // user would otherwise believe a file is on disk when it is not.
@@ -446,9 +554,27 @@ class _EntryTile extends ConsumerWidget {
     await ref.read(vaultControllerProvider.notifier).deleteFile(entry.id);
   }
 
-  static void _say(BuildContext context, String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+  /// Shows a message that is actually visible.
+  ///
+  /// The default snack bar is close enough to this app's background on
+  /// macOS to be missed entirely, so these carry a colour: green when
+  /// something worked, red when it did not.
+  static void _say(BuildContext context, String message,
+      {bool ok = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        backgroundColor: ok ? DeadDropColors.success : DeadDropColors.error,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: ok ? 3 : 6),
+      ),
+    );
   }
 
   @override

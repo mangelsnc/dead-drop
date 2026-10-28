@@ -1093,9 +1093,22 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     // cannot see, and a failure showed nothing at all.
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(saved
-            ? 'Saved to the vault.'
-            : 'Could not save to the vault.'),
+        content: Text(
+          saved ? 'Saved to the vault.' : 'Could not save to the vault.',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        // Coloured, not the default surface. On macOS the default snack
+        // bar is nearly the same shade as this app's background and the
+        // confirmation went unnoticed — which for an action whose whole
+        // point is that the file is now somewhere invisible is the one
+        // message that must land.
+        backgroundColor:
+            saved ? DeadDropColors.success : DeadDropColors.error,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: saved ? 3 : 6),
       ),
     );
   }
