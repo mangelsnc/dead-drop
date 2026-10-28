@@ -5,6 +5,20 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-10-28
+
+### Added
+
+- *(vault)* Send a file from the vault, and say when one is saved
+
+### Fixed
+
+- *(protocol)* The file name survives, and a decoy needs its own passphrase
+
+### Other
+
+- Five more reports from device testing
+
 ## [0.7.0] — 2026-10-28
 
 ### Added
