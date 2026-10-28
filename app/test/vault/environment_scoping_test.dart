@@ -98,9 +98,15 @@ void main() {
       final identityB = await storeB.loadOrGenerate();
 
       expect(identityA.fingerprint, isNot(equals(identityB.fingerprint)));
-      // And each was persisted under its own key.
-      expect(fakeStorage.data.keys,
-          containsAll(['deaddrop_identity_ed25519_env0', 'deaddrop_identity_ed25519_env1']));
+      // Each under its own key. Slot 0 deliberately uses the unscoped one:
+      // the real environment and the no-vault case are the same device
+      // presenting itself to the same people, so they must not show two
+      // different fingerprints depending on whether the vault is open.
+      expect(
+        fakeStorage.data.keys,
+        containsAll(
+            ['deaddrop_identity_ed25519', 'deaddrop_identity_ed25519_env1']),
+      );
     });
 
     test('the no-vault identity keeps the existing storage key', () async {
@@ -137,6 +143,35 @@ void main() {
       expect(await storeA.isKnown('aaaaaaaaaaaaaaaa'), isTrue);
       expect(await storeB.isKnown('aaaaaaaaaaaaaaaa'), isFalse);
       expect(await storeB.count, equals(0));
+    });
+
+    test('a sender accepted before unlocking is still known afterwards',
+        () async {
+      // Reported from a real transfer: a sender already in the address
+      // book asked for confirmation again. The known-senders list was
+      // scoped to the vault slot, so accepting someone with no vault open
+      // wrote one list and opening the real vault read a different one —
+      // the same person, twice, as a stranger both times.
+      //
+      // The decoy still gets its own list; that isolation is the point of
+      // the feature. The real environment and the no-vault case are the
+      // same person's address book and must not diverge.
+      final beforeUnlock = TofuStore();
+      await beforeUnlock.markKnown('cccccccccccccccc', name: 'Lia');
+
+      final afterUnlock = TofuStore(environmentSlot: 0);
+      expect(await afterUnlock.isKnown('cccccccccccccccc'), isTrue);
+      expect(await afterUnlock.nameFor('cccccccccccccccc'), 'Lia');
+    });
+
+    test('the decoy still cannot see the real address book', () async {
+      final real = TofuStore(environmentSlot: 0);
+      await real.markKnown('dddddddddddddddd', name: 'Karim');
+
+      final decoy = TofuStore(environmentSlot: 1);
+      expect(await decoy.isKnown('dddddddddddddddd'), isFalse,
+          reason: 'a populated sender list in the decoy would be a tell');
+      expect(await decoy.count, equals(0));
     });
 
     test('the no-vault TOFU store keeps the existing storage key', () async {

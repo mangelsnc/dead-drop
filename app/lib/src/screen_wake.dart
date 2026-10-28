@@ -28,7 +28,16 @@ import 'package:flutter/services.dart';
 /// MainActivity.kt and AppDelegate.swift respectively.
 const MethodChannel _channel = MethodChannel('dev.deaddrop/screen_wake');
 
-bool get _supported => Platform.isAndroid || Platform.isIOS;
+/// Overrides the platform check in tests.
+///
+/// `Platform.isAndroid` reads dart:io, which a widget test cannot fake, so
+/// without this seam the lifecycle these functions implement could only be
+/// verified by hand on a phone — and it already regressed once that way.
+@visibleForTesting
+bool? debugSupportedOverride;
+
+bool get _supported =>
+    debugSupportedOverride ?? (Platform.isAndroid || Platform.isIOS);
 
 /// Whether the wakelock is currently believed to be held. Tracked so a
 /// double release cannot leave the screen pinned on, and so [isHeld] can be
@@ -78,4 +87,5 @@ Future<void> allowScreenSleep() async {
 @visibleForTesting
 void debugResetScreenWake() {
   _held = false;
+  debugSupportedOverride = null;
 }
