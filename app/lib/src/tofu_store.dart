@@ -44,11 +44,16 @@ class TofuStore {
   /// (real or decoy). Without scoping, opening the decoy would show the
   /// real environment's TOFU history — a populated sender list next to a
   /// still-empty decoy file list (or vice versa) is internally incoherent
-  /// and a tell to an attacker. `null` is the no-vault case and keeps the
-  /// original, unsuffixed storage key byte-for-byte — there are no vaults
-  /// in the wild yet, so existing installs must see no behaviour change.
+  /// and a tell to an attacker.
+  ///
+  /// The real environment (slot 0) and the no-vault case share one list,
+  /// because they are one person's address book. Scoping them apart meant
+  /// a sender accepted with the vault closed came back as a stranger once
+  /// it was open, which is what a user reported. Only the decoy gets a
+  /// list of its own, which is the isolation the threat model actually
+  /// asks for.
   TofuStore({int? environmentSlot})
-      : _storageKey = environmentSlot == null
+      : _storageKey = (environmentSlot == null || environmentSlot == 0)
             ? _unscopedStorageKey
             : '${_unscopedStorageKey}_env$environmentSlot';
 
