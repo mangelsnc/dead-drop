@@ -428,9 +428,25 @@ class VaultController extends StateNotifier<VaultState>
     }
 
     final slots = await store.readSlots();
+
+    // A decoy that shares a passphrase with another environment can never
+    // be opened: tryUnlock returns the first slot that matches, so slot 0
+    // always wins and the decoy's files are stranded behind a passphrase
+    // that reaches somewhere else. The user would be left believing they
+    // have coercion resistance they do not have, which is worse than
+    // having no decoy at all — so this refuses rather than writes.
+    if (tryUnlock(sodium, passphrase, slots.cast()).ok) {
+      state = state.copyWith(
+        error: 'That passphrase already opens an environment. A decoy needs '
+            'its own, or it could never be opened.',
+      );
+      return;
+    }
+
     final dataKey = newDataKey(sodium);
     final wrapped = wrapDataKey(sodium, passphrase, dataKey);
     await store.writeSlots([slots[0], wrapped]);
+    state = state.copyWith(clearError: true);
   }
 
   /// Seals [bytes] under [name] into the currently-open environment.
