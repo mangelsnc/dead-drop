@@ -23,6 +23,7 @@ import '../passphrase_field.dart';
 import '../desktop_scanner_view.dart';
 import '../../src/camera_measurement_store.dart';
 import '../../src/capability_hint.dart';
+import '../../src/mobile_camera_measure.dart';
 import '../../src/desktop_scanner.dart';
 import '../vault/vault_controller.dart';
 
@@ -156,15 +157,17 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     state = state.copyWith(receiverKeypair: kp);
   }
 
+  // The wakelock is not taken or released here. The receive screen holds
+  // it for as long as it is open, because the screen matters before the
+  // camera starts too: the handshake QR is on display while the sender
+  // lines their camera up. Releasing it when scanning stops would let the
+  // phone dim during exactly that wait.
   void startScanning() {
     state = state.copyWith(isScanning: true, error: null);
-    // The camera is useless if the screen sleeps mid-transfer.
-    unawaited(keepScreenAwake());
   }
 
   void stopScanning() {
     state = state.copyWith(isScanning: false);
-    unawaited(allowScreenSleep());
   }
 
   /// Entry point for every QR string the camera picks up. Foreign QRs are
@@ -445,10 +448,23 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   /// reception. Null on a first run, which simply means no hint.
   EmissionHint? _hint;
 
+  /// Measures the camera on the `MobileScanner` path, where the scanner
+  /// hands this app detections rather than frames. The desktop view
+  /// measures itself and reports through [_rememberMeasurement]; this is
+  /// the same job for android, ios and macos, which otherwise sent a
+  /// handshake carrying no hint at all and left every sender on defaults.
+  final MobileCameraMeasure _mobileMeasure = MobileCameraMeasure();
+
   @override
   void initState() {
     super.initState();
     _notifier = ref.read(receiveProvider.notifier);
+    // Held for the whole screen, not just while the camera runs. The
+    // receiver shows its handshake QR first and then waits, sometimes for
+    // a while, for the other person to scan it — and a phone that dims
+    // mid-wait hides the very thing the sender is pointing a camera at.
+    // Reported from a real Android device: the screen kept dimming.
+    unawaited(keepScreenAwake());
     _loadHint();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notifier.initKeypair();
@@ -459,6 +475,25 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     final stored = await ref.read(cameraMeasurementStoreProvider).read();
     if (!mounted || stored == null) return;
     setState(() => _hint = suggestEmission(stored.capability));
+  }
+
+  /// What to show under the mobile camera while it is reading.
+  ///
+  /// Reads per second, not the desktop view's share-of-frames: on this
+  /// path a frame that failed to decode is never reported, so the
+  /// denominator does not exist. Saying "60% of frames" here would be a
+  /// number with nothing behind it.
+  String _mobileScanStatus() {
+    final perSecond = _mobileMeasure.decodesPerSecond;
+    if (perSecond == null) {
+      final seen = _mobileMeasure.detections;
+      return seen == 0
+          ? 'Point at the other screen'
+          : 'Reading… $seen codes so far';
+    }
+    if (perSecond >= 8) return 'Good — hold it there';
+    if (perSecond >= 4) return 'Reading — try holding a little steadier';
+    return 'Slow — move closer, or improve the lighting';
   }
 
   /// Remembers what the camera managed, for the next handshake.
@@ -473,6 +508,10 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   @override
   void dispose() {
     _stopScanner();
+    // Released here rather than when scanning stops, to match where it is
+    // acquired. A wakelock left held drains the battery of a device whose
+    // owner may have no way to charge it.
+    unawaited(allowScreenSleep());
     // Leaving the page ends the reception, for the same reason as the
     // send side: receiveProvider is global, so a half-finished transfer
     // was still on screen when the user came back having moved on.
@@ -637,9 +676,23 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                                 onDetect: notifier.processRawQr,
                                 onMeasured: _rememberMeasurement,
                               )
-                            : MobileScanner(
+                            : Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  MobileScanner(
                           controller: _scannerController,
                           onDetect: (capture) {
+                            final size = capture.size;
+                            if (size.width > 0 && size.height > 0) {
+                              _mobileMeasure.recordDetection(
+                                width: size.width.round(),
+                                height: size.height.round(),
+                              );
+                              final measured = _mobileMeasure.capability;
+                              if (measured != null) {
+                                _rememberMeasurement(measured);
+                              }
+                            }
                             for (final barcode in capture.barcodes) {
                               final raw = barcode.rawValue;
                               if (raw != null) {
@@ -669,6 +722,35 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                             );
                           },
                         ),
+                                  // Aim feedback, the mobile counterpart of
+                                  // the desktop quality bar. It reports reads
+                                  // per second rather than a share of frames
+                                  // read: MobileScanner hands this app only
+                                  // successful detections, so the frames that
+                                  // failed cannot be counted and a percentage
+                                  // here would be invented.
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Container(
+                                      margin: const EdgeInsets.all(8),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black
+                                            .withValues(alpha: 0.65),
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        _mobileScanStatus(),
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -947,6 +1029,10 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   }
 
   void _startScanner() {
+    // Each scan is measured on its own. Carrying the previous one forward
+    // would average a reading taken in a different room, at a different
+    // distance, and the result decides what the next sender is told.
+    _mobileMeasure.reset();
     // On desktop, use the default camera (no "back" facing concept).
     final isDesktop =
         Platform.isLinux || Platform.isMacOS || Platform.isWindows;
