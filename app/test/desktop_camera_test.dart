@@ -354,11 +354,13 @@ void main() {
       expect(scanner.aspectRatio, closeTo(640 / 480, 0.001));
     });
 
-    test('a sideways sensor reports the ratio as displayed', () async {
-      // A phone's rear camera is mounted at 90 degrees: the sensor is
-      // 640x480 but the preview the user sees is 480x640. Reported from
-      // a phone — using the sensor ratio directly stretched everything
-      // horizontally, so a laptop screen looked squashed.
+    test('a sideways sensor still reports the sensor ratio', () async {
+      // Deliberately NOT rotated here. On Android buildPreview wraps the
+      // texture in CameraX's RotatedPreviewDelegate, so the plugin has
+      // already turned the image: rotating this figure too
+      // double-corrected it and the preview came out stretched. The view
+      // no longer computes a size from this value at all — it lets the
+      // preview keep its own shape and scales it to cover.
       final scanner = DesktopCameraScanner(
         platform: _FakeCameraPlatform(cameras: const [
           CameraDescription(
@@ -372,8 +374,8 @@ void main() {
       await scanner.start();
       await Future<void>.delayed(Duration.zero);
 
-      expect(scanner.aspectRatio, closeTo(480 / 640, 0.001),
-          reason: 'the preview is rotated, so the displayed ratio inverts');
+      expect(scanner.aspectRatio, closeTo(640 / 480, 0.001),
+          reason: 'the platform rotates the preview; this is the sensor');
     });
 
     test('rotation does not change the measured resolution', () async {
@@ -393,7 +395,6 @@ void main() {
       await scanner.start();
       await Future<void>.delayed(Duration.zero);
 
-      expect(scanner.aspectRatio, closeTo(480 / 640, 0.001));
       expect(scanner.capability?.width ?? 640, 640,
           reason: 'the sensor captured 640 wide however it is displayed');
     });

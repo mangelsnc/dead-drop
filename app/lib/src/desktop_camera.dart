@@ -78,6 +78,20 @@ class DesktopCameraScanner {
   int? _previewWidth;
   int? _previewHeight;
 
+  /// What the platform said about this camera, for on-screen diagnosis.
+  ///
+  /// The preview was stretched on a phone through three attempts at
+  /// fixing it, each from a different guess about which of these numbers
+  /// was wrong. Showing them is cheaper than guessing a fourth time.
+  String get debugGeometry {
+    final w = _previewWidth, h = _previewHeight;
+    if (w == null || h == null) return 'geometry: unknown';
+    return 'sensor ${w}x$h · rot ${_sensorOrientation ?? '?'}°'
+        ' · ratio ${(_aspectRatio ?? 0).toStringAsFixed(2)}';
+  }
+
+  int? _sensorOrientation;
+
   /// How many frames have been looked at, and how many held a code.
   ///
   /// Without this the user cannot tell a camera that is working but
@@ -231,17 +245,19 @@ class DesktopCameraScanner {
       try {
         _initialised = _platform.onCameraInitialized(id).listen((event) {
           if (event.previewHeight > 0) {
-            // previewWidth/Height describe the SENSOR, which on a phone
-            // is mounted sideways: the rear camera usually reports 90 or
-            // 270 degrees, and the plugin rotates the preview to match
-            // the screen. The displayed image is then taller than wide,
-            // so using the sensor's ratio directly stretched everything
-            // horizontally — reported from a phone as a squashed laptop
-            // screen filling the box.
-            final rotated = preferred.sensorOrientation % 180 != 0;
-            final w = rotated ? event.previewHeight : event.previewWidth;
-            final h = rotated ? event.previewWidth : event.previewHeight;
-            _aspectRatio = w / h;
+            // The sensor's own ratio, unrotated on purpose.
+            //
+            // On Android, buildPreview wraps the texture in CameraX's
+            // RotatedPreviewDelegate: the plugin has already turned the
+            // image to match the screen. Rotating this figure as well
+            // double-corrected it, which is why the preview kept coming
+            // out stretched horizontally after the previous attempt.
+            //
+            // This value is therefore only a hint for laying the preview
+            // out on platforms that do not rotate for us; the widget is
+            // free to keep its own shape. See desktop_scanner_view.dart.
+            _sensorOrientation = preferred.sensorOrientation;
+            _aspectRatio = event.previewWidth / event.previewHeight;
             // The measurement keeps the sensor's own numbers: how many
             // pixels the camera captures is what decides whether it can
             // resolve a dense code, and that does not change with how

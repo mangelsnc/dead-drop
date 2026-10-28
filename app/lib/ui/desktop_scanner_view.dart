@@ -152,36 +152,29 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
         // real dimensions to scale from, and a camera preview reports
         // none — handing it a 1px-tall SizedBox made the preview vanish
         // entirely on Android.
+        // The preview keeps whatever shape it has and is scaled to cover
+        // the box, with the overflow clipped.
+        //
+        // FittedBox is doing the work rather than arithmetic on a
+        // reported ratio, because that ratio cannot be trusted: on
+        // Android the plugin has already rotated the image, so the
+        // sensor's numbers describe something other than what is on
+        // screen. Three attempts at computing the right size from them
+        // produced, in order, black bands, a one-pixel preview, and a
+        // horizontally stretched one. Letting the widget keep its own
+        // aspect and only scaling it needs none of that to be right.
         ClipRect(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              if (ratio == null) return _scanner.preview();
-
-              // Cover: match the box on whichever axis leaves no gap, and
-              // let the other overflow past the clip. Fitting instead
-              // left black bands above and below on a phone, whose sensor
-              // is far taller than this wide box, and shrank the image —
-              // so the QR got smaller the more space was wasted. The
-              // cropped edges hold nothing; the code is in the middle,
-              // which is where the user points it.
-              final boxRatio = constraints.maxWidth / constraints.maxHeight;
-              final width = ratio > boxRatio
-                  ? constraints.maxHeight * ratio
-                  : constraints.maxWidth;
-              final height = ratio > boxRatio
-                  ? constraints.maxHeight
-                  : constraints.maxWidth / ratio;
-
-              return OverflowBox(
-                maxWidth: width,
-                maxHeight: height,
-                child: SizedBox(
-                  width: width,
-                  height: height,
-                  child: _scanner.preview(),
-                ),
-              );
-            },
+          child: FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              // Any size works: FittedBox scales from it, and the
+              // preview inside keeps its own proportions. What matters
+              // is that both dimensions are real, so nothing collapses.
+              width: 1000,
+              height: ratio == null ? 1000 : 1000 / ratio,
+              child: _scanner.preview(),
+            ),
           ),
         ),
         // How well the camera is placed, as a bar rather than a number.
@@ -211,6 +204,12 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
                 Text(
                   _statusLine(),
                   style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+                // What the camera reported, so a stretched preview can be
+                // diagnosed from a screenshot instead of guessed at.
+                Text(
+                  _scanner.debugGeometry,
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
                 ),
               ],
             ),

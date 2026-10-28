@@ -86,7 +86,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    return tester.getSize(find.byKey(const Key('preview')));
+    // The painted size, not the laid-out one. A FittedBox scales its
+    // child, so the SizedBox inside reports whatever arbitrary figure it
+    // was built with — measuring that tells you nothing about what the
+    // user sees.
+    final r = tester.getRect(find.byKey(const Key('preview')));
+    return r.size;
   }
 
   testWidgets('the preview is not collapsed to nothing', (tester) async {
@@ -104,7 +109,9 @@ void main() {
     const box = Size(600, 300);
     final size = await previewSizeIn(tester, box);
 
-    expect(size.width, closeTo(box.width, 1),
+    // Covering means no gap on either axis: the painted preview is at
+    // least as large as its box in both directions, overflowing on one.
+    expect(size.width, greaterThanOrEqualTo(box.width - 1),
         reason: 'anything narrower leaves a gap at the sides');
     expect(size.height, greaterThanOrEqualTo(box.height - 1),
         reason: 'letterboxing is what made the QR shrink on a phone');
