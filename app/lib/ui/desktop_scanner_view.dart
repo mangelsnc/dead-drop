@@ -129,18 +129,36 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    // The preview is drawn at the camera's own ratio. Stretching it to
-    // fill a box of some other shape distorts the image — ugly, and
-    // worse, a squashed QR is harder to aim at.
+    // The preview keeps the camera's own ratio and fills the box,
+    // cropping whatever does not fit rather than letterboxing.
+    //
+    // Fitting instead left black bands above and below on a phone, whose
+    // sensor is far taller than the wide box this sits in, and shrank the
+    // image to the height of the band — so the QR the user is aiming at
+    // got smaller the more space was wasted. Cropping costs the edges of
+    // the frame, which hold nothing: the code is in the middle, which is
+    // where the user points it.
+    //
+    // Stretching is still not an option. A squashed QR is harder to aim
+    // at, and the decoder works on the frame rather than this widget, so
+    // distortion here would mislead without helping.
     final ratio = _scanner.aspectRatio;
     final preview = ratio == null
         ? _scanner.preview()
-        : AspectRatio(aspectRatio: ratio, child: _scanner.preview());
+        : FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              width: ratio,
+              height: 1,
+              child: _scanner.preview(),
+            ),
+          );
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        Center(child: preview),
+        ClipRect(child: Center(child: preview)),
         // How well the camera is placed, as a bar rather than a number.
         //
         // Aim, distance and focus all show up in one figure: the share of

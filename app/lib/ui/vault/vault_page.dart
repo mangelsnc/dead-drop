@@ -589,6 +589,10 @@ class _EntryTile extends ConsumerWidget {
         // The same actions in both environments. A menu that offered more
         // in the real vault than in the decoy would be the tell the whole
         // feature exists to avoid.
+        // Tapping the row previews it, which is what a file list implies
+        // it will do. Everything else stays in the menu: exporting and
+        // deleting are deliberate acts and should take a deliberate tap.
+        onTap: () => _preview(context, ref),
         trailing: PopupMenuButton<String>(
           onSelected: (action) => switch (action) {
             'view' => _preview(context, ref),

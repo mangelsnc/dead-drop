@@ -102,7 +102,7 @@ class _FakeSecureStorage extends FlutterSecureStoragePlatform {
 /// that gate — these tests never drive it through an actual handshake.
 class _CompletedReceiveNotifier extends ReceiveNotifier {
   _CompletedReceiveNotifier(SodiumSumo sodium, TofuStore tofuStore)
-      : super(sodium, tofuStore) {
+      : super(sodium, (() => tofuStore)) {
     _seed(sodium);
   }
 
