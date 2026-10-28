@@ -570,9 +570,55 @@ void main() {
       receiver.feedFrame(metaFrame.pack());
       expect(receiver.fileName, 'secret-plans.pdf');
 
-      // The metadata frame must NOT count towards fountain decoding.
-      expect(receiver.decoder!.decoded, isEmpty);
+      // The metadata frame is repeated, so a receiver whose camera locks on
+      // after the first one still learns the name. Reported from device
+      // testing: files kept arriving as deaddrop_received_<timestamp> with
+      // no extension, because sequence 0 went by while the camera was
+      // still focusing and nothing ever sent the name again.
+      var repeats = 0;
+      for (var i = 0; i < Emitter.metadataInterval * 2; i++) {
+        if (emitter.nextFrame().chunkIds.isEmpty) repeats++;
+      }
+      expect(repeats, greaterThanOrEqualTo(1),
+          reason: 'the name must not depend on catching one single frame');
 
+      // The metadata frame must NOT count towards fountain decoding: the
+      // frames just pulled were not fed to the receiver, so nothing has
+      // decoded yet.
+      expect(receiver.decoder!.decoded, isEmpty);
+    });
+
+    test('a receiver that joins late still learns the file name', () async {
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final plaintext = Uint8List.fromList(List.filled(4096, 7));
+      final emitter = await Emitter.create(
+        sodium,
+        plaintext,
+        receiverKp,
+        chunkSize: 512,
+        fileName: 'evidence.jpg',
+      );
+      final receiver = Receiver(sodium: sodium, keypair: receiverKp);
+      await receiver.startSession(emitter.bootstrapQrPayload());
+
+      // Throw away the opening frames, the way a camera still focusing
+      // does. This is the reported failure: the name rode on the very
+      // first frame and nothing ever repeated it.
+      for (var i = 0; i < 20; i++) {
+        emitter.nextFrame();
+      }
+      expect(receiver.fileName, isNull, reason: 'nothing fed yet');
+
+      for (var i = 0; i < Emitter.metadataInterval * 2; i++) {
+        receiver.feedFrame(emitter.nextFrame().pack());
+      }
+
+      expect(receiver.fileName, 'evidence.jpg',
+          reason: 'a late joiner must still end up with the real name, '
+              'and therefore the real extension');
+
+      // And the transfer itself still completes: the repeated metadata
+      // frames carry no chunks, so they must not disturb decoding.
       for (var i = 0; i < 500 && !receiver.done; i++) {
         receiver.feedFrame(emitter.nextFrame().pack());
       }

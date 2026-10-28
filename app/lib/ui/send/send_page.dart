@@ -188,6 +188,38 @@ class SendNotifier extends StateNotifier<SendState> {
     );
   }
 
+  /// Stages bytes the user already has, rather than ones picked from
+  /// disk.
+  ///
+  /// The vault uses this to send a file it holds: exporting it first,
+  /// picking it back up and deleting it would mean writing the plaintext
+  /// out just to read it in again, which is the one thing the vault is
+  /// there to avoid.
+  ///
+  /// Shares pickFile's sizing and error handling so a vault file behaves
+  /// exactly like any other once staged.
+  void loadBytes(String name, Uint8List bytes) {
+    _stopTimer();
+    final chunkSize = recommendedChunkSize(bytes.length);
+    final error = fileSizeError(bytes.length, chunkSize) ??
+        (bytes.length > maxFileSizeForChunkSize(chunkSize)
+            ? fileTooLargeError(bytes.length)
+            : null);
+
+    final dot = name.lastIndexOf('.');
+    state = SendState(
+      fileName: name,
+      fileBytes: bytes,
+      fileExtension:
+          dot > 0 ? name.substring(dot + 1).toLowerCase() : null,
+      receiverPk: state.receiverPk,
+      chunkSize: chunkSize,
+      ecLevel: state.ecLevel,
+      fps: state.fps,
+      sendError: error,
+    );
+  }
+
   /// Loads the receiver's public key, and applies the emission hint its
   /// QR carried, when it had one.
   ///
