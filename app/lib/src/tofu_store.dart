@@ -31,7 +31,7 @@ class TofuStore {
   static const _unscopedStorageKey = 'deaddrop_tofu_known_senders';
   static const _storage = FlutterSecureStorage(
     lOptions: LinuxOptions(),
-    mOptions: MacOsOptions(),
+    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
   );
 
   final String _storageKey;

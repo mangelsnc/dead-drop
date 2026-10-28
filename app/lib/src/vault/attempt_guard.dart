@@ -78,7 +78,7 @@ const String kSelfDestructStorageKey = 'deaddrop_self_destruct_enabled';
 
 const FlutterSecureStorage _defaultStorage = FlutterSecureStorage(
   lOptions: LinuxOptions(),
-  mOptions: MacOsOptions(),
+  mOptions: MacOsOptions(usesDataProtectionKeychain: false),
 );
 
 /// Tracks consecutive failed unlock attempts and, if the user opted in,
