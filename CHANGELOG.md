@@ -5,6 +5,22 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-10-28
+
+### Added
+
+- *(vault)* View, export and delete a file you have stored
+
+### Fixed
+
+- *(receive)* Measure the camera on mobile, and stop the screen dimming
+- *(receive)* Stop the sender block pushing the progress off the screen
+- *(vault)* One address book and one identity outside the decoy
+
+### Other
+
+- The six reports from device testing
+
 ## [0.6.0] — 2026-10-28
 
 ### Added
