@@ -72,11 +72,25 @@ class Emitter {
   /// Bytes for the single static QR that starts the session.
   Uint8List bootstrapQrPayload() => header.pack();
 
+  /// How often the metadata frame is sent again.
+  ///
+  /// The file name used to ride on sequence 0 alone, emitted once before
+  /// the receiver's camera had locked on — so in practice it was usually
+  /// missed, and a file arrived with a generated name and no extension.
+  /// Everything else in this protocol already survives a lost frame; the
+  /// name was the one thing that did not.
+  ///
+  /// Every 32nd frame costs about 3% of the stream and means a receiver
+  /// that joins late still learns the name within a couple of seconds at
+  /// any usable frame rate.
+  static const int metadataInterval = 32;
+
   /// Produce the next frame. Sequence 0 is the encrypted metadata frame
-  /// (file name); from sequence 1 on, frames are fountain-coded data.
+  /// (file name), repeated every [metadataInterval] frames thereafter;
+  /// every other sequence carries fountain-coded data.
   Frame nextFrame() {
     final seq = _seq++;
-    if (seq == 0) {
+    if (seq == 0 || seq % metadataInterval == 0) {
       final (nonce, ct) = session.encryptPayload(
         sodium,
         buildFileMetadataPayload(fileName: session.fileName),

@@ -622,4 +622,65 @@ void main() {
       expect(controller.state.entries.single.name, 'real.txt');
     });
   });
+
+  group('a decoy cannot reuse the real passphrase', () {
+    test('addDecoy refuses a passphrase that already opens another slot',
+        () async {
+      // Reported from device testing. tryUnlock takes the FIRST slot that
+      // matches, so a decoy sharing the real passphrase can never be
+      // opened: slot 0 always wins, the decoy's files are orphaned, and
+      // the user believes they have a decoy they do not have. The design
+      // calls an unconvincing decoy worse than none; an unreachable one
+      // is worse still.
+      final controller = buildController();
+      addTearDown(controller.dispose);
+      final store = VaultStore(tempDir, sodium);
+
+      await controller.createVault('correct horse battery staple');
+      await controller.addDecoy('correct horse battery staple');
+
+      expect(controller.state.error, isNotNull,
+          reason: 'the user must be told, not left with a silent no-op');
+
+      // No half-made decoy left behind. An empty slot holds random filler
+      // rather than null — that is deliberate, so disk inspection cannot
+      // tell whether a decoy exists — so the check is that nothing opens
+      // it, not that it is empty.
+      final slots = await store.readSlots();
+      final asDecoy = unwrapDataKey(
+          sodium, 'correct horse battery staple', slots[1]!);
+      expect(asDecoy, isNull,
+          reason: 'the refused passphrase must not have been written');
+    });
+
+    test('a different decoy passphrase is still accepted', () async {
+      final controller = buildController();
+      addTearDown(controller.dispose);
+      final store = VaultStore(tempDir, sodium);
+
+      await controller.createVault('correct horse battery staple');
+      await controller.addDecoy('decoy passphrase entirely different');
+
+      expect(controller.state.error, isNull);
+      final slots = await store.readSlots();
+      expect(slots[1], isNotNull);
+    });
+
+    test('both environments stay reachable after a valid decoy', () async {
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      await controller.createVault('correct horse battery staple');
+      await controller.addDecoy('decoy passphrase entirely different');
+
+      controller.lock();
+      expect(await controller.unlock('correct horse battery staple'), isTrue);
+      expect(controller.state.slot, 0);
+
+      controller.lock();
+      expect(
+          await controller.unlock('decoy passphrase entirely different'), isTrue);
+      expect(controller.state.slot, 1);
+    });
+  });
 }
