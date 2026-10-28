@@ -190,6 +190,12 @@ class DesktopCameraScanner {
   /// already showing the next code.
   bool _decoding = false;
 
+  /// The last payload handed to [payloads], for suppressing the repeats
+  /// a fast camera makes of one slow-changing code. Only the immediately
+  /// previous one: the sender re-emits earlier frames by design, and a
+  /// longer memory would drop those legitimately.
+  String? _lastPayload;
+
   /// Payloads read from the camera, in the order they were decoded.
   ///
   /// Duplicates are not filtered: the sender repeats frames by design and
@@ -318,7 +324,21 @@ class DesktopCameraScanner {
       if (payload != null && !_payloads.isClosed) {
         _framesDecoded++;
         _activity.add(null);
-        _payloads.add(payload);
+        // Consecutive reads of the same code are dropped.
+        //
+        // The camera runs far faster than the sender's display — 30 fps
+        // against 8 — so each QR is captured several times over. Passing
+        // every copy on is harmless to the decoder, which ignores
+        // duplicates, but it is not free upstream: the receive screen
+        // counted 3,332 frames for 49 chunks, where the code needs about
+        // 1.15, because most of that work was the same frame again.
+        //
+        // mobile_scanner did this with DetectionSpeed.noDuplicates; the
+        // replacement had no equivalent, and this is it.
+        if (payload != _lastPayload) {
+          _lastPayload = payload;
+          _payloads.add(payload);
+        }
       }
     } catch (_) {
       // A frame that cannot be decoded is the normal case, and an isolate
