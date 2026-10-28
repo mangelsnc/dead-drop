@@ -81,7 +81,7 @@ void main() {
       expect(hint.reason, contains('320x240'));
     });
 
-    test('a poor decode rate backs off on every axis', () {
+    test('a poor decode rate slows down, without adding codes to read', () {
       // The most honest signal available: it reflects focus, lighting and
       // a shaky hand, none of which resolution or frame rate reveal.
       final measured = suggestEmission(const CameraCapability(
@@ -97,9 +97,17 @@ void main() {
       ));
 
       expect(measured.fps, lessThan(unmeasured.fps));
-      expect(measured.chunkSize, lessThan(unmeasured.chunkSize));
       expect(measured.ecLevel, isNot(unmeasured.ecLevel));
       expect(measured.reason, contains('20%'));
+
+      // The chunk is deliberately NOT shrunk. Halving it doubles how many
+      // codes must be read, so a camera already missing half of them
+      // needs twice as many attempts at the same miss rate — the transfer
+      // gets longer, not more reliable. Reported from a phone: a 653 KB
+      // file became 2,614 codes of 256 B and took about 2.5x that many
+      // frames to complete.
+      expect(measured.chunkSize, equals(unmeasured.chunkSize),
+          reason: 'slowing down helps; making more codes does not');
     });
 
     test('a healthy decode rate changes nothing', () {

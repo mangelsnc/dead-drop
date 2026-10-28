@@ -321,15 +321,28 @@ void main() {
     // so Session.open must reject an oversized file *loudly* instead of
     // emitting a corrupted header the receiver cannot make sense of.
 
-    test('recommendedChunkSize picks the smallest fitting chunk size', () {
-      // Small files stay on the default (best-scannable) chunk size.
+    test('recommendedChunkSize keeps the number of codes within reach', () {
+      // It used to pick the smallest size that fit, optimising for how
+      // scannable one code is. On a 653 KB photo that produced 1,300 of
+      // them, and a user reported scanning roughly 2.5x that before one
+      // completed — not because the fountain code is inefficient
+      // (measured overhead is 1.15x at that scale) but because each code
+      // is another chance for the camera to miss one. It now trades code
+      // density for code count once a file gets large.
+
+      // Small files still stay on the size the spike validated.
       expect(recommendedChunkSize(1024), kDefaultChunkSize);
-      expect(recommendedChunkSize(maxFileSizeForChunkSize(512)), 512);
-      // Just past a boundary bumps to the next size up.
-      expect(recommendedChunkSize(maxFileSizeForChunkSize(512) + 1), 1024);
-      expect(recommendedChunkSize(32 * 1024 * 1024), 1024); // 32 MB
-      expect(recommendedChunkSize(maxFileSizeForChunkSize(1024) + 1), 2048);
-      expect(recommendedChunkSize(64 * 1024 * 1024), 2048); // 64 MB
+      expect(recommendedChunkSize(64 * 1024), kDefaultChunkSize);
+
+      // Past the comfortable count, step up rather than add codes.
+      expect(recommendedChunkSize(653 * 1024), 1024);
+      expect(recommendedChunkSize(4 * 1024 * 1024), 4096);
+
+      // Whatever is chosen must be able to carry the file.
+      for (final bytes in [1024, 653 * 1024, 32 * 1024 * 1024]) {
+        expect(fileSizeError(bytes, recommendedChunkSize(bytes)), isNull);
+      }
+
       // Beyond every option, it returns the largest so the caller can error.
       expect(
         recommendedChunkSize(maxFileSizeForChunkSize(4096) + 1),

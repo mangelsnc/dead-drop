@@ -144,8 +144,20 @@ class PendingSender {
 class ReceiveNotifier extends StateNotifier<ReceiveState> {
   ReceiveNotifier(this._sodium, this._tofuStore) : super(ReceiveState());
 
+  /// Resolved per use, never held.
+  ///
+  /// The store is scoped to the open vault environment, so it changes
+  /// whenever the vault locks or unlocks. Watching it from the provider
+  /// rebuilt this notifier on every such change and threw away whatever
+  /// transfer was running: saving a received file to the vault unlocks
+  /// it, the file picker backgrounds the app, backgrounding locks the
+  /// vault again, and the user came back to a reset screen with the
+  /// handshake QR gone and no way to also save to the device. Reported
+  /// from a phone, more than once.
+  TofuStore get _tofu => _tofuStore();
+
   final Sodium _sodium;
-  final TofuStore _tofuStore;
+  final TofuStore Function() _tofuStore;
 
   Future<void> initKeypair() async {
     if (state.receiverKeypair != null) return;
@@ -207,7 +219,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
           fingerprintOf(receiver.session!.header.senderVerifyKey);
 
       // TOFU check: have we seen this sender before?
-      final known = await _tofuStore.isKnown(fingerprint);
+      final known = await _tofu.isKnown(fingerprint);
       if (!known) {
         // An unrecognised sender is held here, NOT armed. The fingerprint is
         // only written to the TOFU store once the user accepts it in
@@ -228,7 +240,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         totalChunks: receiver.session!.header.chunkCount,
         error: null,
         senderFingerprint: fingerprint,
-        senderName: await _tofuStore.nameFor(fingerprint),
+        senderName: await _tofu.nameFor(fingerprint),
         isNewSender: false,
       );
     } on DeadDropCryptoError catch (e) {
@@ -246,7 +258,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final pending = state.pendingSender;
     if (pending == null) return;
 
-    await _tofuStore.markKnown(pending.fingerprint, name: name);
+    await _tofu.markKnown(pending.fingerprint, name: name);
     state = state.copyWith(
       receiver: pending.receiver,
       totalChunks: pending.receiver.session!.header.chunkCount,
@@ -397,8 +409,13 @@ final cameraMeasurementStoreProvider = Provider<CameraMeasurementStore>(
 final receiveProvider =
     StateNotifierProvider<ReceiveNotifier, ReceiveState>((ref) {
   final sodium = ref.watch(sodiumProvider);
-  final tofuStore = ref.watch(tofuStoreProvider);
-  return ReceiveNotifier(sodium, tofuStore);
+  // `read` through a callback, not `watch`. The TOFU store is scoped to
+  // the open vault environment; watching it here tied this notifier's
+  // lifetime to the vault's lock state and discarded a running transfer
+  // every time the vault locked. The callback still resolves the current
+  // environment's store at each use, so the decoy never sees the real
+  // address book — the property the scoping exists for is unchanged.
+  return ReceiveNotifier(sodium, () => ref.read(tofuStoreProvider));
 });
 
 class ReceivePage extends ConsumerStatefulWidget {

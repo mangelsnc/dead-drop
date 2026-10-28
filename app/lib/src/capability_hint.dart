@@ -117,8 +117,17 @@ EmissionHint suggestEmission(CameraCapability camera) {
   if (rate != null && rate < 0.5) {
     // Reading fewer than half the frames. Whatever the cause — focus,
     // lighting, a shaky hand — the stream is too demanding as it is.
+    //
+    // Slow down and correct harder, but do NOT shrink the chunk. Halving
+    // it doubles how many codes must be read, so a camera already missing
+    // half of them needs twice as many attempts at the same miss rate:
+    // the transfer gets longer, not more reliable. Reported from a phone
+    // as "I always have to read about 2.5x the chunk count", with a
+    // 653 KB file split into 2614 chunks of 256 B.
+    //
+    // The fountain code is not the problem — measured overhead is 1.15x
+    // at that chunk count. The missing frames are.
     fps = _fpsAtMost(fps * 0.75);
-    chunkSize = chunkSize > 256 ? chunkSize ~/ 2 : 256;
     ec = _ecLevels[(_ecLevels.indexOf(ec) + 1).clamp(0, _ecLevels.length - 1)];
     reasons.add('only ${(rate * 100).round()}% of frames readable so far');
   }

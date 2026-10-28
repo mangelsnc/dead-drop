@@ -38,13 +38,40 @@ const int kDefaultChunkSize = 512;
 /// Returns the largest option when even that cannot fit the file — callers
 /// must then surface [fileTooLargeError] instead of starting the transfer.
 int recommendedChunkSize(int fileSize) {
+  // Keep the frame count within reach. The spike validated 512 B on an
+  // 8 KB file, where it produces 16 codes; the same size on a 653 KB
+  // photo produces 1,300, and a user reported scanning roughly 2.5x that
+  // before one completed — not because the fountain code is inefficient
+  // (measured overhead is 1.15x at that scale) but because every code is
+  // another chance for the camera to miss one.
+  //
+  // So scale the chunk with the file: a bigger chunk makes a denser code,
+  // which is the right trade once the alternative is thousands of them.
+  // The sender can still choose any size in Options.
   for (final size in kChunkSizeOptions) {
-    // Never go below the validated default — smaller chunks only add frames.
+    if (size < kDefaultChunkSize) continue;
+    if (fileSize > maxFileSizeForChunkSize(size)) continue;
+    if (fileSize ~/ size <= _comfortableChunkCount) return size;
+  }
+
+  // No size kept the count under the threshold, so take the largest that
+  // still fits: fewest codes available for this file. Taking the first
+  // fitting size instead would hand back 512 B and tens of thousands of
+  // codes, which is the case this function exists to avoid.
+  for (final size in kChunkSizeOptions.reversed) {
     if (size < kDefaultChunkSize) continue;
     if (fileSize <= maxFileSizeForChunkSize(size)) return size;
   }
   return kChunkSizeOptions.last;
 }
+
+/// Above this many chunks, prefer a larger chunk size.
+///
+/// At 12 fps a thousand codes is about a minute and a half of holding a
+/// phone steady even with nothing missed, and real cameras miss plenty.
+/// The figure is a judgement, not a measurement: it is the point where
+/// the denser code is the lesser evil.
+const int _comfortableChunkCount = 1000;
 
 /// A jargon-free error message when [fileSize] cannot be transferred with
 /// [chunkSize], or null when it fits. The message states the limit and points
