@@ -1,0 +1,133 @@
+## Builds a signed APK from any branch, for testing on a real device.
+##
+## The release pipeline only builds main and publishes to a tag, which is
+## right for releases and useless for the case this exists to serve:
+## deciding whether a change is good enough to merge at all. The zxing2
+## scanner is one of those — whether it reads as well as ML Kit cannot be
+## answered by CI, only by someone holding a phone.
+##
+## The APK is attached to the run as an artifact rather than published as
+## a release: it is a build to try, not a version anybody should install
+## expecting support.
+name: Test APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to build'
+        required: true
+        type: string
+        default: main
+
+env:
+  # Must match .fvmrc, as in build.yml.
+  FLUTTER_VERSION: '3.47.8'
+
+jobs:
+  apk:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get
+
+      # Same retry as build.yml: sdkmanager has handed back a truncated
+      # archive before and taken a whole build down with it.
+      - name: Pre-fetch the Android NDK
+        run: |
+          NDK="28.2.13676358"
+          for attempt in 1 2 3; do
+            if yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
+                 "ndk;${NDK}" >/dev/null; then
+              echo "NDK $NDK installed on attempt $attempt"
+              exit 0
+            fi
+            echo "::warning::NDK download failed (attempt $attempt), retrying"
+            rm -rf "${ANDROID_HOME}/ndk/${NDK}"
+            sleep 10
+          done
+          echo "::error::Could not install NDK $NDK after 3 attempts"
+          exit 1
+
+      - name: Write the signing config
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::No Android signing secrets. An unsigned APK cannot be installed as an update over a signed one, so this build would not be testable."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "${RUNNER_TEMP}/upload-keystore.jks"
+          cat > app/android/key.properties <<EOF
+          storeFile=${RUNNER_TEMP}/upload-keystore.jks
+          storePassword=${STORE_PASSWORD}
+          keyPassword=${KEY_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          EOF
+
+      - name: Build release APK
+        working-directory: app
+        run: flutter build apk --release
+
+      # The reason this workflow exists for the zxing2 branch: show what
+      # the APK actually asks the user for. A build whose whole purpose is
+      # removing a permission should prove it in its own log.
+      - name: Report the permissions this APK requests
+        run: |
+          APK=app/build/app/outputs/flutter-apk/app-release.apk
+          AAPT=$(find "${ANDROID_HOME}/build-tools" -name aapt2 \
+                 | sort -V | tail -n1)
+          echo "### Permissions requested" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          "$AAPT" dump permissions "$APK" \
+            | grep -oE 'android\.permission\.[A-Z_]+' \
+            | sort -u | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package
+        env:
+          # Through the environment, never interpolated into the script.
+          # A ref is attacker-controlled in the general case, and
+          # ${{ }} inside run: substitutes before the shell parses the
+          # line, so a crafted value would execute rather than be read.
+          REF: ${{ inputs.ref }}
+        run: |
+          REF_SLUG=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')
+          cp app/build/app/outputs/flutter-apk/app-release.apk \
+             "${GITHUB_WORKSPACE}/deaddrop-${REF_SLUG}.apk"
+          cd "${GITHUB_WORKSPACE}"
+          sha256sum "deaddrop-${REF_SLUG}.apk" \
+            > "deaddrop-${REF_SLUG}.apk.sha256"
+          cat "deaddrop-${REF_SLUG}.apk.sha256" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deaddrop-apk
+          path: |
+            deaddrop-*.apk
+            deaddrop-*.apk.sha256
+          retention-days: 14
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f app/android/key.properties "${RUNNER_TEMP}/upload-keystore.jks"
