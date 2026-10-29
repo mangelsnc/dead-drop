@@ -1085,6 +1085,32 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             // Camera on the left, everything that reports on the right.
             // The sender block no longer displaces the progress bar,
             // because the two are not in the same column any more.
+            final reporting = [
+              ...senderBlock,
+              ...progressBlock,
+              ...errorBlock,
+            ];
+
+            // Before a scan starts there is nothing to report, and a
+            // second column holding nothing is not a column — it is an
+            // empty half of the window with the two cards shoved against
+            // the left edge. With one column of content, centre it and
+            // hold it to a readable width instead.
+            if (reporting.isEmpty) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: spaced([...keyStep, ...scanStep]),
+                    ),
+                  ),
+                ),
+              );
+            }
+
             return SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Row(
@@ -1100,11 +1126,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: spaced([
-                        ...senderBlock,
-                        ...progressBlock,
-                        ...errorBlock,
-                      ]),
+                      children: spaced(reporting),
                     ),
                   ),
                 ],

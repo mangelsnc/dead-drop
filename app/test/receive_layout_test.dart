@@ -101,20 +101,57 @@ void main() {
     expect(find.text('Your public key'), findsOneWidget);
   });
 
-  testWidgets('a wide screen splits the page into two columns',
+  /// Whether the page is currently laid out as two Expanded columns.
+  bool isSplit(WidgetTester tester) => tester
+      .widgetList<Row>(find.byType(Row))
+      .any((r) =>
+          r.children.length == 3 &&
+          r.children.first is Expanded &&
+          r.children.last is Expanded);
+
+  testWidgets('a wide screen with nothing to report centres its one column',
       (tester) async {
+    // The right-hand column holds a trust prompt, a finished file, or an
+    // error — and none of those exist for most of a transfer, because
+    // live progress moved inside step 2. So the empty right column is
+    // the ordinary case, not an edge case. An Expanded claims half the
+    // window whether or not it has content, which on macOS left both
+    // cards pinned against the left edge with an empty half beside them.
     await pumpAt(tester, const Size(1400, 900));
 
-    // The two-column layout puts the camera side and the reporting side in
-    // Expanded children of one Row. Narrow builds never do this.
-    final rows = tester.widgetList<Row>(find.byType(Row));
-    final split = rows.any((r) =>
-        r.children.length == 3 &&
-        r.children.first is Expanded &&
-        r.children.last is Expanded);
-    expect(split, isTrue,
-        reason: 'on a wide window the sender block must not be able to push '
-            'the progress bar down, because they are in different columns');
+    expect(isSplit(tester), isFalse,
+        reason: 'a column with no content is not a column');
+
+    // Centred, not merely narrowed: the gap on each side must match.
+    final card = find.text('Your public key');
+    final pageWidth = tester.getSize(find.byType(Scaffold)).width;
+    final box = tester.getRect(
+      find.ancestor(of: card, matching: find.byType(Card)).first,
+    );
+    expect(box.left, closeTo(pageWidth - box.right, 1.0),
+        reason: 'the content should sit in the middle of the window');
+  });
+
+  test('the second column is built only when it has content', () {
+    // The counterpart to the widget test above: that one proves the
+    // single column is centred when there is nothing to report, this one
+    // proves the two-column layout still exists for when there is. The
+    // states that fill it (an unknown sender, a finished file, an error)
+    // need a real camera or a real handshake to reach, so this is
+    // checked against the source — the same reason the trust prompt
+    // below is.
+    final source = File('lib/ui/receive/receive_page.dart').readAsStringSync();
+
+    // The guard, and the Row it guards, must both still be there. A
+    // layout that lost the Row would pass a "not split" assertion for
+    // the wrong reason.
+    expect(source, contains('if (reporting.isEmpty)'),
+        reason: 'the empty second column must still be special-cased');
+    final guard = source.indexOf('if (reporting.isEmpty)');
+    final after = source.substring(guard);
+    expect(after, contains('Expanded('),
+        reason: 'the two-column layout must survive for the states that '
+            'do have something to report');
   });
 
   testWidgets('progress is reported inside the scan step, not after it',
