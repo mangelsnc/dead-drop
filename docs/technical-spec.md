@@ -219,23 +219,24 @@ All frames are binary, big-endian. Two frame types exist: **session header** (on
 +----------+---------+----------+----------+----------+----------+
 |  MAGIC   | VERSION | FILE_ID  |   SEQ    |   SEED   |  DEGREE  |
 |  2 bytes | 1 byte  | 8 bytes  | 4 bytes  | 4 bytes  | 2 bytes  |
-|  "DD"    |   0x01  |  random  |  uint32  |  uint32  |  uint16  |
+|  "DD"    |   0x03  |  random  |  uint32  |  uint32  |  uint16  |
 +----------+---------+----------+----------+----------+----------+
-+---------------------+--------------+----------------------------+
-|     CHUNK_IDS       |    NONCE     |      CIPHERTEXT + TAG      |
-|  2 bytes x DEGREE   |   24 bytes   |       variable             |
-|  uint16 array       |  XSalsa20    |  (chunk_size + 16 bytes)   |
-+---------------------+--------------+----------------------------+
++--------------+----------------------------+
+|    NONCE     |      CIPHERTEXT + TAG      |
+|   24 bytes   |       variable             |
+|  XSalsa20    |  (chunk_size + 16 bytes)   |
++--------------+----------------------------+
 ```
 
-**Typical size:** 577 bytes for a 512-byte chunk (fits in QR v25-M, capacity 1003 bytes)
+**Size:** 573 bytes for a 512-byte chunk, and constant — every data frame
+of a transfer is the same length, because the chunk ids are derived
+rather than transmitted. Fits in QR v25-M (capacity 1003 bytes).
 
 **Field descriptions:**
 - `MAGIC`, `VERSION`, `FILE_ID`: same as session header
 - `SEQ`: monotonically increasing frame sequence number (0, 1, 2, ...)
-- `SEED`: PRNG seed for this frame's chunk selection (allows receiver to reconstruct chunk IDs without transmitting them — future optimization)
-- `DEGREE`: number of source chunks XORed in this frame (sampled from robust soliton distribution)
-- `CHUNK_IDS`: explicit list of chunk indices XORed in this frame (in the MVP; production will derive from SEED)
+- `SEED`: PRNG seed for this frame's chunk selection. The receiver reconstructs the chunk ids from `(SEQ, SEED, CHUNK_COUNT)`; they are not transmitted. See `docs/decisions/0001-derive-chunk-ids-from-the-seed.md`
+- `DEGREE`: number of source chunks XORed in this frame (sampled from robust soliton distribution). Retained although the ids are derived: it distinguishes the metadata frame, which has degree 0, and a derived degree that disagrees with it identifies a desynchronised emitter instead of decoding silently against the wrong chunks
 - `NONCE`: random 24-byte nonce for XSalsa20-Poly1305
 - `CIPHERTEXT + TAG`: encrypted and authenticated chunk payload (chunk_size bytes plaintext + 16 bytes Poly1305 tag)
 
@@ -257,7 +258,7 @@ A **fountain code** solves this: the sender generates an **infinite stream** of 
 - **Degree distribution:** Robust Soliton with parameters c=0.05, delta=0.5
 - **Encoding:** for each frame, sample degree d from the distribution, select d random chunks, XOR them
 - **Decoding:** belief propagation — each degree-1 frame reveals a chunk, which simplifies other frames
-- **Determinism:** chunk selection is derived from `(seed, seq)` via a fully specified 32-bit PRNG, so both sides can reconstruct it bit-for-bit on any platform (future: transmit only seed, not chunk_ids). The construction is `mixSeed(seed, seq)` (splitmix32-style bijective mixing) feeding a xorshift32 generator with explicit Fisher-Yates subset selection — see `app/lib/src/prng.dart` and `spike/src/fountain.py`, which produce identical streams (pinned by golden-vector tests in `app/test/prng_test.dart`). It replaces `dart:math.Random((seed << 32) ^ seq)`, which silently truncated the seed to 32 bits and whose algorithm is not specified across platforms. **Note:** this PRNG is a selection algorithm, not a cryptographic primitive — all cryptography remains in libsodium.
+- **Determinism:** chunk selection is derived from `(seed, seq)` via a fully specified 32-bit PRNG, so both sides reconstruct it bit-for-bit on any platform. Only the seed travels; the chunk ids are not transmitted. The construction is `mixSeed(seed, seq)` (splitmix32-style bijective mixing) feeding a xorshift32 generator with explicit Fisher-Yates subset selection — see `app/lib/src/prng.dart` and `spike/src/fountain.py`, which produce identical streams (pinned by golden-vector tests in `app/test/prng_test.dart`). It replaces `dart:math.Random((seed << 32) ^ seq)`, which silently truncated the seed to 32 bits and whose algorithm is not specified across platforms. **Note:** this PRNG is a selection algorithm, not a cryptographic primitive — all cryptography remains in libsodium.
 
 #### 2.3.3 Chunk size selection
 
@@ -1027,7 +1028,7 @@ class StorageError extends DeadDropError {
 Offset  Size  Field
 ------  ----  -----
 0       2     MAGIC ("DD")
-2       1     VERSION (0x01)
+2       1     VERSION (0x03)
 3       32    SENDER_EPH_PK
 35      32    RECEIVER_PK
 67      8     FILE_ID
@@ -1038,20 +1039,19 @@ Offset  Size  Field
 115     64    SIGNATURE (Ed25519)
 ```
 
-### Data frame (variable size, ~577 bytes for 512 B chunk)
+### Data frame (constant size, 573 bytes for a 512 B chunk)
 
 ```
 Offset  Size  Field
 ------  ----  -----
 0       2     MAGIC ("DD")
-2       1     VERSION (0x01)
+2       1     VERSION (0x03)
 3       8     FILE_ID
 11      4     SEQ (uint32 BE)
 15      4     SEED (uint32 BE)
 19      2     DEGREE (uint16 BE)
-21      2xD   CHUNK_IDS (uint16 BE array)
-21+2D   24    NONCE
-45+2D   N     CIPHERTEXT + TAG (N = chunk_size + 16)
+21      24    NONCE
+45      N     CIPHERTEXT + TAG (N = chunk_size + 16)
 ```
 
 ---

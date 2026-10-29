@@ -1,6 +1,7 @@
 /// qrframe.dart — QR frame packing, rendering and parsing for DeadDrop.
 ///
-/// Ported 1:1 from spike/src/qrframe.py.
+/// Ported from spike/src/qrframe.py; the chunk id list has since been
+/// removed from the wire (see the layout below).
 ///
 /// Frame layout (binary, big-endian):
 ///     MAGIC(2)      "DD"
@@ -8,8 +9,8 @@
 ///     file_id(8)    random transfer id (lets receiver ignore other sessions)
 ///     frame_seq(4)  monotonically increasing frame number
 ///     seed(4)       PRNG seed for this frame's chunk selection
-///     degree(2)     number of chunk ids
-///     chunk_ids     degree × 2 bytes each
+///     degree(2)     how many chunks this frame XORs together; 0 marks
+///                   the metadata frame
 ///     nonce(24)     XSalsa20-Poly1305 nonce for the payload
 ///     payload(N)    encrypted+tagged XOR chunk (chunk_size + 16 bytes)
 library;
@@ -36,7 +37,20 @@ class Frame {
   final Uint8List fileId;
   final int seq;
   final int seed;
-  final List<int> chunkIds;
+
+  /// How many chunks this frame XORs together.
+  ///
+  /// The ids themselves are not transmitted: the receiver recomputes
+  /// them from (seq, seed, k) with [chunkIdsFor]. See
+  /// docs/decisions/0001-derive-chunk-ids-from-the-seed.md.
+  ///
+  /// The count still travels, so that a receiver can tell the metadata
+  /// frame (degree 0, no chunks) from a data frame without recomputing
+  /// anything, and so that a recomputed degree disagreeing with this one
+  /// identifies a desynchronised emitter instead of decoding silently
+  /// against the wrong chunks.
+  final int degree;
+
   final Uint8List nonce;
   final Uint8List payload;
 
@@ -44,14 +58,16 @@ class Frame {
     required this.fileId,
     required this.seq,
     required this.seed,
-    required this.chunkIds,
+    required this.degree,
     required this.nonce,
     required this.payload,
   });
 
+  /// Whether this frame carries file metadata rather than file data.
+  bool get isMetadata => degree == 0;
+
   Uint8List pack() {
-    final degree = chunkIds.length;
-    final totalSize = frameHeaderSize + degree * 2 + nonceSize + payload.length;
+    final totalSize = frameHeaderSize + nonceSize + payload.length;
     final out = ByteData(totalSize);
     var offset = 0;
 
@@ -72,11 +88,6 @@ class Frame {
     // degree(2)
     out.setUint16(offset, degree, Endian.big);
     offset += 2;
-    // chunk_ids (degree × 2 bytes)
-    for (final cid in chunkIds) {
-      out.setUint16(offset, cid, Endian.big);
-      offset += 2;
-    }
     // nonce(24)
     out.buffer.asUint8List().setRange(offset, offset + nonceSize, nonce);
     offset += nonceSize;
@@ -115,12 +126,6 @@ class Frame {
     // degree(2)
     final degree = input.getUint16(offset, Endian.big);
     offset += 2;
-    // chunk_ids
-    final chunkIds = <int>[];
-    for (var i = 0; i < degree; i++) {
-      chunkIds.add(input.getUint16(offset, Endian.big));
-      offset += 2;
-    }
     // nonce(24)
     final nonce = data.sublist(offset, offset + nonceSize);
     offset += nonceSize;
@@ -131,7 +136,7 @@ class Frame {
       fileId: fileId,
       seq: seq,
       seed: seed,
-      chunkIds: chunkIds,
+      degree: degree,
       nonce: nonce,
       payload: payload,
     );
