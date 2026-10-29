@@ -691,17 +691,47 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       ),
                     ),
                   if (state.isScanning) ...[
-                    Container(
-                      height: 300,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: DeadDropColors.borderInput),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: DesktopScannerView(
-                          onDetect: notifier.processRawQr,
-                          onMeasured: _rememberMeasurement,
+                    // Capped so the preview keeps the camera's own shape
+                    // instead of being poured into a fixed box.
+                    //
+                    // A plain height of 300 stretched across a desktop
+                    // window gives a wide, short box, and BoxFit.cover
+                    // then crops a 4:3 image top and bottom: the preview
+                    // read as letterboxed and the QR had to be held far
+                    // enough away to fit the surviving strip, which
+                    // costs exactly the pixels per module a scan needs.
+                    // Reported from macOS as "the camera looks very
+                    // wide" against a square-looking one on Android.
+                    //
+                    // 4/3 is the fallback, which is what every backend
+                    // here reports; the real figure replaces it as soon
+                    // as the camera says what it is.
+                    Center(
+                      child: ConstrainedBox(
+                        // Tall enough to be useful, never wider than the
+                        // camera's own shape at that height, so nothing
+                        // is cropped away.
+                        constraints: const BoxConstraints(
+                          maxHeight: 360,
+                          maxWidth: 360 * 4 / 3,
+                        ),
+                        child: AspectRatio(
+                          aspectRatio: 4 / 3,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: DeadDropColors.borderInput,
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: DesktopScannerView(
+                                onDetect: notifier.processRawQr,
+                                onMeasured: _rememberMeasurement,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
