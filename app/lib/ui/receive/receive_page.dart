@@ -32,6 +32,7 @@ class ReceiveState {
     this.framesReceived = 0,
     this.chunksDecoded = 0,
     this.totalChunks = 0,
+    this.decodeProgress = 0.0,
     this.fileBytes,
     this.fileName,
     this.savedPath,
@@ -84,7 +85,15 @@ class ReceiveState {
   /// are ignored, and nothing has been written to the TOFU store.
   final PendingSender? pendingSender;
 
-  double get progress => totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
+  /// How full the bar is.
+  ///
+  /// Comes from the decoder, which counts captured-but-unrevealed
+  /// frames as the work they are. Chunks resolved over total reads near
+  /// zero for most of a large transfer and then jumps, which looked
+  /// like a stall on a device. See [LTDecoder.progress].
+  final double decodeProgress;
+
+  double get progress => decodeProgress;
 
   bool get sessionActive => receiver != null;
 
@@ -98,6 +107,7 @@ class ReceiveState {
     int? framesReceived,
     int? chunksDecoded,
     int? totalChunks,
+    double? decodeProgress,
     Uint8List? fileBytes,
     String? fileName,
     String? savedPath,
@@ -118,6 +128,7 @@ class ReceiveState {
       framesReceived: framesReceived ?? this.framesReceived,
       chunksDecoded: chunksDecoded ?? this.chunksDecoded,
       totalChunks: totalChunks ?? this.totalChunks,
+      decodeProgress: decodeProgress ?? this.decodeProgress,
       fileBytes: fileBytes ?? this.fileBytes,
       fileName: fileName ?? this.fileName,
       savedPath: savedPath ?? this.savedPath,
@@ -288,6 +299,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     state = state.copyWith(
       framesReceived: state.framesReceived + 1,
       chunksDecoded: decodedAfter,
+      decodeProgress: receiver.decoder?.progress ?? 0.0,
       fileName: receiver.fileName ?? state.fileName,
     );
 
@@ -748,24 +760,47 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       const SizedBox(height: 12),
-                      // Two numbers on two lines, because on one line
-                      // they were read as one: a fountain code scans
-                      // more frames than the file has chunks, so the
-                      // frame count passing the chunk total looks like
-                      // a bug when the two sit side by side. The chunk
-                      // count is the progress; the frame count is only
-                      // how much work that took.
+                      // A percentage, not a chunk count.
+                      //
+                      // "24 of 2137 chunks" is true and useless: belief
+                      // propagation reveals almost nothing until it
+                      // cascades, so a transfer that was nearly half
+                      // done read as 1% and looked stalled. The
+                      // percentage comes from the decoder, which counts
+                      // captured-but-unrevealed frames as the work they
+                      // are.
                       Text(
-                        '${state.chunksDecoded} of ${state.totalChunks} '
-                        'chunks recovered',
+                        state.fileBytes != null
+                            ? 'Complete'
+                            : '${(state.progress * 100).round()}% received',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       Text(
-                        '${state.framesReceived} codes scanned',
+                        '${state.chunksDecoded} of ${state.totalChunks} '
+                        'chunks rebuilt · ${state.framesReceived} codes '
+                        'scanned',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: DeadDropColors.textSecondary,
                             ),
                       ),
+                      // Said once, where it is needed: the chunk count
+                      // staying low while the bar moves is how this
+                      // works, not a fault.
+                      if (state.fileBytes == null &&
+                          state.chunksDecoded < state.totalChunks / 2)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'Most chunks are rebuilt near the end, so this '
+                            'count stays low until it suddenly finishes.',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: DeadDropColors.textSecondary,
+                                ),
+                          ),
+                        ),
                       // Cancel is offered only while a transfer is still
                       // running: a slow one usually means the sender needs to
                       // change fps or chunk size, and without this the only
