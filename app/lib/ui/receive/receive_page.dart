@@ -1424,24 +1424,28 @@ class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
               onSubmitted: (_) => _accept(),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: widget.onReject,
-                    icon: const Icon(Icons.close),
-                    label: const Text("Codes don't match"),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _accept,
-                    icon: const Icon(Icons.check),
-                    label: const Text('Codes match'),
-                  ),
-                ),
-              ],
+            // Stacked, not side by side. Half a phone's width is not
+            // enough for "Codes don't match" to stay on one line, and a
+            // decision about trust is the wrong place to make someone
+            // read a wrapped label. The affirmative one goes first,
+            // where the thumb is.
+            FilledButton.icon(
+              onPressed: _accept,
+              icon: const Icon(Icons.check),
+              label: const Text('Codes match'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: widget.onReject,
+              icon: const Icon(Icons.close),
+              label: const Text("Codes don't match"),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+                foregroundColor: DeadDropColors.error,
+              ),
             ),
           ],
         ),
@@ -1478,84 +1482,25 @@ class _SenderIdentityCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // A known sender collapses to one line.
+    // Always one line, whether or not this sender is new.
     //
-    // This card used to sit between the camera preview and the progress
-    // bar at full height, so on a phone the user had to choose between
-    // aiming the camera and watching progress — scrolling between the two
-    // during a transfer, which is the one moment attention is scarce.
+    // It used to be a full-height card between the camera and the
+    // progress bar, so on a phone the user had to choose between aiming
+    // and watching progress — scrolling between the two during a
+    // transfer, which is the one moment attention is scarce.
     //
-    // For a sender they have already checked and named there is nothing to
-    // act on, so it says who it is and gets out of the way; the full
-    // fingerprint is still one tap away. A NEW sender keeps the full
-    // warning, because there the user is being asked to do something.
-    if (!isNewSender) {
-      return _KnownSenderLine(fingerprint: fingerprint, name: name);
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.warning_amber, color: DeadDropColors.warning),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    name == null ? 'Sender identity' : 'From $name',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: SelectableText(
-                fingerprint,
-                style: technicalTextStyle(
-                  ref,
-                  relativeTo: 1.4,
-                  letterSpacing: 2,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: DeadDropColors.warning.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: DeadDropColors.warning.withValues(alpha: 0.4),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.info_outline,
-                    color: DeadDropColors.warning,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'New sender — verify this fingerprint through '
-                      'another channel (in person, phone call) to '
-                      'confirm the sender\'s identity.',
-                      style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(color: DeadDropColors.warning),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    // A new sender used to keep a warning card telling them to verify
+    // the fingerprint through another channel. By the time it appears
+    // they have already done exactly that: read the code out loud,
+    // compared it, pressed "Codes match" in the unknown-sender prompt.
+    // Repeating the instruction afterwards teaches people that these
+    // warnings can be ignored, which is the opposite of what a warning
+    // is for.
+    //
+    // isNewSender means new to the address book — acceptPendingSender
+    // sets it true at the moment of acceptance — which is not the same
+    // thing as unverified.
+    return _KnownSenderLine(fingerprint: fingerprint, name: name);
   }
 }
 
