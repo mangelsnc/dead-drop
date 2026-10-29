@@ -100,7 +100,7 @@ jobs:
 
       - name: Build release
         working-directory: app
-        run: flutter build linux --release
+        run: flutter build linux --release $(tool/build_args.sh)
 
       - name: Package
         run: |
@@ -192,7 +192,11 @@ jobs:
 
       - name: Build release
         working-directory: app
-        run: flutter build windows --release
+        # bash explicitly: the default shell on a Windows runner is
+        # PowerShell, which would read $(...) as a subexpression instead
+        # of running the script, and the build would lose its version.
+        shell: bash
+        run: flutter build windows --release $(tool/build_args.sh)
 
       - name: Package
         shell: pwsh
@@ -241,7 +245,7 @@ jobs:
 
       - name: Build release
         working-directory: app
-        run: flutter build macos --release
+        run: flutter build macos --release $(tool/build_args.sh)
 
       - name: Package
         run: |
@@ -354,7 +358,7 @@ jobs:
 
       - name: Build release APK
         working-directory: app
-        run: flutter build apk --release
+        run: flutter build apk --release $(tool/build_args.sh)
 
       # Prove the APK is signed with the upload key rather than the debug
       # fallback. build.gradle swaps the key silently when key.properties is
@@ -443,7 +447,7 @@ jobs:
 
       - name: Build iOS (unsigned)
         working-directory: app
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign $(tool/build_args.sh)
 
       # The camera permission string is the one iOS requirement that fails at
       # runtime rather than at build time: without it the scanner dies the
