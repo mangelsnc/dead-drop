@@ -902,22 +902,20 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             ),
           ];
 
+          // Only the decision lives out here. Who the sender is now
+          // sits inside step 2, under the camera reading them — it
+          // describes what that step is doing. This block kept its own
+          // copy as well, so "From MacBook" appeared twice on the
+          // screen at once.
+          //
+          // A prompt that must be answered before decoding can continue
+          // is a different thing, and keeps its own card.
           final senderBlock = <Widget>[
-            // ── Unknown sender: decision required before decoding ────
             if (state.awaitingSenderApproval) ...[
               _UnknownSenderPrompt(
                 fingerprint: state.pendingSender!.fingerprint,
                 onAccept: (name) => notifier.acceptPendingSender(name: name),
                 onReject: notifier.rejectPendingSender,
-              ),
-              const SizedBox(height: 16),
-            ]
-            // ── Sender identity (shown after bootstrap) ──────────
-            else if (state.senderFingerprint != null) ...[
-              _SenderIdentityCard(
-                fingerprint: state.senderFingerprint!,
-                isNewSender: state.isNewSender,
-                name: state.senderName,
               ),
               const SizedBox(height: 16),
             ],
