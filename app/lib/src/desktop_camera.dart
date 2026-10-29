@@ -260,8 +260,18 @@ class DesktopCameraScanner {
       final id = await _platform.createCameraWithSettings(
         preferred,
         MediaSettings(
+          // What limits a scan is pixels per module, not frame rate.
+          //
+          // medium gives 720x480. A 512-byte chunk is a 117x117 module
+          // code covering roughly 264 of those pixels held at arm's
+          // length: 2.3 pixels per module, under the ~3 a decoder needs,
+          // and 1024-byte chunks fall to 1.7. high doubles that budget
+          // for the same decode cost, measured at 8.0 ms against 7.9.
+          //
+          // Desktop stays low: a webcam sits close to the other screen,
+          // and camera_linux can fail to initialise above it.
           resolutionPreset:
-              _isMobile ? ResolutionPreset.medium : ResolutionPreset.low,
+              _isMobile ? ResolutionPreset.high : ResolutionPreset.low,
           enableAudio: false,
         ),
       );
