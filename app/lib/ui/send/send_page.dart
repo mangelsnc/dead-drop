@@ -562,106 +562,85 @@ class _SendPageState extends ConsumerState<SendPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Send a file')),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          // Tell the notifier how large a QR the SENDING screen could
-          // draw, so a receiver's hint is negotiated against what this
-          // device can actually show.
-          //
-          // Measured from this window rather than from the sending view,
-          // which does not exist yet when the hint arrives. It models
-          // that view: the whole window less its 24px margins and the
-          // furniture above and below the code — not this page's layout,
-          // whose column may be half the width in the two-column desktop
-          // arrangement. Getting that wrong made a MacBook negotiate
-          // itself down to 256-byte chunks, four times more codes than
-          // its screen needed.
-          final qrWidth = constraints.maxWidth - _sendingViewMargins;
-          final qrHeight = constraints.maxHeight - _sendingViewFurniture;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            notifier.reportQrDisplaySize(qrDisplaySize(qrWidth, qrHeight));
-          });
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ContentWidthLimit(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Steps 1 and 2 are the actions; configuration and identity are
-                  // supporting material. On a desktop window they sit side by
-                  // side rather than stacking into a column that scrolls while
-                  // two thirds of the window stays empty. On a phone the same
-                  // widgets stack in this order.
-                  TwoColumnLayout(
-                    start: [
-                      // ── Step 1: Select file ──────────────────────────────
-                      _StepCard(
-                        step: 1,
-                        title: 'Choose a file',
-                        isComplete: state.fileBytes != null,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (state.fileName != null) ...[
-                              _FileInfoTile(
-                                fileName: state.fileName!,
-                                fileSize: state.fileBytes!.length,
-                                fileExtension: state.fileExtension,
-                                filePath: state.filePath,
-                                fileBytes: state.fileBytes,
-                              ),
-                              const SizedBox(height: 12),
-                            ],
-                            FilledButton.tonalIcon(
-                              onPressed: notifier.pickFile,
-                              icon: const Icon(Icons.folder_open),
-                              label: Text(
-                                state.fileName == null
-                                    ? 'Choose file'
-                                    : 'Change file',
-                              ),
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size(double.infinity, 52),
-                              ),
-                            ),
-                          ],
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ContentWidthLimit(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Steps 1 and 2 are the actions; configuration and identity are
+              // supporting material. On a desktop window they sit side by
+              // side rather than stacking into a column that scrolls while
+              // two thirds of the window stays empty. On a phone the same
+              // widgets stack in this order.
+              TwoColumnLayout(
+                start: [
+                  // ── Step 1: Select file ──────────────────────────────
+                  _StepCard(
+                    step: 1,
+                    title: 'Choose a file',
+                    isComplete: state.fileBytes != null,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (state.fileName != null) ...[
+                          _FileInfoTile(
+                            fileName: state.fileName!,
+                            fileSize: state.fileBytes!.length,
+                            fileExtension: state.fileExtension,
+                            filePath: state.filePath,
+                            fileBytes: state.fileBytes,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        FilledButton.tonalIcon(
+                          onPressed: notifier.pickFile,
+                          icon: const Icon(Icons.folder_open),
+                          label: Text(
+                            state.fileName == null
+                                ? 'Choose file'
+                                : 'Change file',
+                          ),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 52),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // ── Step 2: Scan receiver key ────────────────────────
-                      _StepCard(
-                        step: 2,
-                        title: 'Scan receiver\'s QR',
-                        isComplete: state.receiverPk != null,
-                        child: _ReceiverKeySection(
-                          state: state,
-                          notifier: notifier,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    end: [
-                      // ── Step 3: Configure (collapsible) ──────────────
-                      _ConfigSection(state: state, notifier: notifier),
-                      const SizedBox(height: 16),
-
-                      // ── Identity fingerprint ─────────────────────────
-                      const _IdentityFingerprintCard(),
-                      const SizedBox(height: 16),
-                    ],
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
 
-                  // Full width in both layouts: this is the one action that acts
-                  // on everything above it, and it should not look like it
-                  // belongs to either column.
-                  _StartSection(state: state, notifier: notifier),
+                  // ── Step 2: Scan receiver key ────────────────────────
+                  _StepCard(
+                    step: 2,
+                    title: 'Scan receiver\'s QR',
+                    isComplete: state.receiverPk != null,
+                    child: _ReceiverKeySection(
+                      state: state,
+                      notifier: notifier,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                end: [
+                  // ── Step 3: Configure (collapsible) ──────────────
+                  _ConfigSection(state: state, notifier: notifier),
+                  const SizedBox(height: 16),
+
+                  // ── Identity fingerprint ─────────────────────────
+                  const _IdentityFingerprintCard(),
+                  const SizedBox(height: 16),
                 ],
               ),
-            ),
-          );
-        },
+              const SizedBox(height: 8),
+
+              // Full width in both layouts: this is the one action that acts
+              // on everything above it, and it should not look like it
+              // belongs to either column.
+              _StartSection(state: state, notifier: notifier),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1566,6 +1545,17 @@ class _SendingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Uses the size the QR was last given, which _QrDisplay reports as
+    // it lays out. Zero before the first frame, when there is nothing
+    // to advise about yet.
+    final advice = state.qrDisplaySizePx > 0
+        ? qrSizeAdvice(
+            displaySize: state.qrDisplaySizePx,
+            chunkSize: state.chunkSize,
+            ecLevel: state.ecLevel,
+          )
+        : null;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sending'),
@@ -1590,17 +1580,27 @@ class _SendingScreen extends StatelessWidget {
 
               // QR display — takes remaining space
               Expanded(
-                child: Center(child: _QrDisplay(state: state)),
+                child: Center(
+                  child: _QrDisplay(state: state, notifier: notifier),
+                ),
               ),
               const SizedBox(height: 24),
 
               // Progress info
+              // Codes shown, against the fewest a receiver needs.
+              //
+              // This read "Frame 599/195", which looks broken: the
+              // denominator was the chunk count, but the emitter loops
+              // for as long as it takes, so the numerator passes it
+              // routinely and says nothing is wrong. A fountain code
+              // has no total — only a floor.
               Text(
                 state.showingBootstrap
                     ? 'Session bootstrap'
                     : state.totalFrames != null
-                    ? 'Frame ${state.framesEmitted}/${state.totalFrames}'
-                    : 'Frame ${state.framesEmitted}',
+                    ? 'Code ${state.framesEmitted} · '
+                          '${state.totalFrames} needed at least'
+                    : 'Code ${state.framesEmitted}',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 4),
@@ -1610,6 +1610,39 @@ class _SendingScreen extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: DeadDropColors.textSecondary),
               ),
+              // Advice about the code's size on screen, in the column
+              // rather than inside the QR widget. It used to sit in
+              // _QrDisplay, which lives in an Expanded sized for the
+              // code alone, so the text overflowed across the frame
+              // counter and the settings line below it.
+              if (advice != null) ...[
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      advice.isProblem
+                          ? Icons.warning_amber_rounded
+                          : Icons.open_in_full,
+                      size: 18,
+                      color: advice.isProblem
+                          ? DeadDropColors.error
+                          : DeadDropColors.textSecondary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        advice.text,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: advice.isProblem
+                              ? DeadDropColors.error
+                              : DeadDropColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 24),
 
               // Restart and Stop. Restart exists because finding workable
@@ -1799,18 +1832,6 @@ class _ChunkSizeSelector extends StatelessWidget {
   }
 }
 
-/// The horizontal margins the sending view puts around the QR.
-///
-/// `EdgeInsets.all(24)` on each side; see `_SendingScreen.build`. Named
-/// so the estimate made on the configuration page cannot drift from the
-/// layout it is predicting.
-const double _sendingViewMargins = 48;
-
-/// The vertical space the sending view spends on everything but the QR:
-/// the app bar, the file name and size, the frame counter and its
-/// settings line, and the button row, with their gaps.
-const double _sendingViewFurniture = 300;
-
 /// How large to draw the emitted QR, given the space the layout offers.
 ///
 /// A dense code has to survive two reductions before it is read: the
@@ -1976,6 +1997,49 @@ int? chunkUnlockedByABiggerWindow({
   return best;
 }
 
+/// One line about the size of the code on screen, or null when there is
+/// nothing worth saying.
+///
+/// One line, not two. The two advisories this replaces could both show
+/// at once and contradict each other — "a larger window would fit 2048
+/// bytes" above "this screen is too small for 512" — because one looked
+/// at what a maximised window could do and the other at what this one
+/// can. They are the same question and now have one answer.
+({String text, bool isProblem})? qrSizeAdvice({
+  required double displaySize,
+  required int chunkSize,
+  required String ecLevel,
+}) {
+  final density = pixelsPerModuleOnScreen(
+    displaySize: displaySize,
+    chunkSize: chunkSize,
+    ecLevel: ecLevel,
+  );
+  if (density > 0 && density < kMinUsablePixelsPerModule) {
+    return (
+      text:
+          'This window is too small to show $chunkSize-byte chunks '
+          'clearly. Make it larger, or choose a smaller chunk size in '
+          'Options.',
+      isProblem: true,
+    );
+  }
+  final bigger = chunkUnlockedByABiggerWindow(
+    currentSize: displaySize,
+    currentChunk: chunkSize,
+    ecLevel: ecLevel,
+  );
+  if (bigger != null) {
+    return (
+      text:
+          'A larger window would fit chunks of $bigger bytes: '
+          '${bigger ~/ chunkSize}× fewer codes to show.',
+      isProblem: false,
+    );
+  }
+  return null;
+}
+
 /// Whether the settings in force differ from what the receiver asked
 /// for.
 ///
@@ -2021,27 +2085,32 @@ const double kQrMaxDisplaySize = 720;
 /// generation logic lives in [SendNotifier], so there is a single source of
 /// truth for the emitted sequence.
 class _QrDisplay extends StatelessWidget {
-  const _QrDisplay({required this.state});
+  const _QrDisplay({required this.state, required this.notifier});
 
   final SendState state;
+
+  /// Told how much room the code was given, so a receiver's hint can be
+  /// negotiated against what this screen can really draw.
+  final SendNotifier notifier;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = qrDisplaySize(constraints.maxWidth, constraints.maxHeight);
-        final density = pixelsPerModuleOnScreen(
-          displaySize: size,
-          chunkSize: state.chunkSize,
-          ecLevel: state.ecLevel,
-        );
-        // The next chunk size up that a maximised window could show, if
-        // this window cannot show it but a bigger one could.
-        final biggerChunk = chunkUnlockedByABiggerWindow(
-          currentSize: size,
-          currentChunk: state.chunkSize,
-          ecLevel: state.ecLevel,
-        );
+        // Report the size the QR is actually given, from the one place
+        // that knows it.
+        //
+        // This used to be estimated on the configuration page by taking
+        // the window and subtracting a constant for the sending view's
+        // furniture. The constant was wrong — it left 275 px where the
+        // real code gets about 578 — so a window that could show
+        // 512-byte chunks negotiated itself down to 256, and the screen
+        // then warned about a size it had chosen itself. Measuring
+        // beats guessing at something the layout already knows.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifier.reportQrDisplaySize(size);
+        });
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2069,62 +2138,6 @@ class _QrDisplay extends StatelessWidget {
             // aiming or lighting fixes that — only a smaller chunk does.
             // Reported as a phone-to-Mac transfer sitting at 0% for three
             // minutes.
-            // A bigger window would allow a bigger chunk, which is worth
-            // saying: the difference between 256 and 1024 bytes is four
-            // times as many codes to show, and nothing on screen tells a
-            // user that the window size decides it. Reported from a Mac
-            // transferring 1 MB in 256-byte chunks — about 5,000 codes —
-            // because the window was small.
-            if (biggerChunk != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(
-                      Icons.open_in_full,
-                      size: 18,
-                      color: DeadDropColors.textSecondary,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'A larger window would fit chunks of $biggerChunk '
-                        'bytes: '
-                        '${biggerChunk ~/ state.chunkSize}× fewer codes to '
-                        'show.',
-                        style: Theme.of(context).textTheme.bodySmall
-                            ?.copyWith(color: DeadDropColors.textSecondary),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (density > 0 && density < kMinUsablePixelsPerModule)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(
-                      Icons.warning_amber_rounded,
-                      size: 18,
-                      color: DeadDropColors.error,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'This screen is too small to show ${state.chunkSize}-'
-                        'byte chunks clearly. The receiver is unlikely to '
-                        'read anything — choose a smaller chunk size in '
-                        'Options.',
-                        style: Theme.of(context).textTheme.bodySmall
-                            ?.copyWith(color: DeadDropColors.error),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             if (state.showingBootstrap)
               Text(
                 'Session bootstrap — point the receiver camera here',
