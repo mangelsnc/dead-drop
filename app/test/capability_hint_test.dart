@@ -96,7 +96,7 @@ void main() {
       expect(slow.fps, lessThan(fast.fps));
     });
 
-    test('a low-resolution camera gets smaller codes and more correction',
+    test('a low-resolution camera gets smaller codes, and nothing else',
         () {
       // Below 640x480 there are not enough pixels to resolve a dense QR,
       // so each code should carry fewer modules.
@@ -107,7 +107,11 @@ void main() {
       ));
 
       expect(hint.chunkSize, lessThan(kDefaultChunkSize));
-      expect(hint.ecLevel, 'Q');
+      // This used to raise the correction to Q at the same time, which
+      // undid most of the benefit: at 256 bytes Q is 93 modules against
+      // L's 73. Fewer bytes and stronger correction pull in opposite
+      // directions, and thinning the code out is the entire point here.
+      expect(hint.ecLevel, 'L');
       expect(hint.reason, contains('320x240'));
     });
 
@@ -127,8 +131,19 @@ void main() {
       ));
 
       expect(measured.fps, lessThan(unmeasured.fps));
-      expect(measured.ecLevel, isNot(unmeasured.ecLevel));
       expect(measured.reason, contains('20%'));
+
+      // The correction is deliberately NOT raised either, and this rule
+      // used to raise it. Stronger correction spends modules on
+      // redundancy, so the code gets denser — which is what a
+      // struggling camera cannot cope with. Measured on a device at 256
+      // bytes and 10 fps: level M reached 8% in a minute where level L
+      // reached 50%. Six times faster, for a code with 11% fewer
+      // modules. The redundancy helps against a blurred code; it does
+      // not help against one the camera cannot resolve at all.
+      expect(measured.ecLevel, equals(unmeasured.ecLevel),
+          reason: 'correcting harder is what pushed a marginal camera '
+              'over the edge');
 
       // The chunk is deliberately NOT shrunk. Halving it doubles how many
       // codes must be read, so a camera already missing half of them

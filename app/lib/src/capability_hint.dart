@@ -68,9 +68,6 @@ class EmissionHint {
 /// would be useless.
 const List<double> _fpsOptions = [4, 6, 8, 10, 12, 15, 20];
 
-/// Error-correction levels, weakest to strongest. Stronger correction
-/// survives a blurrier image but fits less data per code.
-const List<String> _ecLevels = ['L', 'M', 'Q', 'H'];
 
 /// Picks the largest option that does not exceed [value].
 double _fpsAtMost(double value) {
@@ -138,8 +135,12 @@ EmissionHint suggestEmission(CameraCapability camera) {
   if (pixels > 0 && pixels < 640 * 480) {
     // Not enough pixels to resolve a dense code: fewer bytes per QR means
     // fewer modules, which means each module covers more pixels.
+    //
+    // This also raised the correction to Q, which undid most of it:
+    // at 256 bytes, Q is 93 modules against L's 73. Fewer bytes and
+    // stronger correction pull in opposite directions, and the whole
+    // point here is to thin the code out.
     chunkSize = 256;
-    ec = 'Q';
     reasons.add('a low-resolution camera (${camera.width}x${camera.height})');
   }
 
@@ -148,17 +149,26 @@ EmissionHint suggestEmission(CameraCapability camera) {
     // Reading fewer than half the frames. Whatever the cause — focus,
     // lighting, a shaky hand — the stream is too demanding as it is.
     //
-    // Slow down and correct harder, but do NOT shrink the chunk. Halving
-    // it doubles how many codes must be read, so a camera already missing
-    // half of them needs twice as many attempts at the same miss rate:
-    // the transfer gets longer, not more reliable. Reported from a phone
-    // as "I always have to read about 2.5x the chunk count", with a
-    // 653 KB file split into 2614 chunks of 256 B.
+    // Slow down, and do NOT touch the chunk size or the correction.
     //
-    // The fountain code is not the problem — measured overhead is 1.15x
-    // at that chunk count. The missing frames are.
+    // Halving the chunk doubles how many codes must be read, so a
+    // camera already missing half of them needs twice as many attempts
+    // at the same miss rate: the transfer gets longer, not more
+    // reliable. Reported from a phone as "I always have to read about
+    // 2.5x the chunk count", with a 653 KB file split into 2614 chunks.
+    //
+    // Raising the correction was worse, and this rule used to do it.
+    // Stronger correction spends modules on redundancy, so the code
+    // gets denser — which is the thing a struggling camera cannot
+    // cope with. Measured on a device at 256 bytes and 10 fps: level M
+    // reached 8% in a minute, level L reached 50%. Six times faster,
+    // for a code with 11% fewer modules. A camera at the edge is
+    // pushed over it by very little, and correcting harder is pushing.
+    //
+    // The redundancy would help against a blurred or partly obscured
+    // code. It does not help against a code the camera cannot resolve
+    // at all, and that is the failure being seen here.
     fps = _fpsAtMost(fps * 0.75);
-    ec = _ecLevels[(_ecLevels.indexOf(ec) + 1).clamp(0, _ecLevels.length - 1)];
     reasons.add('only ${(rate * 100).round()}% of frames readable so far');
   }
 
