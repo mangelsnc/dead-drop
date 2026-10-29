@@ -383,12 +383,46 @@ class Session {
 // ---------------------------------------------------------------------------
 
 /// Builds the encrypted metadata payload: a compact JSON document with the
-/// original file name. Kept deliberately small (it occupies one QR frame).
-Uint8List buildFileMetadataPayload({String? fileName}) {
+/// original file name, padded to [padTo] bytes.
+///
+/// The padding is why this is not simply the JSON. A metadata frame
+/// carrying only a file name is a 37-module QR where a 1024-byte data
+/// chunk is 141, so without padding every 32nd frame changes the code's
+/// geometry completely: on screen it reads as a flash, and a receiver's
+/// auto-exposure and binarizer have to re-adapt afterwards, during
+/// frames that carry actual data.
+///
+/// It also stops the metadata frames being the obviously smaller ones in
+/// a sequence someone is watching over your shoulder. That is a side
+/// benefit, not a guarantee: frame sizes are not the only thing such an
+/// observer sees.
+///
+/// Padding is inside the encrypted payload, so it costs a receiver
+/// nothing and tells an observer nothing. It is a JSON field rather than
+/// trailing bytes because [parseFileMetadataPayload] rejects anything
+/// after the document.
+Uint8List buildFileMetadataPayload({String? fileName, int padTo = 0}) {
+  final doc = <String, dynamic>{'name': fileName ?? ''};
+  final bare = utf8.encode(jsonEncode(doc));
+  if (padTo <= bare.length) return Uint8List.fromList(bare);
+
+  // Adding the field costs its key, quotes, colon and comma before any
+  // padding character lands, so measure rather than assume.
+  final withEmptyPad = utf8.encode(jsonEncode({...doc, _padKey: ''}));
+  final room = padTo - withEmptyPad.length;
+  if (room <= 0) return Uint8List.fromList(bare);
   return Uint8List.fromList(
-    utf8.encode(jsonEncode({'name': fileName ?? ''})),
+    utf8.encode(jsonEncode({...doc, _padKey: _padChar * room})),
   );
 }
+
+/// The field [buildFileMetadataPayload] pads with. Ignored on parse: a
+/// reader only ever looks up the keys it knows.
+const String _padKey = 'p';
+
+/// A character that survives JSON encoding unescaped and as a single
+/// byte in UTF-8, so the padded length is the length asked for.
+const String _padChar = 'A';
 
 /// Parses the decrypted metadata payload. Returns an empty map on malformed
 /// input — metadata is a convenience, never a reason to fail a transfer.
