@@ -1661,27 +1661,34 @@ class _ChunkSizeSelector extends StatelessWidget {
   }
 }
 
-/// How wide to draw the emitted QR, given the space the layout offers.
+/// How large to draw the emitted QR, given the space the layout offers.
 ///
 /// A dense code has to survive two reductions before it is read: the
 /// sender's own rasterisation, and the receiver's camera. A 1024-byte
-/// chunk is a 157x157 module code, so at the 300 logical pixels this
-/// used to be fixed at, a module was under two pixels on the sender's
-/// screen -- destroyed before any camera saw it. Filling the available
-/// width gives those modules room on a phone and on a desktop window
-/// alike.
+/// chunk is a 141-module code, so at the 300 logical pixels this used to
+/// be fixed at, a module was about two pixels on the sender's screen --
+/// degraded before any camera saw it. Filling the space available gives
+/// those modules room on a phone and on a desktop window alike.
 ///
-/// [kQrMinDisplaySize] keeps a narrow window from shrinking the code
-/// below what the old fixed size gave, and [kQrMaxDisplaySize] stops a
-/// maximised desktop window from drawing a QR nobody can fit in frame.
-double qrDisplaySize(double available) {
-  if (!available.isFinite) return kQrMinDisplaySize;
-  final usable = available - _qrPadding * 2;
-  return usable.clamp(kQrMinDisplaySize, kQrMaxDisplaySize);
+/// Both dimensions are needed, and the result never exceeds either.
+/// Sizing on width alone drew a code taller than the room the layout had
+/// for it on a short window, and the frame counter and buttons below
+/// were painted over the modules -- which corrupts the very thing the
+/// camera is trying to read. Reported from macOS.
+///
+/// There is deliberately no lower bound. One would have to be either
+/// ignored when the window is smaller than it, or honoured by drawing
+/// outside the box, and that overflow is the bug above. A small code is
+/// hard to scan; a code with a button drawn across it cannot be scanned
+/// at all.
+double qrDisplaySize(double availableWidth, double availableHeight) {
+  final width =
+      availableWidth.isFinite ? availableWidth - _qrPadding * 2 : 0.0;
+  final height =
+      availableHeight.isFinite ? availableHeight - _qrPadding * 2 : 0.0;
+  final usable = width < height ? width : height;
+  return usable.clamp(0.0, kQrMaxDisplaySize);
 }
-
-/// The floor for [qrDisplaySize]: the size the renderer used to be fixed at.
-const double kQrMinDisplaySize = 300;
 
 /// The ceiling for [qrDisplaySize].
 ///
@@ -1715,7 +1722,7 @@ class _QrDisplay extends StatelessWidget {
               data: state.currentQrData!,
               version: QrVersions.auto,
               errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-              size: qrDisplaySize(constraints.maxWidth),
+              size: qrDisplaySize(constraints.maxWidth, constraints.maxHeight),
               backgroundColor: Colors.white,
             ),
           ),

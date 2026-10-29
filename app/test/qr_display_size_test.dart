@@ -14,24 +14,47 @@ int _moduleCountFor(int bytes, int ecLevel) {
 
 void main() {
   group('qrDisplaySize', () {
-    test('fills the width it is given', () {
-      expect(qrDisplaySize(500), 500 - 32);
-      expect(qrDisplaySize(600), 600 - 32);
+    test('fills the space it is given', () {
+      expect(qrDisplaySize(500, 2000), 500 - 32);
+      expect(qrDisplaySize(2000, 500), 500 - 32);
     });
 
-    test('never draws smaller than the old fixed size', () {
-      expect(qrDisplaySize(100), kQrMinDisplaySize);
-      expect(qrDisplaySize(0), kQrMinDisplaySize);
+    test('is limited by height as well as width', () {
+      // A wide, short window. Sizing on width alone drew a code taller
+      // than its box, and the frame counter and buttons below it were
+      // painted over the modules -- corrupting the code the camera
+      // reads. Reported from macOS.
+      expect(qrDisplaySize(1400, 420), 420 - 32);
+      expect(qrDisplaySize(1400, 420), lessThan(qrDisplaySize(1400, 2000)));
+    });
+
+    test('never asks for more room than it was given', () {
+      // The overflow property itself, over the whole range rather than
+      // at the sizes that happened to be reported.
+      for (final w in [120.0, 320.0, 411.0, 800.0, 1400.0, 4000.0]) {
+        for (final h in [60.0, 200.0, 420.0, 900.0, 2000.0]) {
+          final size = qrDisplaySize(w, h);
+          expect(size, lessThanOrEqualTo(w), reason: '${w}x$h');
+          expect(size, lessThanOrEqualTo(h), reason: '${w}x$h');
+        }
+      }
     });
 
     test('stops growing past what fits in a camera frame', () {
-      expect(qrDisplaySize(4000), kQrMaxDisplaySize);
+      expect(qrDisplaySize(4000, 4000), kQrMaxDisplaySize);
     });
 
-    test('an unbounded width falls back to the floor rather than infinity',
-        () {
-      expect(qrDisplaySize(double.infinity), kQrMinDisplaySize);
-      expect(qrDisplaySize(double.infinity).isFinite, isTrue);
+    test('never returns a negative size', () {
+      for (final h in [0.0, 10.0, 32.0]) {
+        expect(qrDisplaySize(1400, h), greaterThanOrEqualTo(0));
+      }
+    });
+
+    test('unbounded constraints produce nothing rather than infinity', () {
+      // An unbounded box cannot say how much room there is, and a code
+      // sized to infinity would crash the layout.
+      expect(qrDisplaySize(double.infinity, double.infinity), 0);
+      expect(qrDisplaySize(double.infinity, 500).isFinite, isTrue);
     });
 
     test('256 and 512 byte chunks clear three pixels per module on a '
@@ -44,7 +67,7 @@ void main() {
       // 392 is a 411-pixel-wide phone (the Redmi Note 14 this was
       // reported from) less the page's own horizontal padding.
       const phoneWidth = 392.0;
-      final size = qrDisplaySize(phoneWidth);
+      final size = qrDisplaySize(phoneWidth, 2000);
 
       for (final chunk in [256, 512]) {
         final modules = _moduleCountFor(chunk, QrErrorCorrectLevel.M);
@@ -67,7 +90,7 @@ void main() {
       // confront the arithmetic rather than pass by accident.
       const phoneWidth = 392.0;
       final modules = _moduleCountFor(1024, QrErrorCorrectLevel.M);
-      expect(qrDisplaySize(phoneWidth) / modules, lessThan(3.0));
+      expect(qrDisplaySize(phoneWidth, 2000) / modules, lessThan(3.0));
       expect(modules * 3, greaterThan(phoneWidth));
     });
 
