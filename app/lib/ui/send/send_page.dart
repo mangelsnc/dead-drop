@@ -1661,6 +1661,36 @@ class _ChunkSizeSelector extends StatelessWidget {
   }
 }
 
+/// How wide to draw the emitted QR, given the space the layout offers.
+///
+/// A dense code has to survive two reductions before it is read: the
+/// sender's own rasterisation, and the receiver's camera. A 1024-byte
+/// chunk is a 157x157 module code, so at the 300 logical pixels this
+/// used to be fixed at, a module was under two pixels on the sender's
+/// screen -- destroyed before any camera saw it. Filling the available
+/// width gives those modules room on a phone and on a desktop window
+/// alike.
+///
+/// [kQrMinDisplaySize] keeps a narrow window from shrinking the code
+/// below what the old fixed size gave, and [kQrMaxDisplaySize] stops a
+/// maximised desktop window from drawing a QR nobody can fit in frame.
+double qrDisplaySize(double available) {
+  if (!available.isFinite) return kQrMinDisplaySize;
+  final usable = available - _qrPadding * 2;
+  return usable.clamp(kQrMinDisplaySize, kQrMaxDisplaySize);
+}
+
+/// The floor for [qrDisplaySize]: the size the renderer used to be fixed at.
+const double kQrMinDisplaySize = 300;
+
+/// The ceiling for [qrDisplaySize].
+///
+/// Past this a code stops being easier to scan and starts being hard to
+/// hold entirely within the camera's view.
+const double kQrMaxDisplaySize = 720;
+
+const double _qrPadding = 16;
+
 /// Dumb QR renderer: displays exactly what the notifier produced. All frame
 /// generation logic lives in [SendNotifier], so there is a single source of
 /// truth for the emitted sequence.
@@ -1671,30 +1701,32 @@ class _QrDisplay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: QrImageView(
+              data: state.currentQrData!,
+              version: QrVersions.auto,
+              errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
+              size: qrDisplaySize(constraints.maxWidth),
+              backgroundColor: Colors.white,
+            ),
           ),
-          child: QrImageView(
-            data: state.currentQrData!,
-            version: QrVersions.auto,
-            errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-            size: 300,
-            backgroundColor: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (state.showingBootstrap)
-          Text(
-            'Session bootstrap — point the receiver camera here',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-      ],
+          const SizedBox(height: 12),
+          if (state.showingBootstrap)
+            Text(
+              'Session bootstrap — point the receiver camera here',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+        ],
+      ),
     );
   }
 

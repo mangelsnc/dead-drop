@@ -93,7 +93,12 @@ class Emitter {
     if (seq == 0 || seq % metadataInterval == 0) {
       final (nonce, ct) = session.encryptPayload(
         sodium,
-        buildFileMetadataPayload(fileName: session.fileName),
+        // Padded to a chunk, so this frame renders at the same QR
+        // version as the data frames around it and does not flash.
+        buildFileMetadataPayload(
+          fileName: session.fileName,
+          padTo: session.chunkSize,
+        ),
       );
       return Frame(
         fileId: session.fileId,
