@@ -115,43 +115,21 @@ void main() {
             'the progress bar down, because they are in different columns');
   });
 
-  group('progress placement on a narrow screen', () {
-    test('the camera comes first until a session is running', () {
-      // Before a session there is no progress to show, and the camera is
-      // what the user is reaching for.
-      expect(progressGoesAboveCamera(sessionActive: false), isFalse);
-    });
-
-    test('progress goes above the camera once a session is running', () {
-      // Reported twice now, from two different causes. First the
-      // unknown-sender prompt was inserted between camera and progress;
-      // this time the 300-pixel preview plus the cards around it were
-      // enough on their own, and the progress card sat under the fold
-      // with a transfer running perfectly behind it.
-      //
-      // The first transfer from a given sender is the worst case,
-      // because that is when the trust prompt is also on screen — which
-      // is why it was seen once and not on the second scan.
-      expect(progressGoesAboveCamera(sessionActive: true), isTrue);
-    });
-  });
-
-  testWidgets('the narrow layout asks for the order that function returns',
+  testWidgets('progress is reported inside the scan step, not after it',
       (tester) async {
-    // The tests above check the decision; this one checks the page is
-    // actually wired to it, so dropping the call would not pass.
-    //
-    // Before a session, step 2 (the camera) is the first step card on
-    // the page after the key step.
+    // It was a card of its own numbered 3, which on a phone fell below
+    // the fold; hoisting it above the camera then put a 3 above the 2.
+    // While a transfer runs, the progress belongs with the camera.
     await pumpAt(tester, const Size(400, 900));
 
+    // Before a session there is no progress and no result card.
+    expect(find.text('Received file'), findsNothing);
+    expect(find.text('Progress'), findsNothing);
+
+    // Step 2 follows step 1, in plain order, with nothing hoisted.
     final scanY = tester.getTopLeft(find.text('Scan sender QR codes')).dy;
     final keyY = tester.getTopLeft(find.text('Your public key')).dy;
-    expect(scanY, greaterThan(keyY),
-        reason: 'with no session, the camera follows the key step');
-
-    // And there is no progress card yet to be pushed anywhere.
-    expect(find.text('Progress'), findsNothing);
+    expect(scanY, greaterThan(keyY));
   });
 
   testWidgets('the page scrolls rather than overflowing on a short screen',

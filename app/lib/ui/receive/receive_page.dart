@@ -137,8 +137,9 @@ class ReceiveState {
       senderFingerprint: senderFingerprint ?? this.senderFingerprint,
       senderName: senderName ?? this.senderName,
       isNewSender: isNewSender ?? this.isNewSender,
-      pendingSender:
-          clearPendingSender ? null : (pendingSender ?? this.pendingSender),
+      pendingSender: clearPendingSender
+          ? null
+          : (pendingSender ?? this.pendingSender),
     );
   }
 }
@@ -226,8 +227,9 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
       // Same derivation the sender shows in its own identity card — both
       // sides must render an identical string or the comparison the user is
       // asked to make is meaningless.
-      final fingerprint =
-          fingerprintOf(receiver.session!.header.senderVerifyKey);
+      final fingerprint = fingerprintOf(
+        receiver.session!.header.senderVerifyKey,
+      );
 
       // TOFU check: have we seen this sender before?
       final known = await _tofu.isKnown(fingerprint);
@@ -238,8 +240,10 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         // trusted automatically and every later transfer from an impostor
         // would show up as an already-known sender.
         state = state.copyWith(
-          pendingSender:
-              PendingSender(receiver: receiver, fingerprint: fingerprint),
+          pendingSender: PendingSender(
+            receiver: receiver,
+            fingerprint: fingerprint,
+          ),
           senderFingerprint: fingerprint,
           error: null,
         );
@@ -326,7 +330,8 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final bytes = state.fileBytes;
     if (bytes == null) return;
 
-    final name = state.fileName ??
+    final name =
+        state.fileName ??
         'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
 
     try {
@@ -380,7 +385,8 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   /// and the user has no way to know.
   Future<bool> saveToVault(VaultController vaultController) async {
     if (state.fileBytes == null) return false;
-    final name = state.fileName ??
+    final name =
+        state.fileName ??
         'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
     final entry = await vaultController.saveFile(name, state.fileBytes!);
     if (entry == null) {
@@ -418,8 +424,9 @@ final cameraMeasurementStoreProvider = Provider<CameraMeasurementStore>(
   (ref) => CameraMeasurementStore(),
 );
 
-final receiveProvider =
-    StateNotifierProvider<ReceiveNotifier, ReceiveState>((ref) {
+final receiveProvider = StateNotifierProvider<ReceiveNotifier, ReceiveState>((
+  ref,
+) {
   final sodium = ref.watch(sodiumProvider);
   // `read` through a callback, not `watch`. The TOFU store is scoped to
   // the open vault environment; watching it here tied this notifier's
@@ -463,7 +470,6 @@ String displayPath(String raw) {
 }
 
 class _ReceivePageState extends ConsumerState<ReceivePage> {
-
   /// Whether the receiver public key is shown as text instead of a QR code.
   /// The text view helps when the sender cannot scan (no camera, small or
   /// cracked screen, focus issues) and needs to type or paste the key.
@@ -481,7 +487,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   /// The hint this device will put in its handshake QR, from the last
   /// reception. Null on a first run, which simply means no hint.
   EmissionHint? _hint;
-
 
   @override
   void initState() {
@@ -504,7 +509,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     if (!mounted || stored == null) return;
     setState(() => _hint = suggestEmission(stored.capability));
   }
-
 
   /// Remembers what the camera managed, for the next handshake.
   ///
@@ -577,176 +581,139 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
           final showKeyStep = !state.isScanning || wide;
 
           final keyStep = <Widget>[
-              // Step 1: show our public key so the sender can address the file
-              // to us (handshake).
-              _StepCard(
-                step: 1,
-                title: 'Your public key',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (state.receiverKeypair != null) ...[
-                      Center(
-                        child: SegmentedButton<bool>(
-                          // These segments carry their own icons, which
-                          // the selection checkmark displaces.
-                          showSelectedIcon: false,
-                          segments: const [
-                            ButtonSegment(
-                              value: false,
-                              icon: Icon(Icons.qr_code_2),
-                              label: Text('QR'),
-                            ),
-                            ButtonSegment(
-                              value: true,
-                              icon: Icon(Icons.text_fields),
-                              label: Text('Text'),
-                            ),
-                          ],
-                          selected: {_showKeyAsText},
-                          onSelectionChanged: (selection) {
-                            setState(() => _showKeyAsText = selection.first);
-                          },
-                        ),
+            // Step 1: show our public key so the sender can address the file
+            // to us (handshake).
+            _StepCard(
+              step: 1,
+              title: 'Your public key',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (state.receiverKeypair != null) ...[
+                    Center(
+                      child: SegmentedButton<bool>(
+                        // These segments carry their own icons, which
+                        // the selection checkmark displaces.
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: false,
+                            icon: Icon(Icons.qr_code_2),
+                            label: Text('QR'),
+                          ),
+                          ButtonSegment(
+                            value: true,
+                            icon: Icon(Icons.text_fields),
+                            label: Text('Text'),
+                          ),
+                        ],
+                        selected: {_showKeyAsText},
+                        onSelectionChanged: (selection) {
+                          setState(() => _showKeyAsText = selection.first);
+                        },
                       ),
-                      const SizedBox(height: 16),
-                      if (_showKeyAsText)
-                        _PublicKeyTextView(
-                          publicKey: state.receiverKeypair!.publicKey,
-                        )
-                      else
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
+                    ),
+                    const SizedBox(height: 16),
+                    if (_showKeyAsText)
+                      _PublicKeyTextView(
+                        publicKey: state.receiverKeypair!.publicKey,
+                      )
+                    else
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                          ),
+                          child: QrImageView(
+                            data: encodeHandshakeQr(
+                              state.receiverKeypair!.publicKey,
+                              hint: _hint == null
+                                  ? null
+                                  : HandshakeHint(
+                                      fps: _hint!.fps,
+                                      chunkSize: _hint!.chunkSize,
+                                      ecLevel: _hint!.ecLevel,
+                                    ),
                             ),
-                            child: QrImageView(
-                              data: encodeHandshakeQr(
-                                state.receiverKeypair!.publicKey,
-                                hint: _hint == null
-                                    ? null
-                                    : HandshakeHint(
-                                        fps: _hint!.fps,
-                                        chunkSize: _hint!.chunkSize,
-                                        ecLevel: _hint!.ecLevel,
-                                      ),
-                              ),
-                              version: QrVersions.auto,
-                              size: 200,
-                              backgroundColor: Colors.white,
-                            ),
+                            version: QrVersions.auto,
+                            size: 200,
+                            backgroundColor: Colors.white,
                           ),
                         ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _showKeyAsText
-                            ? 'Share this public key with the sender — they can '
+                      ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _showKeyAsText
+                          ? 'Share this public key with the sender — they can '
                                 'copy it or type it in manually. It contains only '
                                 'your public key — the file itself is encrypted '
                                 'end-to-end.'
-                            : _hint == null
-                                ? 'Show this QR to the sender. It contains only '
-                                    'your public key — the file itself is '
-                                    'encrypted end-to-end.'
-                                : 'Show this QR to the sender. It contains your '
-                                    'public key and a suggestion for how fast to '
-                                    'send, based on what this camera managed last '
-                                    'time — the file itself is encrypted '
-                                    'end-to-end.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                        textAlign: TextAlign.center,
-                      ),
-                    ] else
-                      const Center(child: CircularProgressIndicator()),
-                  ],
-                ),
+                          : _hint == null
+                          ? 'Show this QR to the sender. It contains only '
+                                'your public key — the file itself is '
+                                'encrypted end-to-end.'
+                          : 'Show this QR to the sender. It contains your '
+                                'public key and a suggestion for how fast to '
+                                'send, based on what this camera managed last '
+                                'time — the file itself is encrypted '
+                                'end-to-end.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ] else
+                    const Center(child: CircularProgressIndicator()),
+                ],
               ),
+            ),
           ];
 
           final scanStep = <Widget>[
-              // Step 2: scan the sender's bootstrap + data frames.
-              _StepCard(
-                step: 2,
-                title: 'Scan sender QR codes',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (!state.isScanning && state.fileBytes == null)
-                      FilledButton.icon(
-                        onPressed: () {
-                          notifier.startScanning();
-                          _startScanner();
-                        },
-                        icon: const Icon(Icons.camera_alt),
-                        label: Text(state.sessionActive
+            // Step 2: scan the sender's bootstrap + data frames.
+            _StepCard(
+              step: 2,
+              title: 'Scan sender QR codes',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!state.isScanning && state.fileBytes == null)
+                    FilledButton.icon(
+                      onPressed: () {
+                        notifier.startScanning();
+                        _startScanner();
+                      },
+                      icon: const Icon(Icons.camera_alt),
+                      label: Text(
+                        state.sessionActive
                             ? 'Resume scanning'
-                            : 'Start scanning'),
+                            : 'Start scanning',
                       ),
-                    if (state.isScanning) ...[
-                      Container(
-                        height: 300,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: DeadDropColors.borderInput,
-                          ),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: DesktopScannerView(
-                            onDetect: notifier.processRawQr,
-                            onMeasured: _rememberMeasurement,
-                          ),
+                    ),
+                  if (state.isScanning) ...[
+                    Container(
+                      height: 300,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: DeadDropColors.borderInput),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: DesktopScannerView(
+                          onDetect: notifier.processRawQr,
+                          onMeasured: _rememberMeasurement,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          notifier.stopScanning();
-                          _stopScanner();
-                        },
-                        icon: const Icon(Icons.stop),
-                        label: const Text('Stop scanning'),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-          ];
-
-          final senderBlock = <Widget>[
-              // ── Unknown sender: decision required before decoding ────
-              if (state.awaitingSenderApproval) ...[
-                _UnknownSenderPrompt(
-                  fingerprint: state.pendingSender!.fingerprint,
-                  onAccept: (name) =>
-                      notifier.acceptPendingSender(name: name),
-                  onReject: notifier.rejectPendingSender,
-                ),
-                const SizedBox(height: 16),
-              ]
-              // ── Sender identity (shown after bootstrap) ──────────
-              else if (state.senderFingerprint != null) ...[
-                _SenderIdentityCard(
-                  fingerprint: state.senderFingerprint!,
-                  isNewSender: state.isNewSender,
-                  name: state.senderName,
-                ),
-                const SizedBox(height: 16),
-              ],
-          ];
-
-          final progressBlock = <Widget>[
-              // Step 3: live progress / result.
-              if (state.sessionActive) ...[
-                _StepCard(
-                  step: 3,
-                  title: 'Progress',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                    ),
+                    const SizedBox(height: 12),
+                    // Progress lives here, under the camera, rather
+                    // than in a card of its own. It used to be step
+                    // 3; on a phone that card fell below the fold, and
+                    // moving it above the camera put a block numbered
+                    // 3 above the one numbered 2. While a transfer is
+                    // running the progress is part of scanning, not a
+                    // step after it.
+                    if (state.sessionActive) ...[
                       if (state.fileName != null) ...[
                         Text(
                           state.fileName!,
@@ -779,9 +746,8 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                         '${state.chunksDecoded} of ${state.totalChunks} '
                         'chunks rebuilt · ${state.framesReceived} codes '
                         'scanned',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: DeadDropColors.textSecondary,
-                            ),
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: DeadDropColors.textSecondary),
                       ),
                       // Said once, where it is needed: the chunk count
                       // staying low while the bar moves is how this
@@ -793,12 +759,8 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                           child: Text(
                             'Most chunks are rebuilt near the end, so this '
                             'count stays low until it suddenly finishes.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: DeadDropColors.textSecondary,
-                                ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: DeadDropColors.textSecondary),
                           ),
                         ),
                       // Cancel is offered only while a transfer is still
@@ -824,126 +786,178 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                           child: Text(
                             'Cancelling keeps your key, so the sender does not '
                             'have to scan it again.',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: DeadDropColors.textSecondary,
-                                ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: DeadDropColors.textSecondary),
                           ),
                         ),
                       ],
-                      if (state.fileBytes != null) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green[900]!.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[700]!),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.check_circle,
-                                      color: Colors.green[400]),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Transfer complete!',
-                                      style: TextStyle(
-                                        color: Colors.green[400],
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        notifier.stopScanning();
+                        _stopScanner();
+                      },
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop scanning'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ];
+
+          final senderBlock = <Widget>[
+            // ── Unknown sender: decision required before decoding ────
+            if (state.awaitingSenderApproval) ...[
+              _UnknownSenderPrompt(
+                fingerprint: state.pendingSender!.fingerprint,
+                onAccept: (name) => notifier.acceptPendingSender(name: name),
+                onReject: notifier.rejectPendingSender,
+              ),
+              const SizedBox(height: 16),
+            ]
+            // ── Sender identity (shown after bootstrap) ──────────
+            else if (state.senderFingerprint != null) ...[
+              _SenderIdentityCard(
+                fingerprint: state.senderFingerprint!,
+                isNewSender: state.isNewSender,
+                name: state.senderName,
+              ),
+              const SizedBox(height: 16),
+            ],
+          ];
+
+          final progressBlock = <Widget>[
+            // Step 3: the received file.
+            //
+            // Live progress is no longer here — it sits under the
+            // camera in step 2, where it belongs while a transfer is
+            // running. This card appears only once there is a file,
+            // rather than standing empty throughout the scan.
+            if (state.fileBytes != null) ...[
+              _StepCard(
+                step: 3,
+                title: 'Received file',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.green[900]!.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green[700]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green[400],
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Transfer complete!',
+                                    style: TextStyle(
+                                      color: Colors.green[400],
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB received'
+                              '${state.fileName != null ? ' · ${state.fileName}' : ''}',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            if (state.savedPath != null) ...[
+                              const SizedBox(height: 4),
+                              // Selectable and wrapping rather than
+                              // truncated: this is the only record of where
+                              // a file the user may have taken real risks
+                              // for actually went, and they may need to
+                              // copy it.
+                              SelectableText(
+                                'Saved to: ${displayPath(state.savedPath!)}',
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
-                              const SizedBox(height: 8),
+                            ],
+                            if (state.savedToVault) ...[
+                              const SizedBox(height: 4),
                               Text(
-                                '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB received'
-                                '${state.fileName != null ? ' · ${state.fileName}' : ''}',
-                                style: Theme.of(context).textTheme.bodyMedium,
+                                'Saved to vault',
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
-                              if (state.savedPath != null) ...[
-                                const SizedBox(height: 4),
-                                // Selectable and wrapping rather than
-                                // truncated: this is the only record of where
-                                // a file the user may have taken real risks
-                                // for actually went, and they may need to
-                                // copy it.
-                                SelectableText(
-                                  'Saved to: ${displayPath(state.savedPath!)}',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                              if (state.savedToVault) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Saved to vault',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                              const SizedBox(height: 12),
-                              // Stacked, not side by side. Three labelled
-                              // buttons sharing a phone's width left each one
-                              // too narrow to read, and the labels had been
-                              // cut to single words ("Device", "New") to make
-                              // them fit at all. Full width each costs a
-                              // little vertical space on a screen that has it
-                              // — the file has arrived, nothing else is
-                              // competing for room — and buys labels that say
-                              // what they do.
-                              SizedBox(
-                                width: double.infinity,
-                                child: FilledButton.icon(
-                                  onPressed: state.savedPath == null
-                                      ? notifier.saveFile
-                                      : null,
-                                  icon: const Icon(Icons.save),
-                                  label: const Text('Save to this device'),
-                                ),
+                            ],
+                            const SizedBox(height: 12),
+                            // Stacked, not side by side. Three labelled
+                            // buttons sharing a phone's width left each one
+                            // too narrow to read, and the labels had been
+                            // cut to single words ("Device", "New") to make
+                            // them fit at all. Full width each costs a
+                            // little vertical space on a screen that has it
+                            // — the file has arrived, nothing else is
+                            // competing for room — and buys labels that say
+                            // what they do.
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: state.savedPath == null
+                                    ? notifier.saveFile
+                                    : null,
+                                icon: const Icon(Icons.save),
+                                label: const Text('Save to this device'),
                               ),
-                              // The vault destination is offered only once a
-                              // vault exists in this session — never shown
-                              // disabled. A greyed-out option would itself
-                              // tell an attacker the feature exists and the
-                              // user set it up, which is exactly the kind of
-                              // tell the vault's coercion-resistance is built
-                              // to avoid (see home_page.dart's identical
-                              // treatment of its Vault entry).
-                              if (vaultExists) ...[
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: state.savedToVault
-                                        ? null
-                                        : () => _saveToVault(context, ref),
-                                    icon: const Icon(Icons.lock_outline),
-                                    label: const Text('Save to the vault'),
-                                  ),
-                                ),
-                              ],
+                            ),
+                            // The vault destination is offered only once a
+                            // vault exists in this session — never shown
+                            // disabled. A greyed-out option would itself
+                            // tell an attacker the feature exists and the
+                            // user set it up, which is exactly the kind of
+                            // tell the vault's coercion-resistance is built
+                            // to avoid (see home_page.dart's identical
+                            // treatment of its Vault entry).
+                            if (vaultExists) ...[
                               const SizedBox(height: 8),
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    notifier.reset();
-                                    _stopScanner();
-                                  },
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('New transfer'),
+                                  onPressed: state.savedToVault
+                                      ? null
+                                      : () => _saveToVault(context, ref),
+                                  icon: const Icon(Icons.lock_outline),
+                                  label: const Text('Save to the vault'),
                                 ),
                               ),
                             ],
-                          ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  notifier.reset();
+                                  _stopScanner();
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('New transfer'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ],
-                  ),
+                  ],
                 ),
-              ],
+              ),
+            ],
           ];
 
           final errorBlock = <Widget>[
@@ -971,8 +985,8 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
           ];
 
           List<Widget> spaced(List<Widget> items) => [
-                for (final w in items) ...[w, const SizedBox(height: 16)],
-              ];
+            for (final w in items) ...[w, const SizedBox(height: 16)],
+          ];
 
           if (wide) {
             // Camera on the left, everything that reports on the right.
@@ -1005,24 +1019,20 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             );
           }
 
-          final progressFirst =
-              progressGoesAboveCamera(sessionActive: state.sessionActive);
-
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: spaced([
                 if (showKeyStep) ...keyStep,
-                if (progressFirst) ...[
-                  ...senderBlock,
-                  ...progressBlock,
-                  ...scanStep,
-                ] else ...[
-                  ...scanStep,
-                  ...senderBlock,
-                  ...progressBlock,
-                ],
+                // Plain source order. The progress was briefly hoisted
+                // above the camera so it would not fall below the fold
+                // on a phone, which left a card numbered 3 above the one
+                // numbered 2. It now lives inside step 2, so there is
+                // nothing to hoist.
+                ...scanStep,
+                ...senderBlock,
+                ...progressBlock,
                 ...errorBlock,
               ]),
             ),
@@ -1077,8 +1087,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
         // confirmation went unnoticed — which for an action whose whole
         // point is that the file is now somewhere invisible is the one
         // message that must land.
-        backgroundColor:
-            saved ? DeadDropColors.success : DeadDropColors.error,
+        backgroundColor: saved ? DeadDropColors.success : DeadDropColors.error,
         behavior: SnackBarBehavior.floating,
         duration: Duration(seconds: saved ? 3 : 6),
       ),
@@ -1105,7 +1114,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   void _startScanner() {}
 
   void _stopScanner() {}
-
 }
 
 class _StepCard extends StatelessWidget {
@@ -1129,10 +1137,7 @@ class _StepCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                CircleAvatar(
-                  radius: 14,
-                  child: Text('$step'),
-                ),
+                CircleAvatar(radius: 14, child: Text('$step')),
                 const SizedBox(width: 12),
                 // Expanded, not a bare Text: a title at its natural size
                 // overflows the row on a narrow phone.
@@ -1196,9 +1201,11 @@ class _PublicKeyTextView extends ConsumerWidget {
           SelectableText(
             grouped,
             textAlign: TextAlign.center,
-            style: technicalTextStyle(ref, relativeTo: 1.08,
-                    letterSpacing: 0.5)
-                .copyWith(height: 1.6),
+            style: technicalTextStyle(
+              ref,
+              relativeTo: 1.08,
+              letterSpacing: 0.5,
+            ).copyWith(height: 1.6),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1293,8 +1300,11 @@ class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
             Center(
               child: SelectableText(
                 widget.fingerprint,
-                style: technicalTextStyle(ref, relativeTo: 1.4,
-                    letterSpacing: 2),
+                style: technicalTextStyle(
+                  ref,
+                  relativeTo: 1.4,
+                  letterSpacing: 2,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -1396,8 +1406,7 @@ class _SenderIdentityCard extends ConsumerWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.warning_amber,
-                    color: DeadDropColors.warning),
+                const Icon(Icons.warning_amber, color: DeadDropColors.warning),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -1411,8 +1420,11 @@ class _SenderIdentityCard extends ConsumerWidget {
             Center(
               child: SelectableText(
                 fingerprint,
-                style: technicalTextStyle(ref, relativeTo: 1.4,
-                    letterSpacing: 2),
+                style: technicalTextStyle(
+                  ref,
+                  relativeTo: 1.4,
+                  letterSpacing: 2,
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -1427,17 +1439,18 @@ class _SenderIdentityCard extends ConsumerWidget {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline,
-                      color: DeadDropColors.warning, size: 20),
+                  const Icon(
+                    Icons.info_outline,
+                    color: DeadDropColors.warning,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'New sender — verify this fingerprint through '
                       'another channel (in person, phone call) to '
                       'confirm the sender\'s identity.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
+                      style: Theme.of(context).textTheme.bodySmall
                           ?.copyWith(color: DeadDropColors.warning),
                     ),
                   ),
@@ -1474,8 +1487,11 @@ class _KnownSenderLine extends ConsumerWidget {
             children: [
               SelectableText(
                 fingerprint,
-                style: technicalTextStyle(ref, relativeTo: 1.4,
-                    letterSpacing: 2),
+                style: technicalTextStyle(
+                  ref,
+                  relativeTo: 1.4,
+                  letterSpacing: 2,
+                ),
               ),
               const SizedBox(height: 12),
               Text(
@@ -1499,20 +1515,25 @@ class _KnownSenderLine extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         child: Row(
           children: [
-            const Icon(Icons.verified_user,
-                color: DeadDropColors.success, size: 18),
+            const Icon(
+              Icons.verified_user,
+              color: DeadDropColors.success,
+              size: 18,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'From $label',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: DeadDropColors.success,
-                    ),
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: DeadDropColors.success),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Icon(Icons.info_outline,
-                size: 16, color: Theme.of(context).hintColor),
+            Icon(
+              Icons.info_outline,
+              size: 16,
+              color: Theme.of(context).hintColor,
+            ),
           ],
         ),
       ),
@@ -1589,17 +1610,15 @@ class _VaultUnlockDialogState extends ConsumerState<_VaultUnlockDialog> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(
-              _error!,
-              style: const TextStyle(color: DeadDropColors.error),
-            ),
+            Text(_error!, style: const TextStyle(color: DeadDropColors.error)),
           ],
         ],
       ),
       actions: [
         TextButton(
-          onPressed:
-              _submitting ? null : () => Navigator.of(context).pop(false),
+          onPressed: _submitting
+              ? null
+              : () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
         FilledButton(
@@ -1616,22 +1635,3 @@ class _VaultUnlockDialogState extends ConsumerState<_VaultUnlockDialog> {
     );
   }
 }
-
-
-/// Whether the progress card is placed above the camera, on a narrow
-/// screen.
-///
-/// The preview is 300 pixels tall and the cards around it take the rest,
-/// so with the progress card in source order it sat under the fold: a
-/// transfer could be running perfectly and the only thing on screen was
-/// a camera, with no count, no bar and no file name. Reported as "block
-/// 3 has disappeared on mobile during the transfer".
-///
-/// Once a session is running, the progress is what the user is watching
-/// while they aim, so it goes first. Before that there is no progress to
-/// show and the camera is the thing to reach for.
-///
-/// The wide layout never needs this: it puts the camera and the
-/// reporting blocks in separate columns, so neither can displace the
-/// other.
-bool progressGoesAboveCamera({required bool sessionActive}) => sessionActive;

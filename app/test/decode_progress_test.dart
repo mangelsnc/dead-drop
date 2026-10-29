@@ -1,11 +1,16 @@
-/// Progress reflects the work done, not just the chunks revealed.
+/// The progress bar rises steadily and does not sit at its cap.
 ///
-/// Reported from a device: a 1 MB transfer sat at "24 of 2137 chunks"
-/// after a thousand codes and looked stalled. It was not — belief
-/// propagation reveals almost nothing until it cascades. Counting only
-/// resolved chunks told the user the transfer was 1% done when it was
-/// nearly half way, which is the difference between waiting and giving
-/// up.
+/// Two failures reported from devices, in that order. First "24 of
+/// 2137 chunks" after a thousand codes, which read as 1% when the
+/// transfer was nearly half done. Then, after counting pending frames
+/// to fix that, two or three minutes stuck on the final 1%.
+///
+/// Both come from measuring the wrong thing. Chunks resolved
+/// understates, because belief propagation reveals nothing until it
+/// cascades; chunks covered by pending frames overstates, because
+/// frames touch nearly every chunk long before they can be resolved.
+/// Frames received against frames expected is the quantity that
+/// actually tracks the work.
 library;
 
 import 'dart:typed_data';
@@ -20,15 +25,60 @@ List<Uint8List> _chunks(int k) => List.generate(k, (i) {
       return b;
     });
 
+/// Runs a transfer, reading one frame in [readOneIn], and reports the
+/// progress seen after each frame.
+List<double> _run(int k, {int readOneIn = 1, int seed = 4242}) {
+  final enc = LTEncoder(_chunks(k));
+  final dec = LTDecoder(k: k, chunkSize: 32);
+  final seen = <double>[];
+  for (var seq = 1; seq <= k * 300 && !dec.done; seq++) {
+    if (seq % readOneIn != 0) continue;
+    final (ids, payload) = enc.makeFrame(seq, seed);
+    dec.addFrame(ids, payload);
+    seen.add(dec.progress);
+  }
+  return seen;
+}
+
 void main() {
   group('LTDecoder.progress', () {
     test('is zero before anything arrives', () {
       expect(LTDecoder(k: 100, chunkSize: 32).progress, 0);
     });
 
-    test('rises long before any chunk is resolved', () {
-      // The whole point. Partway through a large transfer the resolved
-      // count is still near zero while most of the work is done.
+    test('rises steadily rather than jumping at the end', () {
+      // The first failure: resolved chunks stay near zero for most of a
+      // transfer, so a bar driven by them says 1% when half the work is
+      // done.
+      final seen = _run(2048);
+      final quarter = seen[seen.length ~/ 4];
+      final half = seen[seen.length ~/ 2];
+      final threeQuarters = seen[seen.length * 3 ~/ 4];
+
+      expect(quarter, closeTo(0.25, 0.1));
+      expect(half, closeTo(0.5, 0.1));
+      expect(threeQuarters, closeTo(0.75, 0.1));
+    });
+
+    test('does not sit at its cap for a meaningful part of the run', () {
+      // The second failure, which is what "stuck on the last 1%" was.
+      // Tested lossy as well as clean, because that is the case where
+      // the old measure was worst.
+      for (final readOneIn in [1, 4, 8]) {
+        final seen = _run(200, readOneIn: readOneIn);
+        final atCap = seen.where((p) => p >= 0.99).length;
+        expect(
+          atCap / seen.length,
+          lessThan(0.15),
+          reason: 'reading 1 frame in $readOneIn, the bar sat at its cap '
+              'for ${(atCap / seen.length * 100).round()}% of the transfer',
+        );
+      }
+    });
+
+    test('a bar driven by resolved chunks would have failed that', () {
+      // The control. Without it the tests above could pass for a
+      // measure that happens to be smooth but means nothing.
       const k = 2048;
       final enc = LTEncoder(_chunks(k));
       final dec = LTDecoder(k: k, chunkSize: 32);
@@ -36,15 +86,14 @@ void main() {
         final (ids, payload) = enc.makeFrame(seq, 4242);
         dec.addFrame(ids, payload);
       }
-
-      final naive = dec.decoded.length / k;
-      expect(naive, lessThan(0.05),
-          reason: 'the old measure really did read near zero here');
-      expect(dec.progress, greaterThan(0.4),
-          reason: 'half the frames are in, so the bar must show it');
+      expect(dec.decoded.length / k, lessThan(0.05),
+          reason: 'resolved chunks really are near zero at the half way '
+              'point, which is what made the first bar useless');
+      expect(dec.progress, greaterThan(0.3));
     });
 
-    test('reaches exactly 1 when the transfer finishes, and not before', () {
+    test('reaches exactly 1 when the transfer finishes, and not before',
+        () {
       const k = 200;
       final enc = LTEncoder(_chunks(k));
       final dec = LTDecoder(k: k, chunkSize: 32);
@@ -59,32 +108,23 @@ void main() {
       expect(dec.progress, 1.0);
     });
 
-    test('never exceeds 1, even when more frames arrive than needed', () {
-      // pending can hold far more frames than there are chunks.
+    test('never goes backwards', () {
+      // A bar that retreats reads as a failure.
+      final seen = _run(300, seed: 1234);
+      for (var i = 1; i < seen.length; i++) {
+        expect(seen[i], greaterThanOrEqualTo(seen[i - 1]),
+            reason: 'progress fell at frame $i');
+      }
+    });
+
+    test('never exceeds 1, however many frames arrive', () {
       const k = 50;
       final enc = LTEncoder(_chunks(k));
       final dec = LTDecoder(k: k, chunkSize: 32);
       for (var seq = 1; seq <= k * 30; seq++) {
         final (ids, payload) = enc.makeFrame(seq, 99);
         dec.addFrame(ids, payload);
-        expect(dec.progress, inInclusiveRange(0.0, 1.0),
-            reason: 'at seq $seq');
-      }
-    });
-
-    test('never goes backwards', () {
-      // pending shrinks as frames are peeled, so a naive sum of decoded
-      // and pending could fall. A bar that retreats reads as a failure.
-      const k = 300;
-      final enc = LTEncoder(_chunks(k));
-      final dec = LTDecoder(k: k, chunkSize: 32);
-      var previous = 0.0;
-      for (var seq = 1; seq <= k * 10 && !dec.done; seq++) {
-        final (ids, payload) = enc.makeFrame(seq, 1234);
-        dec.addFrame(ids, payload);
-        expect(dec.progress, greaterThanOrEqualTo(previous),
-            reason: 'progress fell at seq $seq');
-        previous = dec.progress;
+        expect(dec.progress, inInclusiveRange(0.0, 1.0));
       }
     });
   });
