@@ -159,6 +159,15 @@ class LTDecoder {
   int framesReceived = 0;
   int framesUseful = 0;
 
+  /// Frames that carried information this decoder did not already have.
+  ///
+  /// Distinct from [framesUseful], which counts only the frames that
+  /// resolved a chunk there and then. A frame that goes into [pending]
+  /// has advanced the transfer even though it revealed nothing yet, and
+  /// a fully redundant one has not. This is the quantity that rises
+  /// steadily through a transfer, so it is what [progress] measures.
+  int framesInformative = 0;
+
   LTDecoder({required this.k, required this.chunkSize});
 
   bool get done => decoded.length == k;
@@ -166,27 +175,40 @@ class LTDecoder {
   double get efficiency =>
       framesReceived > 0 ? framesUseful / framesReceived : 0.0;
 
-  /// How far along the transfer really is, from 0 to 1.
+  /// Frames a transfer of [k] chunks typically needs, as a multiple of
+  /// k.
   ///
-  /// Not `decoded.length / k`, which badly understates it. Belief
-  /// propagation resolves almost nothing until it reaches critical
-  /// mass and then cascades: a real 1 MB transfer at 512-byte chunks
-  /// had recovered 12 of 2048 chunks after 1024 frames — under 1% by
-  /// that measure — and finished at 2308. Reported from a device as a
-  /// transfer that looked stalled when it was in fact nearly half way.
+  /// A fountain code needs more frames than there are chunks. Measured
+  /// on this implementation: 1.22x at k=200, 1.13x at k=2048. The higher
+  /// figure is used so the estimate does not habitually overshoot on
+  /// small transfers.
+  static const double expectedOverhead = 1.22;
+
+  /// How far along the transfer is, from 0 to 1.
   ///
-  /// A frame sitting in [pending] is captured information that has not
-  /// been revealed yet, so it counts. Each one constrains the chunks it
-  /// combines, and k independent constraints are what finishing takes.
+  /// Measured by useful frames received against the number such a
+  /// transfer takes, because neither of the obvious alternatives works:
   ///
-  /// This can only approach 1 from below, never reach it early: it is
-  /// capped just short, so the bar completes when [done] does and not
-  /// before.
+  /// `decoded.length / k` badly understates it. Belief propagation
+  /// resolves almost nothing until it cascades, so a 1 MB transfer at
+  /// 512-byte chunks showed 12 chunks of 2048 after 1024 frames and
+  /// finished at 2308 -- it read as 1% when it was nearly half done, and
+  /// was reported from a device as a stall.
+  ///
+  /// Counting pending frames overstates it instead. Frames cover nearly
+  /// every chunk long before they can be resolved, so the bar reached
+  /// its cap and sat there for roughly half the run -- reported as
+  /// minutes stuck on the final 1%.
+  ///
+  /// Frames received is the one quantity that rises steadily throughout,
+  /// which is what a progress bar is for. It is an estimate: a transfer
+  /// may finish a little before or after the bar fills, so the value is
+  /// capped just below 1 and only [done] puts it at 1.
   double get progress {
     if (k == 0) return 0;
     if (done) return 1;
-    final captured = decoded.length + pending.length;
-    final ratio = captured / k;
+    final expected = k * expectedOverhead;
+    final ratio = framesInformative / expected;
     return ratio > 0.99 ? 0.99 : ratio;
   }
 
@@ -208,6 +230,8 @@ class LTDecoder {
     }
 
     if (ids.isEmpty) return false; // fully redundant frame
+
+    framesInformative++;
 
     if (ids.length == 1) {
       _resolve(ids.first, buf);
