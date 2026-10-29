@@ -160,6 +160,20 @@ void main() {
       expect(between, isNot(contains('SizedBox(width:')));
     });
 
+    test('the sender identity is built in exactly one place', () {
+      // Moving it into step 2 left the original copy behind, so "From
+      // MacBook" appeared twice on screen at once — once inside the
+      // receive block and once after it.
+      final source = File('lib/ui/receive/receive_page.dart')
+          .readAsStringSync();
+      // The declaration plus one construction; anything more is a
+      // second copy on screen.
+      final uses = RegExp(r'_SenderIdentityCard\(').allMatches(source).length;
+      expect(uses, 2,
+          reason: 'expected the constructor declaration and one use, '
+              'found $uses occurrences');
+    });
+
     test('the identity shown afterwards does not repeat the instruction',
         () {
       // By the time it appears the user has read the code out loud,
