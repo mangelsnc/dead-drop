@@ -188,4 +188,63 @@ void main() {
       }
     });
   });
+
+  group('chunkUnlockedByABiggerWindow', () {
+    test('a small window is told what a big one would allow', () {
+      // The reported case: a MacBook with a small window negotiated
+      // itself down to 256-byte chunks and spent about 5,000 codes on a
+      // 1 MB file, where 1024 would have taken 1,250.
+      expect(
+        chunkUnlockedByABiggerWindow(
+          currentSize: 300,
+          currentChunk: 256,
+          ecLevel: 'M',
+        ),
+        1024,
+      );
+    });
+
+    test('says nothing when the window is already big enough', () {
+      expect(
+        chunkUnlockedByABiggerWindow(
+          currentSize: kQrMaxDisplaySize,
+          currentChunk: 1024,
+          ecLevel: 'M',
+        ),
+        isNull,
+      );
+    });
+
+    test('says nothing when the chunk is already the best available', () {
+      // Nagging about a window that would change nothing is noise.
+      expect(
+        chunkUnlockedByABiggerWindow(
+          currentSize: 600,
+          currentChunk: 1024,
+          ecLevel: 'M',
+        ),
+        isNull,
+      );
+    });
+
+    test('never suggests something the bigger window could not show', () {
+      for (final ec in const ['L', 'M', 'Q', 'H']) {
+        final suggestion = chunkUnlockedByABiggerWindow(
+          currentSize: 300,
+          currentChunk: 256,
+          ecLevel: ec,
+        );
+        if (suggestion == null) continue;
+        expect(
+          pixelsPerModuleOnScreen(
+            displaySize: kQrMaxDisplaySize,
+            chunkSize: suggestion,
+            ecLevel: ec,
+          ),
+          greaterThanOrEqualTo(kMinUsablePixelsPerModule),
+          reason: 'suggested $suggestion at level $ec',
+        );
+      }
+    });
+  });
 }

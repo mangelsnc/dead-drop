@@ -95,13 +95,31 @@ double _fpsAtMost(double value) {
 /// 3. **Resolution.** A dense QR needs pixels. Below 640x480 the chunk
 ///    size comes down so each code carries fewer modules.
 EmissionHint suggestEmission(CameraCapability camera) {
-  // Two thirds of the measured rate. Sampling exactly at the emission
-  // rate catches each code at an arbitrary point in its display, often
-  // mid-change; leaving headroom means most frames land on a stable code.
-  var fps = _fpsAtMost(camera.framesPerSecond * 0.66);
+  // Just under the measured camera rate.
+  //
+  // This was two thirds of it, on the reasoning that sampling at the
+  // emission rate catches codes mid-change. Measured on a device, that
+  // headroom cost far more than it bought: a camera reporting 12 fps
+  // was told to emit at 8, where it read about 62% of the codes, and
+  // at 12 it read 90% — a 1 MB transfer went from 16.7 minutes to 7.7.
+  //
+  // The mid-change frames are real but they are simply dropped, and a
+  // dropped frame costs one frame. Emitting below what the camera can
+  // sample costs every frame it could have read and did not.
+  var fps = _fpsAtMost(camera.framesPerSecond * 0.95);
 
   var chunkSize = kDefaultChunkSize;
-  var ec = 'M';
+
+  // Start at the weakest correction and strengthen only on evidence.
+  //
+  // This started at M. Stronger correction spends modules on redundancy
+  // rather than data, so the same chunk becomes a denser code — and
+  // density is what a camera struggles with. Measured on a device:
+  // at the same 12 fps and chunk size, M read measurably slower than L.
+  //
+  // Correction earns its cost when frames are actually being lost, and
+  // the decode-rate rule below raises it when they are.
+  var ec = 'L';
   final reasons = <String>[];
 
   final pixels = camera.width * camera.height;
