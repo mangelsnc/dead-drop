@@ -104,7 +104,8 @@ class Emitter {
         fileId: session.fileId,
         seq: seq,
         seed: transferSeed,
-        chunkIds: const [],
+        // Degree 0 is what marks this as the metadata frame.
+        degree: 0,
         nonce: nonce,
         payload: ct,
       );
@@ -119,7 +120,9 @@ class Emitter {
       fileId: session.fileId,
       seq: seq,
       seed: transferSeed,
-      chunkIds: chunkIds,
+      // Only the count travels; the receiver recomputes the ids from
+      // (seq, seed, k).
+      degree: chunkIds.length,
       nonce: nonce,
       payload: ct,
     );

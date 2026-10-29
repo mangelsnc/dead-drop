@@ -481,13 +481,48 @@ void main() {
     });
   });
 
+  group('frames are a constant size', () {
+    test('every data frame packs to the same length', () {
+      // The point of deriving chunk ids rather than transmitting them.
+      // Previously a frame's length tracked the fountain degree, which
+      // has a long tail by design: at k=4600 the median degree was 2 and
+      // the maximum 624, so roughly 2 frames in 500 were more than
+      // three times the usual size. Those jumped several QR versions,
+      // which is the flash reported during emission, and the largest
+      // could not be rendered at all.
+      final lengths = <int>{};
+      final degrees = <int>{};
+      for (var seq = 1; seq <= 400; seq++) {
+        final ids = chunkIdsFor(seq: seq, seed: 4242, k: 1000);
+        degrees.add(ids.length);
+        final frame = Frame(
+          fileId: Uint8List(8),
+          seq: seq,
+          seed: 4242,
+          degree: ids.length,
+          nonce: Uint8List(nonceSize),
+          payload: Uint8List(512 + 16),
+        );
+        lengths.add(frame.pack().length);
+      }
+      expect(lengths.length, 1,
+          reason: 'frame lengths seen: \$lengths');
+      // The control: the degrees really did vary, so the single length
+      // above is the format holding it constant and not a sample that
+      // happened to be uniform.
+      expect(degrees.length, greaterThan(3),
+          reason: 'degrees seen: \$degrees');
+      expect(degrees.reduce((a, b) => a > b ? a : b), greaterThan(10));
+    });
+  });
+
   group('Frame', () {
     test('Frame pack/unpack roundtrip', () {
       final frame = Frame(
         fileId: Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]),
         seq: 42,
         seed: 1337,
-        chunkIds: [0, 3, 7],
+        degree: 3,
         nonce: Uint8List.fromList(List.generate(24, (i) => i)),
         payload: Uint8List.fromList(List.generate(100, (i) => i % 256)),
       );
@@ -497,7 +532,8 @@ void main() {
 
       expect(unpacked.seq, 42);
       expect(unpacked.seed, 1337);
-      expect(unpacked.chunkIds, [0, 3, 7]);
+      expect(unpacked.degree, 3);
+      expect(unpacked.isMetadata, isFalse);
       expect(unpacked.nonce, frame.nonce);
       expect(unpacked.payload, frame.payload);
     });
@@ -582,7 +618,7 @@ void main() {
       // The first emitted frame is the encrypted metadata frame (seq 0).
       final metaFrame = emitter.nextFrame();
       expect(metaFrame.seq, 0);
-      expect(metaFrame.chunkIds, isEmpty);
+      expect(metaFrame.isMetadata, isTrue);
       receiver.feedFrame(metaFrame.pack());
       expect(receiver.fileName, 'secret-plans.pdf');
 
@@ -593,7 +629,7 @@ void main() {
       // still focusing and nothing ever sent the name again.
       var repeats = 0;
       for (var i = 0; i < Emitter.metadataInterval * 2; i++) {
-        if (emitter.nextFrame().chunkIds.isEmpty) repeats++;
+        if (emitter.nextFrame().isMetadata) repeats++;
       }
       expect(repeats, greaterThanOrEqualTo(1),
           reason: 'the name must not depend on catching one single frame');
@@ -723,17 +759,23 @@ void main() {
       final k = receiver.decoder!.k;
       expect(k, greaterThan(0));
 
-      // Forge a frame whose payload is validly encrypted (passes AEAD) but
-      // whose chunkIds are out of range. Note: Frame.pack() writes each id
-      // with setUint16, which truncates silently — so -1 comes back off the
-      // wire as 0xFFFF (65535). Either way it is >= k and must be rejected.
+      // Chunk ids are no longer on the wire, so a frame can no longer
+      // carry out-of-range ones: the receiver derives them and the
+      // derivation cannot produce an id outside [0, k). What a frame
+      // *can* still lie about is the degree, and a degree that
+      // disagrees with the derivation means the two sides are not
+      // computing the same thing — decoding anyway would corrupt the
+      // file with no error anywhere.
       final forgedPayload = Uint8List(512);
       final (nonce, ct) = emitter.session.encryptPayload(sodium, forgedPayload);
+      const forgedSeq = 9999;
+      final realDegree =
+          chunkIdsFor(seq: forgedSeq, seed: emitter.transferSeed, k: k).length;
       final evilFrame = Frame(
         fileId: emitter.session.fileId,
-        seq: 9999, // non-zero so it is treated as a fountain frame
+        seq: forgedSeq,
         seed: emitter.transferSeed,
-        chunkIds: [-1, k, k + 1000],
+        degree: realDegree + 1,
         nonce: nonce,
         payload: ct,
       );
@@ -748,20 +790,40 @@ void main() {
       expect(receiver.decoder!.decoded.length, decodedBefore);
       expect(receiver.decoder!.pending.length, pendingBefore);
 
-      // A second forged frame with a single out-of-range id (the minimal bad
-      // case) is also dropped.
+      // An absurd degree is rejected the same way.
       final (nonce2, ct2) = emitter.session.encryptPayload(sodium, forgedPayload);
       final evilFrame2 = Frame(
         fileId: emitter.session.fileId,
         seq: 10000,
         seed: emitter.transferSeed,
-        chunkIds: [k], // == k is out of range: valid ids are [0, k)
+        degree: k + 1000,
         nonce: nonce2,
         payload: ct2,
       );
       expect(receiver.feedFrame(evilFrame2.pack()), isFalse);
       expect(receiver.framesRejectedBadChunkIds, 2);
       expect(receiver.decoder!.pending.length, pendingBefore);
+
+      // The control: the same frame with the honest degree gets past the
+      // degree check, so the two rejections above are that check doing
+      // its job and not something else dropping every forged frame.
+      //
+      // It is not asserted to advance decoding. feedFrame reports
+      // whether the frame made *progress*, and a frame whose chunks are
+      // still unresolved is held in `pending` without any — so the
+      // counter not moving is the signal here, not the return value.
+      final (nonce3, ct3) = emitter.session.encryptPayload(sodium, forgedPayload);
+      final honestFrame = Frame(
+        fileId: emitter.session.fileId,
+        seq: forgedSeq,
+        seed: emitter.transferSeed,
+        degree: realDegree,
+        nonce: nonce3,
+        payload: ct3,
+      );
+      receiver.feedFrame(honestFrame.pack());
+      expect(receiver.framesRejectedBadChunkIds, 2,
+          reason: 'an honest degree must not be rejected');
 
       // The channel absorbs the loss: a normal transfer still completes.
       for (var i = 0; i < 500 && !receiver.done; i++) {

@@ -74,7 +74,7 @@ class Receiver {
     // small file can finish decoding before the first repeat of that frame
     // comes round, and dropping it here is how a complete transfer still
     // ended up saved as deaddrop_received_<timestamp> with no extension.
-    if (decoder!.done && frame.chunkIds.isNotEmpty) return false;
+    if (decoder!.done && !frame.isMetadata) return false;
 
     if (!constantTimeEquals(frame.fileId, session!.header.fileId)) {
       framesIgnoredOtherSession++;
@@ -89,17 +89,17 @@ class Receiver {
       return false;
     }
 
-    // The metadata frame (original file name). Recognised by its empty
-    // chunk list rather than by sequence number: the emitter repeats it
+    // The metadata frame (original file name). Recognised by its degree
+    // of 0 rather than by sequence number: the emitter repeats it
     // periodically, because sending it once — before the receiver's
     // camera had locked on — meant the name was usually lost and the file
     // arrived unnamed. Keying on the shape rather than on seq 0 keeps the
     // two sides from drifting apart if that interval ever changes.
     //
-    // It is not a fountain frame: degree is 0 and it never advances
+    // It is not a fountain frame: it carries no chunks and never advances
     // decoding. Receiving it more than once is harmless — the name is
     // simply set again to the same value.
-    if (frame.chunkIds.isEmpty) {
+    if (frame.isMetadata) {
       final meta = parseFileMetadataPayload(payload);
       final name = meta['name'];
       if (name is String && name.isNotEmpty) {
@@ -108,18 +108,38 @@ class Receiver {
       return false;
     }
 
-    // Bounds-check chunk ids before they reach the decoder. The payload is
-    // AEAD-authenticated, so this is defence-in-depth against a corrupt
-    // emitter or our own bug — not a remote attack surface. An out-of-range
-    // cid would otherwise pollute `pending` permanently and crash
-    // `reassemble()` with an opaque error. A bad frame is dropped, never
-    // fatal: the fountain code absorbs the loss.
-    if (!_validateChunkIds(frame.chunkIds, decoder!.k)) {
+    // Recover which chunks this frame XORs together. They are not on the
+    // wire: the emitter and this side derive them from the same
+    // (seq, seed, k). See
+    // docs/decisions/0001-derive-chunk-ids-from-the-seed.md.
+    final chunkIds = chunkIdsFor(
+      seq: frame.seq,
+      seed: frame.seed,
+      k: decoder!.k,
+    );
+
+    // The frame states how many chunks it combined. If our derivation
+    // produced a different number, the two sides are not computing the
+    // same thing, and decoding against these ids would corrupt the file
+    // with no error anywhere. Dropping the frame is the safe response:
+    // the fountain code absorbs the loss, and a systematic divergence
+    // shows up as a transfer that never completes rather than as a file
+    // that is quietly wrong.
+    if (chunkIds.length != frame.degree) {
       framesRejectedBadChunkIds++;
       return false;
     }
 
-    return decoder!.addFrame(frame.chunkIds, payload);
+    // Bounds-check before the ids reach the decoder. This is
+    // defence-in-depth against our own bug rather than a remote attack
+    // surface — an out-of-range cid would pollute `pending` permanently
+    // and crash `reassemble()` with an opaque error.
+    if (!_validateChunkIds(chunkIds, decoder!.k)) {
+      framesRejectedBadChunkIds++;
+      return false;
+    }
+
+    return decoder!.addFrame(chunkIds, payload);
   }
 
   bool get done => decoder?.done ?? false;

@@ -61,6 +61,49 @@ int sampleDegree(DeterministicRandom rng, List<double> cdf) {
 }
 
 // ---------------------------------------------------------------------------
+// Chunk id derivation — shared by both sides
+// ---------------------------------------------------------------------------
+
+/// The chunk ids frame [seq] of a transfer with [k] chunks encodes, under
+/// PRNG [seed].
+///
+/// This is the single definition of that mapping, used by the emitter to
+/// build a frame and by the receiver to recover what the frame means. The
+/// ids are not transmitted, so the two sides agreeing is not something
+/// the wire can check for us: if this function ever behaves differently
+/// on the two of them, transfers corrupt silently. Hence one
+/// implementation, and `fountain_vectors_test.dart` pinning its output
+/// against fixed expected values so a refactor cannot move it.
+///
+/// Deterministic for a given (seq, seed, k) on every platform: the
+/// generator is the specified xorshift32 in prng.dart, NOT
+/// `dart:math.Random` (which truncated `(seed << 32) ^ seq` to 32 bits —
+/// silently discarding `seed` — and guarantees no stable sequence across
+/// platforms or SDK versions).
+///
+/// [cdf] is [robustSolitonCdf] for [k]; it is a parameter only so the
+/// encoder can reuse the one it already built.
+List<int> chunkIdsFor({
+  required int seq,
+  required int seed,
+  required int k,
+  List<double>? cdf,
+}) {
+  final rng = DeterministicRandom(mixSeed(seed, seq));
+  final degree = min(sampleDegree(rng, cdf ?? robustSolitonCdf(k)), k);
+  // Fisher-Yates on the identity permutation, driven by the deterministic
+  // generator. `List.shuffle` is not usable here: it takes `dart:math.Random`.
+  final indices = List<int>.generate(k, (i) => i);
+  for (var i = k - 1; i > 0; i--) {
+    final j = rng.nextInt(i + 1);
+    final tmp = indices[i];
+    indices[i] = indices[j];
+    indices[j] = tmp;
+  }
+  return indices.sublist(0, degree)..sort();
+}
+
+// ---------------------------------------------------------------------------
 // Encoder
 // ---------------------------------------------------------------------------
 
@@ -85,23 +128,13 @@ class LTEncoder {
   /// Produce encoded frame #(seq) under PRNG seed.
   /// Returns (chunk_ids, payload) where payload = XOR of the chosen chunks.
   ///
-  /// Deterministic for a given (seq, seed) on every platform: the generator
-  /// is the specified xorshift32 in prng.dart, NOT `dart:math.Random` (which
-  /// truncated `(seed << 32) ^ seq` to 32 bits — silently discarding `seed` —
-  /// and guarantees no stable sequence across platforms or SDK versions).
+  /// The ids are not transmitted: the receiver recomputes them with
+  /// [chunkIdsFor] from the same (seq, seed, k). See
+  /// docs/decisions/0001-derive-chunk-ids-from-the-seed.md. They are
+  /// returned here because the emitter still needs them to build the
+  /// payload, and because the degree goes on the wire.
   (List<int>, Uint8List) makeFrame(int seq, int seed) {
-    final rng = DeterministicRandom(mixSeed(seed, seq));
-    final degree = min(sampleDegree(rng, cdf), k);
-    // Fisher-Yates on the identity permutation, driven by the deterministic
-    // generator. `List.shuffle` is not usable here: it takes `dart:math.Random`.
-    final indices = List<int>.generate(k, (i) => i);
-    for (var i = k - 1; i > 0; i--) {
-      final j = rng.nextInt(i + 1);
-      final tmp = indices[i];
-      indices[i] = indices[j];
-      indices[j] = tmp;
-    }
-    final chunkIds = indices.sublist(0, degree)..sort();
+    final chunkIds = chunkIdsFor(seq: seq, seed: seed, k: k, cdf: cdf);
 
     final payload = Uint8List(chunkSize);
     for (final cid in chunkIds) {

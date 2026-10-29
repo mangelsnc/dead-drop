@@ -21,7 +21,10 @@ import 'utils.dart';
 // ---------------------------------------------------------------------------
 
 const magic = [0x44, 0x44]; // "DD"
-const version = 2; // v2: added senderVerifyKey to SessionHeader
+// v2: added senderVerifyKey to SessionHeader
+// v3: chunk ids are derived from the seed rather than transmitted
+//     (docs/decisions/0001-derive-chunk-ids-from-the-seed.md)
+const version = 3;
 const nonceSize = 24; // XSalsa20-Poly1305 nonce
 const tagSize = 16; // Poly1305 tag
 const pkSize = 32; // X25519 public key
