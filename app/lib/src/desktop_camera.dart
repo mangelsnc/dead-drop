@@ -49,6 +49,11 @@ class DesktopCameraScanner {
   /// open and at what resolution.
   static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
+  /// The capture resolution, which decides the densest code that can be
+  /// read at all. See the note at the call site.
+  static ResolutionPreset get _resolutionPreset =>
+      resolutionPresetFor(Platform.operatingSystem);
+
   /// The lens to prefer. A phone points its back camera at the other
   /// screen; everything else has one camera and takes it.
   static CameraLensDirection get _preferredLens =>
@@ -262,16 +267,23 @@ class DesktopCameraScanner {
         MediaSettings(
           // What limits a scan is pixels per module, not frame rate.
           //
-          // medium gives 720x480. A 512-byte chunk is a 117x117 module
-          // code covering roughly 264 of those pixels held at arm's
-          // length: 2.3 pixels per module, under the ~3 a decoder needs,
-          // and 1024-byte chunks fall to 1.7. high doubles that budget
-          // for the same decode cost, measured at 8.0 ms against 7.9.
+          // A 512-byte chunk is a 105-module code. For a decoder to get
+          // the ~3 samples per module it needs, that code has to land on
+          // some 315 pixels of sensor -- so the capture width sets a
+          // floor on how dense a code can be read, and it is the first
+          // thing to check when frames arrive and nothing decodes.
           //
-          // Desktop stays low: a webcam sits close to the other screen,
-          // and camera_linux can fail to initialise above it.
-          resolutionPreset:
-              _isMobile ? ResolutionPreset.high : ResolutionPreset.low,
+          // low is 320x240, where even a code filling the frame gets
+          // about 1.5 pixels per module. That was the desktop default
+          // and it could not read a phone held in front of the webcam at
+          // any distance: backing off to fit the code in frame only made
+          // each module smaller. Reported from macOS as "sensor 320x240
+          // ... seen 305 · read 0".
+          //
+          // Linux is the exception: camera_linux can fail to initialise
+          // above medium, and a scanner that will not start is worse
+          // than one that needs a steadier hand.
+          resolutionPreset: _resolutionPreset,
           enableAudio: false,
         ),
       );
@@ -421,3 +433,44 @@ class DesktopCameraScanner {
     await _activity.close();
   }
 }
+
+/// The capture resolution to use on [operatingSystem].
+///
+/// Separated from the camera so the choice can be tested without one, and
+/// taking the platform as a value rather than reading it, so every branch
+/// is reachable from a test on any machine.
+///
+/// Linux is held at medium because camera_linux can fail to initialise
+/// above it, and a scanner that will not start is worse than one that
+/// needs a steadier hand. Everywhere else takes high: low is 320x240,
+/// which cannot resolve any code this app emits.
+ResolutionPreset resolutionPresetFor(String operatingSystem) =>
+    operatingSystem == 'linux'
+        ? ResolutionPreset.medium
+        : ResolutionPreset.high;
+
+/// The capture width, in pixels, of each [ResolutionPreset] this app uses.
+///
+/// The `camera` package defines presets as target resolutions; a backend
+/// may hand back something near them. These are the nominal figures, and
+/// they are what the pixels-per-module arithmetic is done against.
+const Map<ResolutionPreset, int> kPresetCaptureWidth = {
+  ResolutionPreset.low: 320,
+  ResolutionPreset.medium: 720,
+  ResolutionPreset.high: 1280,
+  ResolutionPreset.veryHigh: 1920,
+};
+
+/// How many camera pixels fall on one QR module, for a code of
+/// [moduleCount] modules captured at [captureWidth], assuming the code
+/// occupies [frameFraction] of the frame's width.
+///
+/// A decoder needs roughly three; below two it cannot work at all. This
+/// is the figure that decides whether a scan is possible before frame
+/// rate, decoder or lighting are worth considering.
+double pixelsPerModule({
+  required int captureWidth,
+  required int moduleCount,
+  double frameFraction = 0.6,
+}) =>
+    captureWidth * frameFraction / moduleCount;
