@@ -133,17 +133,22 @@ somewhere it is safe to read the screen. The app cannot see the room; you can.
 
 ### Deleting a vault
 
-**Vault → Delete vault**, with any passphrase. It asks for one so that a phone
-left unlocked on a table is not enough for someone else to destroy your files.
+**Settings → Security → Delete vault**, or the same option on the unlock
+screen. It asks you to type `DELETE` rather than your passphrase, so that a
+stray tap cannot wipe your files — but it does not need the passphrase,
+because deleting is also what you do when you have forgotten it.
 
-**It deletes everything.** Both the real environment and the decoy, whichever
-passphrase you use. There is no "delete just the decoy", on purpose: an option
+**It deletes everything.** Both the real environment and the decoy. There is
+no "delete just the decoy", on purpose: an option
 like that could only exist on a device that has one, so its presence on the
 screen would be the very thing the decoy is meant to hide. Assume that
 deleting under someone else's pressure destroys all of it.
 
-If you have forgotten every passphrase, the app cannot delete it for you —
-remove the application's data through your operating system instead.
+**If you have forgotten your passphrase, this is your way out.** There is no
+recovery — no PIN, no hint, no reset link. That is what makes the vault worth
+having: nobody can be made to hand over something that does not exist. What
+you can always do is delete the vault and start again. The files are gone,
+but they were encrypted and stay encrypted; better deleted than read.
 
 ---
 
