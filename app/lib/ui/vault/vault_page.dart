@@ -48,24 +48,21 @@ class VaultPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Vault'),
+        // Settings only. Deleting the vault used to sit beside it here,
+        // one icon away from the control people reach for without
+        // looking — an irreversible action in the position reserved for
+        // adjusting things. It lives in Settings → Security now, with
+        // the other destructive controls, and on the locked screen for
+        // someone who has forgotten the passphrase.
         actions: [
-          if (state.unlocked) ...[
+          if (state.unlocked)
             IconButton(
               icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsPage()),
-              ),
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
             ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Delete vault',
-              onPressed: () async {
-                final erased = await showDeleteVaultDialog(context);
-                if (erased && context.mounted) Navigator.of(context).pop();
-              },
-            ),
-          ],
         ],
       ),
       body: SafeArea(
@@ -131,16 +128,20 @@ class _LockedViewState extends ConsumerState<_LockedView> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock_outline,
-                  size: 64, color: theme.colorScheme.primary),
+              Icon(
+                Icons.lock_outline,
+                size: 64,
+                color: theme.colorScheme.primary,
+              ),
               const SizedBox(height: 24),
               Text('No vault yet', style: theme.textTheme.headlineSmall),
               const SizedBox(height: 8),
               Text(
                 'Create a vault to store files behind a passphrase.',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: DeadDropColors.textSecondary),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: DeadDropColors.textSecondary,
+                ),
               ),
               const SizedBox(height: 24),
               FilledButton(
@@ -162,8 +163,11 @@ class _LockedViewState extends ConsumerState<_LockedView> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(Icons.lock_outline,
-                size: 64, color: theme.colorScheme.primary),
+            Icon(
+              Icons.lock_outline,
+              size: 64,
+              color: theme.colorScheme.primary,
+            ),
             const SizedBox(height: 24),
             Text(
               'Enter your passphrase',
@@ -182,8 +186,9 @@ class _LockedViewState extends ConsumerState<_LockedView> {
               Text(
                 _error!,
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: DeadDropColors.error),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: DeadDropColors.error,
+                ),
               ),
             ],
             const SizedBox(height: 24),
@@ -266,15 +271,15 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
     final query = _search.text.trim().toLowerCase();
     final filtered = query.isEmpty
         ? [...entries]
-        : entries
-            .where((e) => e.name.toLowerCase().contains(query))
-            .toList();
+        : entries.where((e) => e.name.toLowerCase().contains(query)).toList();
 
     filtered.sort(switch (_sort) {
-      _VaultSort.nameAsc => (a, b) =>
-          a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      _VaultSort.nameDesc => (a, b) =>
-          b.name.toLowerCase().compareTo(a.name.toLowerCase()),
+      _VaultSort.nameAsc => (a, b) => a.name.toLowerCase().compareTo(
+        b.name.toLowerCase(),
+      ),
+      _VaultSort.nameDesc => (a, b) => b.name.toLowerCase().compareTo(
+        a.name.toLowerCase(),
+      ),
       _VaultSort.newestFirst => (a, b) => b.addedAt.compareTo(a.addedAt),
       _VaultSort.oldestFirst => (a, b) => a.addedAt.compareTo(b.addedAt),
     });
@@ -323,10 +328,7 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                   onSelected: (value) => setState(() => _sort = value),
                   itemBuilder: (context) => [
                     for (final option in _VaultSort.values)
-                      PopupMenuItem(
-                        value: option,
-                        child: Text(option.label),
-                      ),
+                      PopupMenuItem(value: option, child: Text(option.label)),
                   ],
                 ),
               ],
@@ -340,8 +342,11 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.folder_open,
-                            size: 56, color: DeadDropColors.textSecondary),
+                        const Icon(
+                          Icons.folder_open,
+                          size: 56,
+                          color: DeadDropColors.textSecondary,
+                        ),
                         const SizedBox(height: 16),
                         Text(
                           'No files yet',
@@ -351,33 +356,34 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                         Text(
                           'Files you save to the vault will appear here.',
                           textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(color: DeadDropColors.textSecondary),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: DeadDropColors.textSecondary,
+                          ),
                         ),
                       ],
                     ),
                   ),
                 )
               : visible.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'Nothing matches "${_search.text.trim()}".',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: DeadDropColors.textSecondary,
-                          ),
-                        ),
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'Nothing matches "${_search.text.trim()}".',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: DeadDropColors.textSecondary,
                       ),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: visible.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) =>
-                          _EntryTile(entry: visible[index]),
                     ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: visible.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) =>
+                      _EntryTile(entry: visible[index]),
+                ),
         ),
         Padding(
           padding: const EdgeInsets.all(16),
@@ -420,8 +426,9 @@ class _EntryTile extends ConsumerWidget {
           mime == 'application/xml');
 
   Future<void> _preview(BuildContext context, WidgetRef ref) async {
-    final bytes =
-        await ref.read(vaultControllerProvider.notifier).readFile(entry.id);
+    final bytes = await ref
+        .read(vaultControllerProvider.notifier)
+        .readFile(entry.id);
     if (!context.mounted) return;
     if (bytes == null) {
       _say(context, 'The vault is locked.');
@@ -480,8 +487,9 @@ class _EntryTile extends ConsumerWidget {
     );
     if (proceed != true || !context.mounted) return;
 
-    final bytes =
-        await ref.read(vaultControllerProvider.notifier).readFile(entry.id);
+    final bytes = await ref
+        .read(vaultControllerProvider.notifier)
+        .readFile(entry.id);
     if (!context.mounted) return;
     if (bytes == null) {
       _say(context, 'The vault is locked.');
@@ -513,8 +521,9 @@ class _EntryTile extends ConsumerWidget {
   /// plaintext out just to read it straight back in, undoing the vault
   /// for as long as that copy existed.
   Future<void> _send(BuildContext context, WidgetRef ref) async {
-    final bytes =
-        await ref.read(vaultControllerProvider.notifier).readFile(entry.id);
+    final bytes = await ref
+        .read(vaultControllerProvider.notifier)
+        .readFile(entry.id);
     if (!context.mounted) return;
     if (bytes == null) {
       _say(context, 'The vault is locked.');
@@ -523,9 +532,8 @@ class _EntryTile extends ConsumerWidget {
 
     ref.read(sendProvider.notifier).loadBytes(entry.name, bytes);
     if (!context.mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SendPage()),
-    );
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const SendPage()));
   }
 
   Future<void> _delete(BuildContext context, WidgetRef ref) async {
@@ -544,8 +552,10 @@ class _EntryTile extends ConsumerWidget {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete',
-                style: TextStyle(color: DeadDropColors.error)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: DeadDropColors.error),
+            ),
           ),
         ],
       ),
@@ -559,8 +569,7 @@ class _EntryTile extends ConsumerWidget {
   /// The default snack bar is close enough to this app's background on
   /// macOS to be missed entirely, so these carry a colour: green when
   /// something worked, red when it did not.
-  static void _say(BuildContext context, String message,
-      {bool ok = false}) {
+  static void _say(BuildContext context, String message, {bool ok = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -607,9 +616,13 @@ class _EntryTile extends ConsumerWidget {
             // a name lost in transit must not hide a viewable file.
             const PopupMenuItem(value: 'view', child: Text('View')),
             const PopupMenuItem(
-                value: 'send', child: Text('Send with DeadDrop')),
+              value: 'send',
+              child: Text('Send with DeadDrop'),
+            ),
             const PopupMenuItem(
-                value: 'export', child: Text('Save outside the vault')),
+              value: 'export',
+              child: Text('Save outside the vault'),
+            ),
             const PopupMenuItem(value: 'delete', child: Text('Delete')),
           ],
         ),
@@ -644,10 +657,7 @@ class _PreviewDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(name, overflow: TextOverflow.ellipsis),
-      content: SizedBox(
-        width: 480,
-        child: isImage ? _image() : _text(context),
-      ),
+      content: SizedBox(width: 480, child: isImage ? _image() : _text(context)),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -658,15 +668,15 @@ class _PreviewDialog extends StatelessWidget {
   }
 
   Widget _image() => InteractiveViewer(
-        child: Image.memory(
-          bytes,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stack) => const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('This file is not an image the app can show.'),
-          ),
-        ),
-      );
+    child: Image.memory(
+      bytes,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stack) => const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('This file is not an image the app can show.'),
+      ),
+    ),
+  );
 
   Widget _text(BuildContext context) {
     String body;

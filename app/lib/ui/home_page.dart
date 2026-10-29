@@ -47,10 +47,21 @@ class HomePage extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.qr_code_2,
-              size: 80,
-              color: Theme.of(context).colorScheme.primary,
+            // The app's own icon, not a stock Material glyph. The
+            // home screen was showing Icons.qr_code_2 while every
+            // platform launcher showed the logo.
+            Image.asset(
+              'assets/branding/app_icon.png',
+              width: 96,
+              height: 96,
+              filterQuality: FilterQuality.medium,
+              // A missing asset must not take the home screen down
+              // with it; the stock glyph is a fair stand-in.
+              errorBuilder: (context, _, __) => Icon(
+                Icons.qr_code_2,
+                size: 80,
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
             const SizedBox(height: 24),
             Text(

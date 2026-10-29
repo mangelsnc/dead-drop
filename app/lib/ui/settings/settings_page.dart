@@ -27,6 +27,7 @@ import '../senders/known_senders_page.dart';
 import '../../src/app_version.dart';
 import '../../src/vault/attempt_guard.dart';
 import '../vault/vault_controller.dart';
+import '../vault/delete_vault_dialog.dart';
 import '../vault/vault_setup_page.dart';
 
 const _secureStorage = FlutterSecureStorage(
@@ -119,6 +120,26 @@ class SettingsPage extends ConsumerWidget {
                 ),
               ),
               const _SelfDestructTile(),
+              // Moved here from the vault's app bar, where it sat one
+              // icon away from Settings: an irreversible action in the
+              // position people press without looking.
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: DeadDropColors.error,
+                ),
+                title: const Text('Delete vault'),
+                subtitle: const Text(
+                  'Erases every environment and everything stored in '
+                  'them. Asks for your passphrase first.',
+                ),
+                onTap: () async {
+                  final erased = await showDeleteVaultDialog(context);
+                  // Settings sits on top of the vault, which no longer
+                  // has anything to show.
+                  if (erased && context.mounted) Navigator.of(context).pop();
+                },
+              ),
             ],
           ],
         ),
@@ -139,9 +160,9 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: DeadDropColors.accent,
-              fontWeight: FontWeight.bold,
-            ),
+          color: DeadDropColors.accent,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
