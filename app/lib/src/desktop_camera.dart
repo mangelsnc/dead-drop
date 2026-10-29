@@ -109,20 +109,28 @@ class DesktopCameraScanner {
     final w = _previewWidth, h = _previewHeight;
     if (w == null || h == null) return 'geometry: unknown';
     final fps = measuredFps;
-    // The share of delivered frames dropped because a decode was
-    // already running. This is the one number that says whether
-    // decoding on the Dart thread is costing anything: a native
-    // decoder on its own thread would not drop these. Low means the
-    // reader keeps up and swapping it would buy nothing.
-    final dropped = _framesDelivered == 0
-        ? 0
-        : (_framesWhileBusy / _framesDelivered * 100).round();
+    // How long a decode takes, and what share of the gap between frames
+    // it eats. This replaced a "frames dropped because a decode was
+    // already running" counter that could only ever read zero: the
+    // decode path holds no await, so an async frame handler runs to
+    // completion in one turn of the event loop and the guard is always
+    // clear again before the next frame arrives. The cost is real but it
+    // does not surface as a drop — a decode that overruns the frame
+    // interval blocks the camera callback, so it surfaces as a lower
+    // delivered rate. This is the number that says whether moving the
+    // decode off this isolate would buy anything.
+    final median = medianDecodeMillis;
+    final load = decodeLoad;
+    final decode = median == null
+        ? 'decode: measuring…'
+        : 'decode ${median.toStringAsFixed(1)} ms median'
+              '${load == null ? '' : ' · ${(load * 100).round()}% of the frame'}';
     return 'sensor ${w}x$h · rot ${_sensorOrientation ?? '?'}°'
         ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}\n'
         'cam ${fps == null ? '?' : fps.toStringAsFixed(1)} fps'
         ' · got $_framesDelivered · decoded $_framesSeen'
         ' · read $_framesDecoded\n'
-        'busy-dropped $_framesWhileBusy ($dropped%)';
+        '$decode';
   }
 
   int? _sensorOrientation;
@@ -353,12 +361,48 @@ class DesktopCameraScanner {
         );
   }
 
-  /// Frames the camera delivered while a decode was already running.
+  /// How long the last [_decodeWindow] decodes took, in microseconds.
   ///
-  /// The difference between "the camera is slow" and "we cannot keep up
-  /// with it". If this climbs while [_framesSeen] crawls, the decoder is
-  /// the bottleneck; if both crawl, the camera is not delivering.
-  int _framesWhileBusy = 0;
+  /// A rolling window, for the same reason [recentDecodeRate] is one: what
+  /// matters is what the decoder is doing against the code on screen now,
+  /// not an average dragged down by the frames before the user aimed.
+  ///
+  /// This exists because the counter it replaced could not move. That one
+  /// counted frames arriving while a decode was in flight, to decide
+  /// whether a native decoder on its own thread would be worth the
+  /// dependency — but [_onFrame] awaits nothing around the decode, so it
+  /// never yields mid-decode and the count was always zero. Timing the
+  /// decode measures the same thing honestly: compared against the frame
+  /// interval it says how much of the camera's budget the decoder spends.
+  final List<int> _decodeMicros = [];
+  static const int _decodeWindow = 30;
+
+  /// Median decode time in milliseconds, or null before there is enough.
+  ///
+  /// Median, not mean: a single slow frame (a garbage-collection pause, a
+  /// window being dragged) would drag a mean away from the typical cost,
+  /// and the typical cost is what decides whether this approach holds.
+  double? get medianDecodeMillis {
+    if (_decodeMicros.length < 5) return null;
+    final sorted = [..._decodeMicros]..sort();
+    final mid = sorted.length ~/ 2;
+    final micros = sorted.length.isOdd
+        ? sorted[mid].toDouble()
+        : (sorted[mid - 1] + sorted[mid]) / 2;
+    return micros / 1000;
+  }
+
+  /// Share of the interval between camera frames that a decode occupies,
+  /// or null before both it and the frame rate can be measured.
+  ///
+  /// At or above 1.0 the decoder cannot finish one frame before the next
+  /// arrives, so it is holding the camera callback and capping the rate.
+  double? get decodeLoad {
+    final median = medianDecodeMillis;
+    final fps = measuredFps;
+    if (median == null || fps == null || fps <= 0) return null;
+    return median / (1000 / fps);
+  }
 
   /// Every frame the camera has delivered, decoded or not.
   ///
@@ -377,14 +421,12 @@ class DesktopCameraScanner {
     _framesDelivered++;
     _firstFrameAt ??= DateTime.now();
 
-    if (_decoding) {
-      _framesWhileBusy++;
-      return;
-    }
+    if (_decoding) return;
     if (_payloads.isClosed) return;
     _decoding = true;
     _framesSeen++;
     if (!_activity.isClosed) _activity.add(null);
+    final startedAt = Stopwatch()..start();
     try {
       // Decoded here, not on a spawned isolate.
       //
@@ -424,6 +466,12 @@ class DesktopCameraScanner {
       // A frame that cannot be decoded is the normal case, and an isolate
       // that fails on one frame should not end the scan.
     } finally {
+      // Recorded in the finally, so a frame the decoder threw on still
+      // counts. Those are not rare — a frame holding no code is the
+      // normal case — and leaving them out would time only the frames
+      // that happened to be easy.
+      _decodeMicros.add(startedAt.elapsedMicroseconds);
+      if (_decodeMicros.length > _decodeWindow) _decodeMicros.removeAt(0);
       _decoding = false;
     }
   }

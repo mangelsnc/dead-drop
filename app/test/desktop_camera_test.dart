@@ -119,6 +119,27 @@ CameraImageData _frame(String payload) {
   );
 }
 
+/// A blank white frame, holding no code.
+///
+/// The ordinary case while a camera is being aimed, and the one the decode
+/// timing must include: a frame that decodes to nothing still costs a
+/// decode.
+CameraImageData _blankFrame() {
+  const side = 64;
+  const stride = side * 4;
+  return CameraImageData(
+    format: const CameraImageFormat(ImageFormatGroup.bgra8888, raw: null),
+    planes: [
+      CameraImagePlane(
+        bytes: Uint8List(stride * side)..fillRange(0, stride * side, 0xFF),
+        bytesPerRow: stride,
+      )
+    ],
+    width: side,
+    height: side,
+  );
+}
+
 /// A platform that does not publish camera dimensions, as the base class
 /// does by default.
 class _NoInitEventPlatform extends _FakeCameraPlatform {
@@ -314,6 +335,89 @@ void main() {
       platform.frames.addError('unplugged');
 
       expect(await error, isA<DesktopCameraException>());
+    });
+  });
+
+  group('measuring what the decoder costs', () {
+    // This replaced a counter of "frames that arrived while a decode was
+    // already running", which was structurally unable to report anything
+    // but zero: the decode path holds no await, so the frame handler runs
+    // to completion in a single turn of the event loop and the guard is
+    // always clear again by the time the next frame is delivered. It read
+    // 0% on a device that was plainly struggling, and that zero was taken
+    // as evidence the decoder was keeping up.
+    //
+    // The tests below hold the replacement to the bar the old one failed:
+    // the figure must move when the thing it claims to measure moves.
+
+    test('reports nothing until there are enough decodes to be worth it',
+        () async {
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      expect(scanner.medianDecodeMillis, isNull);
+      expect(scanner.debugGeometry, contains('measuring'));
+    });
+
+    test('times every frame it decodes, including the ones with no code',
+        () async {
+      // Most frames hold no code. Timing only the frames that decoded to
+      // something would measure the easy ones and miss the cost of the
+      // rest.
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      for (var i = 0; i < 8; i++) {
+        platform.frames.add(_blankFrame());
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      expect(scanner.medianDecodeMillis, isNotNull);
+      expect(scanner.medianDecodeMillis, greaterThan(0));
+    });
+
+    test('the decode time reaches the diagnostic line', () async {
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      for (var i = 0; i < 8; i++) {
+        platform.frames.add(_blankFrame());
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      expect(scanner.debugGeometry, contains('ms median'));
+      expect(scanner.debugGeometry, isNot(contains('busy-dropped')),
+          reason: 'the counter that could only read zero is gone');
+    });
+
+    test('the load is the decode time against the frame interval', () async {
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      // Enough frames to measure both the rate and the decode time.
+      for (var i = 0; i < 12; i++) {
+        platform.frames.add(_blankFrame());
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      final median = scanner.medianDecodeMillis;
+      final fps = scanner.measuredFps;
+      final load = scanner.decodeLoad;
+      expect(median, isNotNull);
+      expect(fps, isNotNull);
+      expect(load, isNotNull);
+      // The relationship that makes the number mean something: at a load
+      // of 1.0 a decode fills the whole gap between frames, so the
+      // decoder is capping the camera rather than the camera being slow.
+      expect(load, closeTo(median! / (1000 / fps!), 0.01));
     });
   });
 
