@@ -17,6 +17,7 @@ import '../../src/handshake.dart';
 import '../../src/identity_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
+import '../info_point.dart';
 import '../theme.dart';
 import '../technical_text.dart';
 import '../desktop_scanner_view.dart';
@@ -1356,25 +1357,54 @@ class _ConfigSection extends StatelessWidget {
               divisions: 20,
               unit: ' fps',
               onChanged: notifier.setFps,
+              help: SettingHelp.frameRate,
             ),
             const SizedBox(height: 12),
-            const Text('Error correction'),
+            const Row(
+              children: [
+                Text('Error correction'),
+                InfoPoint(
+                  title: 'Error correction',
+                  body: SettingHelp.errorCorrection,
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             SegmentedButton<String>(
+              // No checkmark on the selected segment: Material reserves
+              // room for it inside the segment, which on a phone took
+              // enough width from the label that "M (15%)" wrapped onto
+              // three lines and the selected segment grew to twice the
+              // height of its neighbours. The fill already says which
+              // one is selected.
+              showSelectedIcon: false,
               // A level is disabled when the current chunk would not fit
               // in a QR with that much correction. Stronger correction
               // leaves less room for data, so at 2048 bytes only L has
               // the capacity — offering the others rendered nothing.
               segments: [
+                // Level and overhead on separate lines, centred. On one
+                // line "M (15%)" does not fit a quarter of a phone's
+                // width and wraps mid-label; stacked, each segment is
+                // the same shape whatever it contains.
                 for (final ec in const [
-                  ('L', 'L (7%)'),
-                  ('M', 'M (15%)'),
-                  ('Q', 'Q (25%)'),
-                  ('H', 'H (30%)'),
+                  ('L', '7%'),
+                  ('M', '15%'),
+                  ('Q', '25%'),
+                  ('H', '30%'),
                 ])
                   ButtonSegment(
                     value: ec.$1,
-                    label: Text(ec.$2),
+                    label: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(ec.$1),
+                        Text(
+                          '(${ec.$2})',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ],
+                    ),
                     enabled: chunkFitsQr(state.chunkSize, ec.$1),
                   ),
               ],
@@ -1559,9 +1589,13 @@ class _ParamSlider extends StatelessWidget {
     required this.divisions,
     required this.unit,
     required this.onChanged,
+    this.help,
   });
 
   final String label;
+
+  /// What the (i) beside the label explains. No icon when null.
+  final String? help;
   final double value;
   final double min;
   final double max;
@@ -1577,7 +1611,14 @@ class _ParamSlider extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label),
+                if (help != null)
+                  InfoPoint(title: label, body: help!),
+              ],
+            ),
             Text('${value.round()}$unit'),
           ],
         ),
@@ -1619,7 +1660,16 @@ class _ChunkSizeSelector extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Chunk size'),
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Chunk size'),
+                InfoPoint(
+                  title: 'Chunk size',
+                  body: SettingHelp.chunkSize,
+                ),
+              ],
+            ),
             Text('${state.chunkSize} bytes'),
           ],
         ),

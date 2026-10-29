@@ -576,6 +576,9 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                     if (state.receiverKeypair != null) ...[
                       Center(
                         child: SegmentedButton<bool>(
+                          // These segments carry their own icons, which
+                          // the selection checkmark displaces.
+                          showSelectedIcon: false,
                           segments: const [
                             ButtonSegment(
                               value: false,
