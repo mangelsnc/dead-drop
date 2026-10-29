@@ -109,11 +109,20 @@ class DesktopCameraScanner {
     final w = _previewWidth, h = _previewHeight;
     if (w == null || h == null) return 'geometry: unknown';
     final fps = measuredFps;
+    // The share of delivered frames dropped because a decode was
+    // already running. This is the one number that says whether
+    // decoding on the Dart thread is costing anything: a native
+    // decoder on its own thread would not drop these. Low means the
+    // reader keeps up and swapping it would buy nothing.
+    final dropped = _framesDelivered == 0
+        ? 0
+        : (_framesWhileBusy / _framesDelivered * 100).round();
     return 'sensor ${w}x$h · rot ${_sensorOrientation ?? '?'}°'
         ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}\n'
         'cam ${fps == null ? '?' : fps.toStringAsFixed(1)} fps'
-        ' · seen $_framesSeen · read $_framesDecoded'
-        ' · busy $_framesWhileBusy';
+        ' · got $_framesDelivered · decoded $_framesSeen'
+        ' · read $_framesDecoded\n'
+        'busy-dropped $_framesWhileBusy ($dropped%)';
   }
 
   int? _sensorOrientation;
