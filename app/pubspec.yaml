@@ -67,4 +67,8 @@ dev_dependencies:
   flutter_secure_storage_platform_interface: ^2.1.1
 
 flutter:
+  assets:
+    # The app's own icon, so the home screen shows the logo rather than
+    # a stock Material glyph. Same file the platform launchers use.
+    - assets/branding/app_icon.png
   uses-material-design: true

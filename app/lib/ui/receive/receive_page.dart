@@ -15,6 +15,7 @@ import '../../src/tofu_store.dart';
 import '../../src/transport.dart';
 import '../../src/utils.dart';
 import '../../main.dart';
+import '../elapsed_time.dart';
 import '../theme.dart';
 import '../technical_text.dart';
 import '../passphrase_field.dart';
@@ -30,6 +31,8 @@ class ReceiveState {
     this.receiver,
     this.isScanning = false,
     this.framesReceived = 0,
+    this.startedAt,
+    this.completedAt,
     this.chunksDecoded = 0,
     this.totalChunks = 0,
     this.decodeProgress = 0.0,
@@ -48,6 +51,17 @@ class ReceiveState {
   final Receiver? receiver;
   final bool isScanning;
   final int framesReceived;
+
+  /// When the first data frame arrived, for the elapsed-time readout.
+  ///
+  /// Not when scanning started: the gap before the sender begins is not
+  /// transfer time, and counting it makes every transfer look slower
+  /// than it was.
+  final DateTime? startedAt;
+
+  /// When the transfer finished, so the elapsed readout stops there.
+  final DateTime? completedAt;
+
   final int chunksDecoded;
   final int totalChunks;
   final Uint8List? fileBytes;
@@ -105,6 +119,8 @@ class ReceiveState {
     Receiver? receiver,
     bool? isScanning,
     int? framesReceived,
+    DateTime? startedAt,
+    DateTime? completedAt,
     int? chunksDecoded,
     int? totalChunks,
     double? decodeProgress,
@@ -126,6 +142,8 @@ class ReceiveState {
       receiver: receiver ?? this.receiver,
       isScanning: isScanning ?? this.isScanning,
       framesReceived: framesReceived ?? this.framesReceived,
+      startedAt: startedAt ?? this.startedAt,
+      completedAt: completedAt ?? this.completedAt,
       chunksDecoded: chunksDecoded ?? this.chunksDecoded,
       totalChunks: totalChunks ?? this.totalChunks,
       decodeProgress: decodeProgress ?? this.decodeProgress,
@@ -301,6 +319,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final decodedAfter = receiver.decoder?.decoded.length ?? 0;
 
     state = state.copyWith(
+      startedAt: state.startedAt ?? DateTime.now(),
       framesReceived: state.framesReceived + 1,
       chunksDecoded: decodedAfter,
       decodeProgress: receiver.decoder?.progress ?? 0.0,
@@ -319,6 +338,9 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
           fileBytes: fileBytes,
           fileName: receiver.fileName ?? state.fileName,
           isScanning: false,
+          // Stops the elapsed readout here rather than letting it
+          // count on past the thing it measures.
+          completedAt: DateTime.now(),
         );
       } catch (e) {
         state = state.copyWith(error: 'Integrity check failed: $e');
@@ -766,11 +788,33 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       // percentage comes from the decoder, which counts
                       // captured-but-unrevealed frames as the work they
                       // are.
-                      Text(
-                        state.fileBytes != null
-                            ? 'Complete'
-                            : '${(state.progress * 100).round()}% received',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            state.fileBytes != null
+                                ? 'Complete'
+                                : '${(state.progress * 100).round()}% '
+                                      'received',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          // How long this has been running. A transfer
+                          // takes minutes, and knowing how many is the
+                          // first thing anyone wants when deciding
+                          // whether to wait or change a setting.
+                          if (state.startedAt != null)
+                            ElapsedTime(
+                              since: state.startedAt!,
+                              frozenAt: state.completedAt,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: DeadDropColors.textSecondary,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                            ),
+                        ],
                       ),
                       Text(
                         '${state.chunksDecoded} of ${state.totalChunks} '

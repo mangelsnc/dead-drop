@@ -44,6 +44,7 @@ class SendState {
     this.showingBootstrap = false,
     this.sendError,
     this.appliedHint,
+    this.qrDisplaySizePx = 0,
   });
 
   final String? fileName;
@@ -62,6 +63,14 @@ class SendState {
   /// applied. Held so the screen can say where these settings came from:
   /// numbers that changed by themselves are indistinguishable from a bug.
   final HandshakeHint? appliedHint;
+
+  /// How many logical pixels the layout gives the QR, reported by the
+  /// send screen. Zero until it has laid out once.
+  ///
+  /// The notifier needs it to negotiate settings a receiver asked for
+  /// against what this screen can actually draw, and only the layout
+  /// knows it.
+  final double qrDisplaySizePx;
 
   final Emitter? emitter;
   final Identity? identity;
@@ -120,6 +129,7 @@ class SendState {
     bool? showingBootstrap,
     String? sendError,
     HandshakeHint? appliedHint,
+    double? qrDisplaySizePx,
     bool clearSendError = false,
     bool clearReceiverPk = false,
     bool clearHint = false,
@@ -142,6 +152,7 @@ class SendState {
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
       sendError: clearSendError ? null : (sendError ?? this.sendError),
       appliedHint: clearHint ? null : (appliedHint ?? this.appliedHint),
+      qrDisplaySizePx: qrDisplaySizePx ?? this.qrDisplaySizePx,
     );
   }
 }
@@ -253,11 +264,27 @@ class SendNotifier extends StateNotifier<SendState> {
     // and knows nothing about the file being sent, so it can name a
     // combination that produces a QR larger than version 40 — which
     // displays nothing at all.
-    final ec = chunkFitsQr(chunkSize, hint.ecLevel)
+    var ec = chunkFitsQr(chunkSize, hint.ecLevel)
         ? hint.ecLevel
         : (ecLevelsFor(chunkSize).isEmpty
               ? state.ecLevel
               : ecLevelsFor(chunkSize).first);
+
+    // Renderable is not the same as readable. The hint says what the
+    // receiver's camera can manage; it knows nothing about this screen,
+    // and a code too dense to draw here cannot be read however good
+    // that camera is. The UI already stops a user choosing such a pair
+    // by hand — this is the path that bypassed it. Reported after a
+    // phone accepted 512 bytes at level Q and transferred nothing.
+    if (state.qrDisplaySizePx > 0) {
+      final agreed = negotiateSettings(
+        requestedChunkSize: chunkSize,
+        requestedEcLevel: ec,
+        displaySize: state.qrDisplaySizePx,
+      );
+      chunkSize = agreed.chunkSize;
+      ec = agreed.ecLevel;
+    }
 
     state = state.copyWith(
       receiverPk: pk,
@@ -276,6 +303,16 @@ class SendNotifier extends StateNotifier<SendState> {
   /// succeed, so the only way out was to restart the app.
   void clearReceiverPk() {
     state = state.copyWith(clearReceiverPk: true);
+  }
+
+  /// Records how much room the layout gives the QR.
+  ///
+  /// Called from the display widget's LayoutBuilder, which is the only
+  /// place that knows. Ignored when unchanged, so it does not loop: a
+  /// state change rebuilds the layout, which reports again.
+  void reportQrDisplaySize(double px) {
+    if ((state.qrDisplaySizePx - px).abs() < 0.5) return;
+    state = state.copyWith(qrDisplaySizePx: px);
   }
 
   void setChunkSize(int size) {
@@ -525,85 +562,102 @@ class _SendPageState extends ConsumerState<SendPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Send a file')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: ContentWidthLimit(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Steps 1 and 2 are the actions; configuration and identity are
-              // supporting material. On a desktop window they sit side by
-              // side rather than stacking into a column that scrolls while
-              // two thirds of the window stays empty. On a phone the same
-              // widgets stack in this order.
-              TwoColumnLayout(
-                start: [
-                  // ── Step 1: Select file ──────────────────────────────
-                  _StepCard(
-                    step: 1,
-                    title: 'Choose a file',
-                    isComplete: state.fileBytes != null,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (state.fileName != null) ...[
-                          _FileInfoTile(
-                            fileName: state.fileName!,
-                            fileSize: state.fileBytes!.length,
-                            fileExtension: state.fileExtension,
-                            filePath: state.filePath,
-                            fileBytes: state.fileBytes,
-                          ),
-                          const SizedBox(height: 12),
-                        ],
-                        FilledButton.tonalIcon(
-                          onPressed: notifier.pickFile,
-                          icon: const Icon(Icons.folder_open),
-                          label: Text(
-                            state.fileName == null
-                                ? 'Choose file'
-                                : 'Change file',
-                          ),
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 52),
-                          ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // Tell the notifier how large a QR this screen can draw, so a
+          // receiver's hint can be negotiated against it rather than
+          // accepted blind. Measured here because the sending view does
+          // not exist yet when the hint arrives.
+          //
+          // The estimate deliberately matches what _QrDisplay will be
+          // given: the page's width less its margins, against the
+          // height left once the sending screen's furniture is counted.
+          final qrWidth = constraints.maxWidth - 48;
+          final qrHeight = constraints.maxHeight - 240;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            notifier.reportQrDisplaySize(qrDisplaySize(qrWidth, qrHeight));
+          });
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ContentWidthLimit(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Steps 1 and 2 are the actions; configuration and identity are
+                  // supporting material. On a desktop window they sit side by
+                  // side rather than stacking into a column that scrolls while
+                  // two thirds of the window stays empty. On a phone the same
+                  // widgets stack in this order.
+                  TwoColumnLayout(
+                    start: [
+                      // ── Step 1: Select file ──────────────────────────────
+                      _StepCard(
+                        step: 1,
+                        title: 'Choose a file',
+                        isComplete: state.fileBytes != null,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (state.fileName != null) ...[
+                              _FileInfoTile(
+                                fileName: state.fileName!,
+                                fileSize: state.fileBytes!.length,
+                                fileExtension: state.fileExtension,
+                                filePath: state.filePath,
+                                fileBytes: state.fileBytes,
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            FilledButton.tonalIcon(
+                              onPressed: notifier.pickFile,
+                              icon: const Icon(Icons.folder_open),
+                              label: Text(
+                                state.fileName == null
+                                    ? 'Choose file'
+                                    : 'Change file',
+                              ),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(double.infinity, 52),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
+                      ),
+                      const SizedBox(height: 16),
 
-                  // ── Step 2: Scan receiver key ────────────────────────
-                  _StepCard(
-                    step: 2,
-                    title: 'Scan receiver\'s QR',
-                    isComplete: state.receiverPk != null,
-                    child: _ReceiverKeySection(
-                      state: state,
-                      notifier: notifier,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                end: [
-                  // ── Step 3: Configure (collapsible) ──────────────
-                  _ConfigSection(state: state, notifier: notifier),
-                  const SizedBox(height: 16),
+                      // ── Step 2: Scan receiver key ────────────────────────
+                      _StepCard(
+                        step: 2,
+                        title: 'Scan receiver\'s QR',
+                        isComplete: state.receiverPk != null,
+                        child: _ReceiverKeySection(
+                          state: state,
+                          notifier: notifier,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    end: [
+                      // ── Step 3: Configure (collapsible) ──────────────
+                      _ConfigSection(state: state, notifier: notifier),
+                      const SizedBox(height: 16),
 
-                  // ── Identity fingerprint ─────────────────────────
-                  const _IdentityFingerprintCard(),
-                  const SizedBox(height: 16),
+                      // ── Identity fingerprint ─────────────────────────
+                      const _IdentityFingerprintCard(),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Full width in both layouts: this is the one action that acts
+                  // on everything above it, and it should not look like it
+                  // belongs to either column.
+                  _StartSection(state: state, notifier: notifier),
                 ],
               ),
-              const SizedBox(height: 8),
-
-              // Full width in both layouts: this is the one action that acts
-              // on everything above it, and it should not look like it
-              // belongs to either column.
-              _StartSection(state: state, notifier: notifier),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -1760,6 +1814,99 @@ double pixelsPerModuleOnScreen({
   return displaySize / modules;
 }
 
+/// The largest chunk size this screen can display legibly at [ecLevel],
+/// out of [kChunkSizeOptions], or null when it cannot manage any.
+///
+/// The receiver's hint says what its camera can read. It knows nothing
+/// about the sender's screen, and a code too dense to draw here cannot
+/// be read however good that camera is: a Redmi Note 14 asked to show
+/// 512-byte chunks produced 3.29 pixels per module and transferred
+/// nothing in three minutes, where 256 bytes finished in one.
+///
+/// So the settings a transfer runs at are the smaller of what the
+/// receiver asks for and what this screen can offer.
+int? largestDisplayableChunk({
+  required double displaySize,
+  required String ecLevel,
+}) {
+  int? best;
+  for (final size in kChunkSizeOptions) {
+    final density = pixelsPerModuleOnScreen(
+      displaySize: displaySize,
+      chunkSize: size,
+      ecLevel: ecLevel,
+    );
+    if (density >= kMinUsablePixelsPerModule) {
+      best = size;
+    }
+  }
+  return best;
+}
+
+/// What a transfer should actually run at, given what the receiver asked
+/// for and what this screen can show.
+///
+/// Returns the chunk size to use. Never raises the receiver's request —
+/// it knows its own camera — and never exceeds what this screen can
+/// draw. When the screen cannot manage even the smallest option, the
+/// request stands: the warning on the send screen says so, and refusing
+/// to transfer at all would be worse than letting someone try.
+int negotiateChunkSize({
+  required int requested,
+  required double displaySize,
+  required String ecLevel,
+}) {
+  final offerable = largestDisplayableChunk(
+    displaySize: displaySize,
+    ecLevel: ecLevel,
+  );
+  if (offerable == null) return requested;
+  return requested < offerable ? requested : offerable;
+}
+
+/// The settings a transfer should run at, balancing what the receiver
+/// asked for against what this screen can show.
+///
+/// Both halves matter. Capping only the chunk size is not enough: a
+/// Redmi Note 14 asked for level Q cannot legibly draw *any* chunk
+/// size, so the error correction has to give way too. Weakening it is
+/// the right trade — a code with less redundancy that the camera can
+/// resolve beats a denser one it cannot see.
+///
+/// Levels are tried from the requested one downwards, stopping at the
+/// first this screen can work with. If none can, the request is
+/// returned unchanged: the send screen's warning says so, and refusing
+/// the transfer outright would be worse than letting the user try.
+({int chunkSize, String ecLevel}) negotiateSettings({
+  required int requestedChunkSize,
+  required String requestedEcLevel,
+  required double displaySize,
+}) {
+  // Strongest to weakest. Anything at or below the request is fair to
+  // fall back to; nothing above it, since the receiver asked for what
+  // its camera needs.
+  const weakening = ['H', 'Q', 'M', 'L'];
+  final from = weakening.indexOf(requestedEcLevel);
+  if (from < 0) {
+    return (chunkSize: requestedChunkSize, ecLevel: requestedEcLevel);
+  }
+
+  for (var i = from; i < weakening.length; i++) {
+    final ec = weakening[i];
+    final offerable = largestDisplayableChunk(
+      displaySize: displaySize,
+      ecLevel: ec,
+    );
+    if (offerable == null) continue;
+    final chunk = requestedChunkSize < offerable
+        ? requestedChunkSize
+        : offerable;
+    return (chunkSize: chunk, ecLevel: ec);
+  }
+
+  return (chunkSize: requestedChunkSize, ecLevel: requestedEcLevel);
+}
+
 /// The floor below which a sender's own screen cannot render a code
 /// another device will read.
 ///
@@ -1785,7 +1932,6 @@ const double kMinUsablePixelsPerModule = 4.0;
 /// Past this a code stops being easier to scan and starts being hard to
 /// hold entirely within the camera's view.
 const double kQrMaxDisplaySize = 720;
-
 
 /// Dumb QR renderer: displays exactly what the notifier produced. All frame
 /// generation logic lives in [SendNotifier], so there is a single source of
