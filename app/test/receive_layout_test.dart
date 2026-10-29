@@ -11,6 +11,8 @@
 /// never displace the other.
 library;
 
+import 'dart:io';
+
 import 'package:dead_drop/main.dart';
 import 'package:dead_drop/ui/receive/receive_page.dart';
 import 'package:dead_drop/ui/theme.dart';
@@ -130,6 +132,49 @@ void main() {
     final scanY = tester.getTopLeft(find.text('Scan sender QR codes')).dy;
     final keyY = tester.getTopLeft(find.text('Your public key')).dy;
     expect(scanY, greaterThan(keyY));
+  });
+
+  group('the trust prompt', () {
+    test('its two buttons are not laid out side by side', () {
+      // Half a phone's width is not enough for "Codes don't match" to
+      // stay on one line, and a decision about trust is the wrong place
+      // to make someone read a wrapped label. Checked against the
+      // source, because the prompt is private and only appears when a
+      // real unknown sender arrives.
+      final source = File('lib/ui/receive/receive_page.dart')
+          .readAsStringSync();
+      final start = source.indexOf('class _UnknownSenderPrompt');
+      expect(start, greaterThan(0));
+      final body = source.substring(start);
+      final match = body.indexOf("label: const Text('Codes match')");
+      final noMatch = body.indexOf('label: const Text("Codes don\'t match")');
+      expect(match, greaterThan(0), reason: 'the accept button moved');
+      expect(noMatch, greaterThan(0), reason: 'the reject button moved');
+      // Between the two buttons there must be a vertical gap, not a
+      // horizontal one.
+      final between = body.substring(
+        match < noMatch ? match : noMatch,
+        match < noMatch ? noMatch : match,
+      );
+      expect(between, contains('SizedBox(height:'));
+      expect(between, isNot(contains('SizedBox(width:')));
+    });
+
+    test('the identity shown afterwards does not repeat the instruction',
+        () {
+      // By the time it appears the user has read the code out loud,
+      // compared it and pressed "Codes match". Telling them again to
+      // verify through another channel teaches people that these
+      // warnings can be ignored.
+      final source = File('lib/ui/receive/receive_page.dart')
+          .readAsStringSync();
+      expect(
+        source,
+        isNot(contains('verify this fingerprint through')),
+        reason: 'the post-acceptance card repeated the instruction the '
+            'user had just followed',
+      );
+    });
   });
 
   testWidgets('the page scrolls rather than overflowing on a short screen',
