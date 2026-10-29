@@ -247,4 +247,62 @@ void main() {
       }
     });
   });
+
+  group('qrSizeAdvice', () {
+    test('warns when the window cannot show the chunk', () {
+      final advice = qrSizeAdvice(
+        displaySize: 200,
+        chunkSize: 512,
+        ecLevel: 'L',
+      );
+      expect(advice, isNotNull);
+      expect(advice!.isProblem, isTrue);
+      expect(advice.text, contains('512'));
+    });
+
+    test('suggests a bigger window when that would help', () {
+      final advice = qrSizeAdvice(
+        displaySize: 420,
+        chunkSize: 256,
+        ecLevel: 'L',
+      );
+      expect(advice, isNotNull);
+      expect(advice!.isProblem, isFalse);
+      expect(advice.text, contains('larger window'));
+    });
+
+    test('says nothing when the window is already right', () {
+      expect(
+        qrSizeAdvice(
+          displaySize: kQrMaxDisplaySize,
+          chunkSize: 1024,
+          ecLevel: 'L',
+        ),
+        isNull,
+      );
+    });
+
+    test('never gives both messages at once', () {
+      // The two advisories this replaced could appear together and
+      // contradict each other: "a larger window would fit 2048 bytes"
+      // above "this screen is too small for 512". They are the same
+      // question, so there is one answer.
+      for (final size in [120.0, 200.0, 300.0, 420.0, 600.0, 720.0]) {
+        for (final chunk in [256, 512, 1024]) {
+          final advice =
+              qrSizeAdvice(displaySize: size, chunkSize: chunk, ecLevel: 'L');
+          if (advice == null) continue;
+          // A problem message must never also offer a bigger window as
+          // if the current size were fine.
+          if (advice.isProblem) {
+            expect(advice.text, contains('too small'),
+                reason: '${size}px / $chunk B');
+          } else {
+            expect(advice.text, isNot(contains('too small')),
+                reason: '${size}px / $chunk B');
+          }
+        }
+      }
+    });
+  });
 }
