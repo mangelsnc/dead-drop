@@ -24,6 +24,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../theme.dart';
 import '../technical_text.dart';
 import '../senders/known_senders_page.dart';
+import '../../src/app_version.dart';
 import '../../src/vault/attempt_guard.dart';
 import '../vault/vault_controller.dart';
 import '../vault/vault_setup_page.dart';
@@ -47,10 +48,15 @@ class SettingsPage extends ConsumerWidget {
         child: ListView(
           children: [
             const _SectionHeader('General'),
-            const ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('About DeadDrop'),
-              subtitle: Text('Air-gapped file transfer'),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('About DeadDrop'),
+              // The version is here, not behind a tap: someone reporting
+              // a problem has to be able to read it off the screen, and
+              // a build they cannot identify is a report we cannot act
+              // on.
+              subtitle: Text('Air-gapped file transfer\n$appVersionLabel'),
+              isThreeLine: true,
             ),
             // In General rather than Security for the same reason as the
             // text-size control: the Security section is absent in the

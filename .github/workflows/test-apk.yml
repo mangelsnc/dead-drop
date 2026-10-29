@@ -87,7 +87,7 @@ jobs:
 
       - name: Build release APK
         working-directory: app
-        run: flutter build apk --release
+        run: flutter build apk --release $(tool/build_args.sh)
 
       # The reason this workflow exists for the zxing2 branch: show what
       # the APK actually asks the user for. A build whose whole purpose is
