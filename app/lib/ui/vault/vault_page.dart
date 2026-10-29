@@ -203,12 +203,19 @@ class _LockedViewState extends ConsumerState<_LockedView> {
                   : const Text('Unlock'),
             ),
             const SizedBox(height: 8),
-            // Reachable while locked on purpose. Someone who has forgotten
-            // the passphrase still needs a way to clear the vault off their
-            // device, and the button leaks nothing the screen behind it
-            // does not already show: that a vault exists here. It still
-            // asks for a passphrase, so being reachable is not the same as
-            // being usable by whoever holds the phone.
+            // Reachable while locked on purpose, and the one place it
+            // has to be: someone who has forgotten the passphrase has no
+            // other way out, and this screen is where they are standing
+            // when they find that out.
+            //
+            // It used to ask for the passphrase here, which made the
+            // button a promise it could not keep — the one person who
+            // needs it is the one person who cannot use it. It no longer
+            // does; see delete_vault_dialog.dart for why that costs
+            // nothing, and why typing a word is the right guard instead.
+            //
+            // It leaks nothing the screen behind it does not already
+            // show: that a vault exists here.
             TextButton(
               onPressed: _submitting
                   ? null
