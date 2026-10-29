@@ -64,6 +64,23 @@ void main() {
           reason: 'never faster than the camera can sample');
     });
 
+    test('never suggests emitting faster than the camera samples', () {
+      // Measured on a device: against a camera that read 90% of the
+      // codes at 12 fps, 16 fps dropped it to about 14%. A code is only
+      // readable while it is fully on screen, so passing the camera's
+      // rate is a cliff, not a slope — and a measurement that reads
+      // high must not walk off it.
+      for (final rate in [4.0, 7.5, 8.0, 11.0, 12.0, 13.0, 20.0, 30.0]) {
+        final hint = suggestEmission(CameraCapability(
+          framesPerSecond: rate,
+          width: 1280,
+          height: 720,
+        ));
+        expect(hint.fps, lessThanOrEqualTo(rate),
+            reason: 'camera at $rate fps was told to emit at ${hint.fps}');
+      }
+    });
+
     test('a slow camera gets a slower stream', () {
       final slow = suggestEmission(const CameraCapability(
         framesPerSecond: 8,

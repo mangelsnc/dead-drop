@@ -95,18 +95,30 @@ double _fpsAtMost(double value) {
 /// 3. **Resolution.** A dense QR needs pixels. Below 640x480 the chunk
 ///    size comes down so each code carries fewer modules.
 EmissionHint suggestEmission(CameraCapability camera) {
-  // Just under the measured camera rate.
+  // Just under the measured camera rate, and never above it.
   //
-  // This was two thirds of it, on the reasoning that sampling at the
-  // emission rate catches codes mid-change. Measured on a device, that
-  // headroom cost far more than it bought: a camera reporting 12 fps
-  // was told to emit at 8, where it read about 62% of the codes, and
-  // at 12 it read 90% — a 1 MB transfer went from 16.7 minutes to 7.7.
+  // Measured on a device, twice. Two thirds of the rate was too timid:
+  // a camera delivering 12 fps was told to emit at 8, read about 62% of
+  // the codes, and projected 16.7 minutes for 1 MB — where 12 fps read
+  // 90% and projected 7.7. A dropped frame costs one frame; a frame
+  // never emitted costs one the camera could have read.
   //
-  // The mid-change frames are real but they are simply dropped, and a
-  // dropped frame costs one frame. Emitting below what the camera can
-  // sample costs every frame it could have read and did not.
-  var fps = _fpsAtMost(camera.framesPerSecond * 0.95);
+  // Going past the camera is worse than either. At 16 fps against the
+  // same camera the read rate collapsed to about 14%, because a code is
+  // only readable while it is fully on screen and the camera no longer
+  // samples often enough to catch one. The cost is not gradual.
+  //
+  // So: match the camera, do not try to beat it. 0.9 leaves one frame
+  // in ten for the measurement being slightly optimistic, and
+  // [_fpsAtMost] rounds down to an offered value.
+  var fps = _fpsAtMost(camera.framesPerSecond * 0.9);
+  // Never above the camera, whatever the arithmetic above produced. A
+  // measurement that reads high — a burst of frames while the scene is
+  // simple, say — must not turn into a stream the camera cannot sample,
+  // because that failure is a cliff rather than a slope.
+  if (fps > camera.framesPerSecond) {
+    fps = _fpsAtMost(camera.framesPerSecond);
+  }
 
   var chunkSize = kDefaultChunkSize;
 

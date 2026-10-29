@@ -157,12 +157,20 @@ class DesktopCameraScanner {
   ///
   /// Measured rather than taken from the camera's own claim, which is a
   /// maximum under good light and not what a dim room produces.
+  /// How many frames a second the camera actually delivers.
+  ///
+  /// Counts every delivered frame, including those dropped because a
+  /// decode was already running. It used to count only decoded frames,
+  /// which measured this app's throughput instead: on a phone that read
+  /// far below the camera's real rate, and since the emission hint asks
+  /// for most of this figure, it fed back into a slower and slower
+  /// suggestion.
   double? get measuredFps {
     final start = _firstFrameAt;
-    if (start == null || _framesSeen < 10) return null;
+    if (start == null || _framesDelivered < 10) return null;
     final seconds = DateTime.now().difference(start).inMilliseconds / 1000;
     if (seconds <= 0) return null;
-    return _framesSeen / seconds;
+    return _framesDelivered / seconds;
   }
 
   /// Everything measured about this camera, or null when there is not yet
@@ -343,7 +351,23 @@ class DesktopCameraScanner {
   /// the bottleneck; if both crawl, the camera is not delivering.
   int _framesWhileBusy = 0;
 
+  /// Every frame the camera has delivered, decoded or not.
+  ///
+  /// Distinct from [_framesSeen], which counts only the frames that
+  /// reached the decoder. The difference is not small — a frame
+  /// arriving while a decode is in flight is dropped — and measuring
+  /// the camera with [_framesSeen] measures how fast this app can
+  /// process, not how fast the camera samples. The emission hint is
+  /// derived from this rate, so getting it wrong tells the sender to
+  /// emit faster than the camera can see.
+  int _framesDelivered = 0;
+
   Future<void> _onFrame(CameraImageData frame) async {
+    // Counted before anything can drop the frame: this is the camera's
+    // own rate, which is what the emission hint must be derived from.
+    _framesDelivered++;
+    _firstFrameAt ??= DateTime.now();
+
     if (_decoding) {
       _framesWhileBusy++;
       return;
@@ -351,7 +375,6 @@ class DesktopCameraScanner {
     if (_payloads.isClosed) return;
     _decoding = true;
     _framesSeen++;
-    _firstFrameAt ??= DateTime.now();
     if (!_activity.isClosed) _activity.add(null);
     try {
       // Decoded here, not on a spawned isolate.
