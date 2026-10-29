@@ -170,7 +170,8 @@ class SendNotifier extends StateNotifier<SendState> {
     // afterwards; if even the largest option cannot fit the file, surface a
     // clear error instead of letting the transfer fail silently later.
     final chunkSize = recommendedChunkSize(bytes.length);
-    final error = fileSizeError(bytes.length, chunkSize) ??
+    final error =
+        fileSizeError(bytes.length, chunkSize) ??
         (bytes.length > maxFileSizeForChunkSize(chunkSize)
             ? fileTooLargeError(bytes.length)
             : null);
@@ -201,7 +202,8 @@ class SendNotifier extends StateNotifier<SendState> {
   void loadBytes(String name, Uint8List bytes) {
     _stopTimer();
     final chunkSize = recommendedChunkSize(bytes.length);
-    final error = fileSizeError(bytes.length, chunkSize) ??
+    final error =
+        fileSizeError(bytes.length, chunkSize) ??
         (bytes.length > maxFileSizeForChunkSize(chunkSize)
             ? fileTooLargeError(bytes.length)
             : null);
@@ -210,8 +212,7 @@ class SendNotifier extends StateNotifier<SendState> {
     state = SendState(
       fileName: name,
       fileBytes: bytes,
-      fileExtension:
-          dot > 0 ? name.substring(dot + 1).toLowerCase() : null,
+      fileExtension: dot > 0 ? name.substring(dot + 1).toLowerCase() : null,
       receiverPk: state.receiverPk,
       chunkSize: chunkSize,
       ecLevel: state.ecLevel,
@@ -255,8 +256,8 @@ class SendNotifier extends StateNotifier<SendState> {
     final ec = chunkFitsQr(chunkSize, hint.ecLevel)
         ? hint.ecLevel
         : (ecLevelsFor(chunkSize).isEmpty
-            ? state.ecLevel
-            : ecLevelsFor(chunkSize).first);
+              ? state.ecLevel
+              : ecLevelsFor(chunkSize).first);
 
     state = state.copyWith(
       receiverPk: pk,
@@ -345,7 +346,8 @@ class SendNotifier extends StateNotifier<SendState> {
       );
     } on DeadDropCryptoError catch (e) {
       state = state.copyWith(
-        sendError: fileSizeError(state.fileBytes!.length, state.chunkSize) ??
+        sendError:
+            fileSizeError(state.fileBytes!.length, state.chunkSize) ??
             e.message,
       );
       return;
@@ -774,7 +776,8 @@ class _FileInfoTileState extends State<_FileInfoTile> {
 
   @override
   Widget build(BuildContext context) {
-    final hasMetadata = widget.fileExtension != null ||
+    final hasMetadata =
+        widget.fileExtension != null ||
         widget.filePath != null ||
         widget.fileBytes != null;
 
@@ -815,8 +818,11 @@ class _FileInfoTileState extends State<_FileInfoTile> {
                   ),
                   const SizedBox(width: 4),
                 ],
-                const Icon(Icons.check_circle,
-                    color: DeadDropColors.success, size: 20),
+                const Icon(
+                  Icons.check_circle,
+                  color: DeadDropColors.success,
+                  size: 20,
+                ),
               ],
             ),
           ),
@@ -865,8 +871,8 @@ class _FileInfoTileState extends State<_FileInfoTile> {
       final value = mimeLabel.isNotEmpty && typeLabel.isNotEmpty
           ? '$typeLabel ($mimeLabel)'
           : typeLabel.isNotEmpty
-              ? typeLabel
-              : mimeLabel;
+          ? typeLabel
+          : mimeLabel;
       if (value.isNotEmpty) {
         rows.add(_MetadataRow(label: 'Type', value: value));
       }
@@ -876,10 +882,12 @@ class _FileInfoTileState extends State<_FileInfoTile> {
     if (bytes != null && isPreviewableImageExtension(ext)) {
       final dims = parseImageDimensions(bytes);
       if (dims != null) {
-        rows.add(_MetadataRow(
-          label: 'Dimensions',
-          value: '${dims.width} \u00d7 ${dims.height}',
-        ));
+        rows.add(
+          _MetadataRow(
+            label: 'Dimensions',
+            value: '${dims.width} \u00d7 ${dims.height}',
+          ),
+        );
       }
     }
 
@@ -887,33 +895,23 @@ class _FileInfoTileState extends State<_FileInfoTile> {
     if (bytes != null && ext == 'pdf') {
       final pages = countPdfPages(bytes);
       if (pages != null) {
-        rows.add(_MetadataRow(
-          label: 'Pages',
-          value: '~$pages',
-        ));
+        rows.add(_MetadataRow(label: 'Pages', value: '~$pages'));
       }
     }
 
     // Size: human-readable + exact bytes
-    rows.add(_MetadataRow(
-      label: 'Size',
-      value: formatSizeWithBytes(widget.fileSize),
-    ));
+    rows.add(
+      _MetadataRow(label: 'Size', value: formatSizeWithBytes(widget.fileSize)),
+    );
 
     // Magic bytes / signature
     if (bytes != null && bytes.isNotEmpty) {
-      rows.add(_MetadataRow(
-        label: 'Signature',
-        value: fileSignature(bytes),
-      ));
+      rows.add(_MetadataRow(label: 'Signature', value: fileSignature(bytes)));
     }
 
     // Path
     if (widget.filePath != null) {
-      rows.add(_MetadataRow(
-        label: 'Path',
-        value: widget.filePath!,
-      ));
+      rows.add(_MetadataRow(label: 'Path', value: widget.filePath!));
     }
 
     return Padding(
@@ -961,8 +959,9 @@ class _InfoButton extends StatelessWidget {
           child: Icon(
             Icons.info_outline,
             size: 18,
-            color:
-                expanded ? DeadDropColors.accent : DeadDropColors.textSecondary,
+            color: expanded
+                ? DeadDropColors.accent
+                : DeadDropColors.textSecondary,
           ),
         ),
       ),
@@ -988,18 +987,16 @@ class _MetadataRow extends StatelessWidget {
             width: 72,
             child: Text(
               label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: DeadDropColors.textSecondary,
-                  ),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: DeadDropColors.textSecondary),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               value,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: DeadDropColors.textPrimary,
-                  ),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: DeadDropColors.textPrimary),
               overflow: TextOverflow.ellipsis,
               maxLines: 2,
             ),
@@ -1026,10 +1023,7 @@ class _MetadataRow extends StatelessWidget {
 bool get _canScanQr => canScanQr;
 
 class _ReceiverKeySection extends StatelessWidget {
-  const _ReceiverKeySection({
-    required this.state,
-    required this.notifier,
-  });
+  const _ReceiverKeySection({required this.state, required this.notifier});
 
   final SendState state;
   final SendNotifier notifier;
@@ -1181,7 +1175,6 @@ class _KeyScanPageState extends State<_KeyScanPage> {
       ),
     );
   }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1309,10 +1302,7 @@ class _ConfigSection extends StatelessWidget {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          leading: const CircleAvatar(
-            radius: 14,
-            child: Text('3'),
-          ),
+          leading: const CircleAvatar(radius: 14, child: Text('3')),
           title: Text(
             'Options',
             style: Theme.of(context).textTheme.titleMedium,
@@ -1327,10 +1317,8 @@ class _ConfigSection extends StatelessWidget {
                 ? 'Transfer parameters'
                 : 'Set from the receiver\'s camera — tap to adjust',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: state.appliedHint == null
-                      ? null
-                      : DeadDropColors.success,
-                ),
+              color: state.appliedHint == null ? null : DeadDropColors.success,
+            ),
           ),
           initiallyExpanded: false,
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -1342,9 +1330,8 @@ class _ConfigSection extends StatelessWidget {
                   'The receiver\'s QR carried these settings, measured from '
                   'their camera. They are a suggestion — change anything '
                   'here if the transfer is not reading well.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: DeadDropColors.textSecondary,
-                      ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: DeadDropColors.textSecondary),
                 ),
               ),
             ],
@@ -1370,46 +1357,68 @@ class _ConfigSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            SegmentedButton<String>(
-              // No checkmark on the selected segment: Material reserves
-              // room for it inside the segment, which on a phone took
-              // enough width from the label that "M (15%)" wrapped onto
-              // three lines and the selected segment grew to twice the
-              // height of its neighbours. The fill already says which
-              // one is selected.
-              showSelectedIcon: false,
-              // A level is disabled when the current chunk would not fit
-              // in a QR with that much correction. Stronger correction
-              // leaves less room for data, so at 2048 bytes only L has
-              // the capacity — offering the others rendered nothing.
-              segments: [
-                // Level and overhead on separate lines, centred. On one
-                // line "M (15%)" does not fit a quarter of a phone's
-                // width and wraps mid-label; stacked, each segment is
-                // the same shape whatever it contains.
-                for (final ec in const [
-                  ('L', '7%'),
-                  ('M', '15%'),
-                  ('Q', '25%'),
-                  ('H', '30%'),
-                ])
-                  ButtonSegment(
-                    value: ec.$1,
-                    label: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(ec.$1),
-                        Text(
-                          '(${ec.$2})',
-                          style: const TextStyle(fontSize: 11),
+            // Stretched across the row. A SegmentedButton sizes itself
+            // to its content, so on a desktop window the four levels
+            // huddled into a small block at the left while the row sat
+            // empty beside them. Reported from macOS.
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<String>(
+                // No checkmark on the selected segment: Material reserves
+                // room for it inside the segment, which on a phone took
+                // enough width from the label that "M (15%)" wrapped onto
+                // three lines and the selected segment grew to twice the
+                // height of its neighbours. The fill already says which
+                // one is selected.
+                showSelectedIcon: false,
+                // A level is disabled when the current chunk would not fit
+                // in a QR with that much correction. Stronger correction
+                // leaves less room for data, so at 2048 bytes only L has
+                // the capacity — offering the others rendered nothing.
+                segments: [
+                  // Level and overhead on separate lines, centred. On one
+                  // line "M (15%)" does not fit a quarter of a phone's
+                  // width and wraps mid-label; stacked, each segment is
+                  // the same shape whatever it contains.
+                  for (final ec in const [
+                    ('L', '7%'),
+                    ('M', '15%'),
+                    ('Q', '25%'),
+                    ('H', '30%'),
+                  ])
+                    ButtonSegment(
+                      value: ec.$1,
+                      label: Padding(
+                        // Breathing room inside each segment. Without it
+                        // the control shrinks to the width of "15%" and
+                        // sits as a small cramped block in a desktop
+                        // window, which is how it was reported from
+                        // macOS. The padding also makes each segment a
+                        // comfortable tap target on a phone.
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(ec.$1),
+                            Text(
+                              '(${ec.$2})',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
+                      enabled: chunkFitsQr(state.chunkSize, ec.$1),
                     ),
-                    enabled: chunkFitsQr(state.chunkSize, ec.$1),
-                  ),
-              ],
-              selected: {state.ecLevel},
-              onSelectionChanged: (s) => notifier.setEcLevel(s.first),
+                ],
+                selected: {state.ecLevel},
+                onSelectionChanged: (s) => notifier.setEcLevel(s.first),
+                // Each segment takes an equal share of the row instead of
+                // sizing to its own text, so the four read as one scale
+                // rather than four buttons of different widths.
+                style: const ButtonStyle(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
             ),
           ],
         ),
@@ -1497,9 +1506,7 @@ class _SendingScreen extends StatelessWidget {
 
               // QR display — takes remaining space
               Expanded(
-                child: Center(
-                  child: _QrDisplay(state: state),
-                ),
+                child: Center(child: _QrDisplay(state: state)),
               ),
               const SizedBox(height: 24),
 
@@ -1508,17 +1515,16 @@ class _SendingScreen extends StatelessWidget {
                 state.showingBootstrap
                     ? 'Session bootstrap'
                     : state.totalFrames != null
-                        ? 'Frame ${state.framesEmitted}/${state.totalFrames}'
-                        : 'Frame ${state.framesEmitted}',
+                    ? 'Frame ${state.framesEmitted}/${state.totalFrames}'
+                    : 'Frame ${state.framesEmitted}',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 4),
               Text(
                 '${state.fps.round()} fps · ${state.chunkSize} B/chunk · '
                 'EC-${state.ecLevel}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: DeadDropColors.textSecondary,
-                    ),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: DeadDropColors.textSecondary),
               ),
               const SizedBox(height: 24),
 
@@ -1615,8 +1621,7 @@ class _ParamSlider extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(label),
-                if (help != null)
-                  InfoPoint(title: label, body: help!),
+                if (help != null) InfoPoint(title: label, body: help!),
               ],
             ),
             Text('${value.round()}$unit'),
@@ -1664,10 +1669,7 @@ class _ChunkSizeSelector extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('Chunk size'),
-                InfoPoint(
-                  title: 'Chunk size',
-                  body: SettingHelp.chunkSize,
-                ),
+                InfoPoint(title: 'Chunk size', body: SettingHelp.chunkSize),
               ],
             ),
             Text('${state.chunkSize} bytes'),
@@ -1688,7 +1690,8 @@ class _ChunkSizeSelector extends StatelessWidget {
                 // selectable and simply broke the display: 2048 bytes
                 // encodes to about 2,860 characters, which only level L
                 // can hold.
-                onSelected: state.isEmitting ||
+                onSelected:
+                    state.isEmitting ||
                         (fileSize != null &&
                             fileSize > maxFileSizeForChunkSize(size)) ||
                         !chunkFitsQr(size, state.ecLevel)
@@ -1702,9 +1705,10 @@ class _ChunkSizeSelector extends StatelessWidget {
           fileSize == null
               ? 'Larger chunks fit larger files but are harder to scan.'
               : 'Up to ${formatSizeForMessage(maxFileSizeForChunkSize(state.chunkSize))} '
-                  'per transfer at this size.',
-          style: textTheme.bodySmall
-              ?.copyWith(color: DeadDropColors.textSecondary),
+                    'per transfer at this size.',
+          style: textTheme.bodySmall?.copyWith(
+            color: DeadDropColors.textSecondary,
+          ),
         ),
       ],
     );
@@ -1732,10 +1736,10 @@ class _ChunkSizeSelector extends StatelessWidget {
 /// hard to scan; a code with a button drawn across it cannot be scanned
 /// at all.
 double qrDisplaySize(double availableWidth, double availableHeight) {
-  final width =
-      availableWidth.isFinite ? availableWidth - _qrPadding * 2 : 0.0;
-  final height =
-      availableHeight.isFinite ? availableHeight - _qrPadding * 2 : 0.0;
+  final width = availableWidth.isFinite ? availableWidth - _qrPadding * 2 : 0.0;
+  final height = availableHeight.isFinite
+      ? availableHeight - _qrPadding * 2
+      : 0.0;
   final usable = width < height ? width : height;
   return usable.clamp(0.0, kQrMaxDisplaySize);
 }
@@ -1844,8 +1848,11 @@ class _IdentityFingerprintCard extends ConsumerWidget {
                     Center(
                       child: SelectableText(
                         snapshot.data!,
-                        style: technicalTextStyle(ref, relativeTo: 1.4,
-                            letterSpacing: 2),
+                        style: technicalTextStyle(
+                          ref,
+                          relativeTo: 1.4,
+                          letterSpacing: 2,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),

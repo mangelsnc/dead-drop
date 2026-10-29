@@ -166,6 +166,30 @@ class LTDecoder {
   double get efficiency =>
       framesReceived > 0 ? framesUseful / framesReceived : 0.0;
 
+  /// How far along the transfer really is, from 0 to 1.
+  ///
+  /// Not `decoded.length / k`, which badly understates it. Belief
+  /// propagation resolves almost nothing until it reaches critical
+  /// mass and then cascades: a real 1 MB transfer at 512-byte chunks
+  /// had recovered 12 of 2048 chunks after 1024 frames — under 1% by
+  /// that measure — and finished at 2308. Reported from a device as a
+  /// transfer that looked stalled when it was in fact nearly half way.
+  ///
+  /// A frame sitting in [pending] is captured information that has not
+  /// been revealed yet, so it counts. Each one constrains the chunks it
+  /// combines, and k independent constraints are what finishing takes.
+  ///
+  /// This can only approach 1 from below, never reach it early: it is
+  /// capped just short, so the bar completes when [done] does and not
+  /// before.
+  double get progress {
+    if (k == 0) return 0;
+    if (done) return 1;
+    final captured = decoded.length + pending.length;
+    final ratio = captured / k;
+    return ratio > 0.99 ? 0.99 : ratio;
+  }
+
   /// Feed one encoded frame. Returns true if it made progress.
   bool addFrame(List<int> chunkIds, Uint8List payload) {
     framesReceived++;

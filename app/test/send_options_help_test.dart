@@ -126,6 +126,39 @@ void main() {
         reason: 'the single-line label is what overflowed');
   });
 
+  testWidgets('the selector fills the row on a desktop window',
+      (tester) async {
+    // Reported from macOS: the four levels huddled into a small block
+    // at the left of a wide row, because a SegmentedButton sizes itself
+    // to its content.
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sodiumProvider.overrideWithValue(sodium)],
+        child: MaterialApp(
+          theme: deadDropTheme(),
+          home: const SendPage(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await _openOptions(tester);
+
+    final selector = find.byType(SegmentedButton<String>);
+    expect(selector, findsOneWidget);
+
+    // It should span most of the column it sits in, rather than
+    // shrinking to the width of its text.
+    final selectorWidth = tester.getSize(selector).width;
+    final columnWidth = tester.getSize(find.text('Error correction')).width;
+    expect(selectorWidth, greaterThan(columnWidth * 2),
+        reason: 'the selector shrank back to its content width');
+  });
+
   group('the help text earns its place', () {
     test('each one explains, rather than restating the label', () {
       // A help text that says "the frame rate is the rate of frames"
