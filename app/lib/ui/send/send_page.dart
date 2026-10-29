@@ -1384,12 +1384,38 @@ class _ConfigSection extends StatelessWidget {
             if (state.appliedHint != null) ...[
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  'The receiver\'s QR carried these settings, measured from '
-                  'their camera. They are a suggestion — change anything '
-                  'here if the transfer is not reading well.',
-                  style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: DeadDropColors.textSecondary),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'The receiver\'s QR carried these settings, measured '
+                      'from their camera. They are a suggestion — change '
+                      'anything here if the transfer is not reading well.',
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: DeadDropColors.textSecondary),
+                    ),
+                    const SizedBox(height: 6),
+                    // What the receiver asked for, beside what is in
+                    // force. They differ when this screen cannot draw
+                    // what was asked, or when the file will not fit it,
+                    // and without seeing both there is no way to tell
+                    // a negotiated value from one that simply did not
+                    // apply.
+                    Text(
+                      'Asked for: ${state.appliedHint!.chunkSize} B · '
+                      '${state.appliedHint!.fps.round()} fps · '
+                      'EC-${state.appliedHint!.ecLevel}'
+                      '${_hintDiffers(state) ? '  →  using '
+                                '${state.chunkSize} B · ${state.fps.round()} fps · '
+                                'EC-${state.ecLevel}' : ''}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: _hintDiffers(state)
+                            ? DeadDropColors.warning
+                            : DeadDropColors.textSecondary,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1948,6 +1974,21 @@ int? chunkUnlockedByABiggerWindow({
   );
   if (nowFits != null && nowFits >= best) return null;
   return best;
+}
+
+/// Whether the settings in force differ from what the receiver asked
+/// for.
+///
+/// They can, for good reasons — this screen may not be able to draw the
+/// chunk size requested, or the file may not fit it — but the screen
+/// said only that a hint had been applied, so a value that did not take
+/// looked identical to one that did.
+bool _hintDiffers(SendState state) {
+  final hint = state.appliedHint;
+  if (hint == null) return false;
+  return hint.chunkSize != state.chunkSize ||
+      hint.ecLevel != state.ecLevel ||
+      hint.fps.round() != state.fps.round();
 }
 
 /// The floor below which a sender's own screen cannot render a code
