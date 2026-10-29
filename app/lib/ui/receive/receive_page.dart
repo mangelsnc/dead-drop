@@ -748,10 +748,23 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       const SizedBox(height: 12),
+                      // Two numbers on two lines, because on one line
+                      // they were read as one: a fountain code scans
+                      // more frames than the file has chunks, so the
+                      // frame count passing the chunk total looks like
+                      // a bug when the two sit side by side. The chunk
+                      // count is the progress; the frame count is only
+                      // how much work that took.
                       Text(
-                        '${state.chunksDecoded} / ${state.totalChunks} chunks '
-                        '(${state.framesReceived} frames scanned)',
+                        '${state.chunksDecoded} of ${state.totalChunks} '
+                        'chunks recovered',
                         style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      Text(
+                        '${state.framesReceived} codes scanned',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: DeadDropColors.textSecondary,
+                            ),
                       ),
                       // Cancel is offered only while a transfer is still
                       // running: a slow one usually means the sender needs to
@@ -957,15 +970,24 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             );
           }
 
+          final progressFirst =
+              progressGoesAboveCamera(sessionActive: state.sessionActive);
+
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: spaced([
                 if (showKeyStep) ...keyStep,
-                ...scanStep,
-                ...senderBlock,
-                ...progressBlock,
+                if (progressFirst) ...[
+                  ...senderBlock,
+                  ...progressBlock,
+                  ...scanStep,
+                ] else ...[
+                  ...scanStep,
+                  ...senderBlock,
+                  ...progressBlock,
+                ],
                 ...errorBlock,
               ]),
             ),
@@ -1559,3 +1581,22 @@ class _VaultUnlockDialogState extends ConsumerState<_VaultUnlockDialog> {
     );
   }
 }
+
+
+/// Whether the progress card is placed above the camera, on a narrow
+/// screen.
+///
+/// The preview is 300 pixels tall and the cards around it take the rest,
+/// so with the progress card in source order it sat under the fold: a
+/// transfer could be running perfectly and the only thing on screen was
+/// a camera, with no count, no bar and no file name. Reported as "block
+/// 3 has disappeared on mobile during the transfer".
+///
+/// Once a session is running, the progress is what the user is watching
+/// while they aim, so it goes first. Before that there is no progress to
+/// show and the camera is the thing to reach for.
+///
+/// The wide layout never needs this: it puts the camera and the
+/// reporting blocks in separate columns, so neither can displace the
+/// other.
+bool progressGoesAboveCamera({required bool sessionActive}) => sessionActive;
