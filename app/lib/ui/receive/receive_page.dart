@@ -758,6 +758,18 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    // Who is sending, under the camera that is reading
+                    // them. Moved here from a card of its own: it
+                    // describes what step 2 is doing.
+                    if (!state.awaitingSenderApproval &&
+                        state.senderFingerprint != null) ...[
+                      _SenderIdentityCard(
+                        fingerprint: state.senderFingerprint!,
+                        isNewSender: state.isNewSender,
+                        name: state.senderName,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     // Progress lives here, under the camera, rather
                     // than in a card of its own. It used to be step
                     // 3; on a phone that card fell below the fold, and
@@ -837,36 +849,14 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                                 ?.copyWith(color: DeadDropColors.textSecondary),
                           ),
                         ),
-                      // Cancel is offered only while a transfer is still
-                      // running: a slow one usually means the sender needs to
-                      // change fps or chunk size, and without this the only
-                      // way out was to close the app and re-pair.
-                      if (state.fileBytes == null) ...[
-                        const SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            notifier.cancelTransfer();
-                            _stopScanner();
-                          },
-                          icon: const Icon(Icons.close),
-                          label: const Text('Cancel transfer'),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 48),
-                            foregroundColor: DeadDropColors.error,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Cancelling keeps your key, so the sender does not '
-                            'have to scan it again.',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: DeadDropColors.textSecondary),
-                          ),
-                        ),
-                      ],
                       const SizedBox(height: 12),
                     ],
+                    // Least destructive first: stopping the camera keeps
+                    // the transfer and can be undone by scanning again;
+                    // cancelling throws away what has been received.
+                    // They used to be the other way round, because one
+                    // sat inside the progress block and the other after
+                    // it.
                     OutlinedButton.icon(
                       onPressed: () {
                         notifier.stopScanning();
@@ -874,7 +864,38 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                       },
                       icon: const Icon(Icons.stop),
                       label: const Text('Stop scanning'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
                     ),
+                    // Cancel is offered only while a transfer is still
+                    // running: a slow one usually means the sender needs to
+                    // change fps or chunk size, and without this the only
+                    // way out was to close the app and re-pair.
+                    if (state.sessionActive && state.fileBytes == null) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          notifier.cancelTransfer();
+                          _stopScanner();
+                        },
+                        icon: const Icon(Icons.close),
+                        label: const Text('Cancel transfer'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 48),
+                          foregroundColor: DeadDropColors.error,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Cancelling keeps your key, so the sender does not '
+                          'have to scan it again.',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: DeadDropColors.textSecondary),
+                        ),
+                      ),
+                    ],
                   ],
                 ],
               ),

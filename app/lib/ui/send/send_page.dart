@@ -564,16 +564,20 @@ class _SendPageState extends ConsumerState<SendPage> {
       appBar: AppBar(title: const Text('Send a file')),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          // Tell the notifier how large a QR this screen can draw, so a
-          // receiver's hint can be negotiated against it rather than
-          // accepted blind. Measured here because the sending view does
-          // not exist yet when the hint arrives.
+          // Tell the notifier how large a QR the SENDING screen could
+          // draw, so a receiver's hint is negotiated against what this
+          // device can actually show.
           //
-          // The estimate deliberately matches what _QrDisplay will be
-          // given: the page's width less its margins, against the
-          // height left once the sending screen's furniture is counted.
-          final qrWidth = constraints.maxWidth - 48;
-          final qrHeight = constraints.maxHeight - 240;
+          // Measured from this window rather than from the sending view,
+          // which does not exist yet when the hint arrives. It models
+          // that view: the whole window less its 24px margins and the
+          // furniture above and below the code — not this page's layout,
+          // whose column may be half the width in the two-column desktop
+          // arrangement. Getting that wrong made a MacBook negotiate
+          // itself down to 256-byte chunks, four times more codes than
+          // its screen needed.
+          final qrWidth = constraints.maxWidth - _sendingViewMargins;
+          final qrHeight = constraints.maxHeight - _sendingViewFurniture;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             notifier.reportQrDisplaySize(qrDisplaySize(qrWidth, qrHeight));
           });
@@ -1769,6 +1773,18 @@ class _ChunkSizeSelector extends StatelessWidget {
   }
 }
 
+/// The horizontal margins the sending view puts around the QR.
+///
+/// `EdgeInsets.all(24)` on each side; see `_SendingScreen.build`. Named
+/// so the estimate made on the configuration page cannot drift from the
+/// layout it is predicting.
+const double _sendingViewMargins = 48;
+
+/// The vertical space the sending view spends on everything but the QR:
+/// the app bar, the file name and size, the frame counter and its
+/// settings line, and the button row, with their gaps.
+const double _sendingViewFurniture = 300;
+
 /// How large to draw the emitted QR, given the space the layout offers.
 ///
 /// A dense code has to survive two reductions before it is read: the
@@ -1907,6 +1923,33 @@ int negotiateChunkSize({
   return (chunkSize: requestedChunkSize, ecLevel: requestedEcLevel);
 }
 
+/// A chunk size larger than [currentChunk] that a full-size window could
+/// show at [ecLevel] but [currentSize] cannot, or null when there is
+/// nothing to gain.
+///
+/// Window size silently decides how many codes a transfer takes, and
+/// nothing on screen says so. A 1 MB file is about 5,000 codes at 256
+/// bytes and 1,250 at 1024 — minutes of difference, settled by how wide
+/// the window happens to be.
+int? chunkUnlockedByABiggerWindow({
+  required double currentSize,
+  required int currentChunk,
+  required String ecLevel,
+}) {
+  if (currentSize >= kQrMaxDisplaySize) return null;
+  final best = largestDisplayableChunk(
+    displaySize: kQrMaxDisplaySize,
+    ecLevel: ecLevel,
+  );
+  if (best == null || best <= currentChunk) return null;
+  final nowFits = largestDisplayableChunk(
+    displaySize: currentSize,
+    ecLevel: ecLevel,
+  );
+  if (nowFits != null && nowFits >= best) return null;
+  return best;
+}
+
 /// The floor below which a sender's own screen cannot render a code
 /// another device will read.
 ///
@@ -1951,6 +1994,13 @@ class _QrDisplay extends StatelessWidget {
           chunkSize: state.chunkSize,
           ecLevel: state.ecLevel,
         );
+        // The next chunk size up that a maximised window could show, if
+        // this window cannot show it but a bigger one could.
+        final biggerChunk = chunkUnlockedByABiggerWindow(
+          currentSize: size,
+          currentChunk: state.chunkSize,
+          ecLevel: state.ecLevel,
+        );
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1978,6 +2028,37 @@ class _QrDisplay extends StatelessWidget {
             // aiming or lighting fixes that — only a smaller chunk does.
             // Reported as a phone-to-Mac transfer sitting at 0% for three
             // minutes.
+            // A bigger window would allow a bigger chunk, which is worth
+            // saying: the difference between 256 and 1024 bytes is four
+            // times as many codes to show, and nothing on screen tells a
+            // user that the window size decides it. Reported from a Mac
+            // transferring 1 MB in 256-byte chunks — about 5,000 codes —
+            // because the window was small.
+            if (biggerChunk != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.open_in_full,
+                      size: 18,
+                      color: DeadDropColors.textSecondary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'A larger window would fit chunks of $biggerChunk '
+                        'bytes: '
+                        '${biggerChunk ~/ state.chunkSize}× fewer codes to '
+                        'show.',
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: DeadDropColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (density > 0 && density < kMinUsablePixelsPerModule)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),

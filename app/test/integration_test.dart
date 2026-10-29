@@ -804,33 +804,54 @@ void main() {
       expect(receiver.framesRejectedBadChunkIds, 2);
       expect(receiver.decoder!.pending.length, pendingBefore);
 
-      // The control: the same frame with the honest degree gets past the
-      // degree check, so the two rejections above are that check doing
-      // its job and not something else dropping every forged frame.
-      //
-      // It is not asserted to advance decoding. feedFrame reports
-      // whether the frame made *progress*, and a frame whose chunks are
-      // still unresolved is held in `pending` without any — so the
-      // counter not moving is the signal here, not the return value.
-      final (nonce3, ct3) = emitter.session.encryptPayload(sodium, forgedPayload);
-      final honestFrame = Frame(
-        fileId: emitter.session.fileId,
-        seq: forgedSeq,
-        seed: emitter.transferSeed,
-        degree: realDegree,
-        nonce: nonce3,
-        payload: ct3,
-      );
-      receiver.feedFrame(honestFrame.pack());
-      expect(receiver.framesRejectedBadChunkIds, 2,
-          reason: 'an honest degree must not be rejected');
-
       // The channel absorbs the loss: a normal transfer still completes.
       for (var i = 0; i < 500 && !receiver.done; i++) {
         receiver.feedFrame(emitter.nextFrame().pack());
       }
       expect(receiver.done, isTrue);
       expect(receiver.finish(), plaintext);
+    });
+
+    test('a frame whose degree is honest is not rejected', () async {
+      // The control for the test above: without it, those rejections
+      // could be something else dropping every forged frame rather than
+      // the degree check doing its job.
+      //
+      // It is a test of its own because the frame it feeds carries a
+      // payload that is validly encrypted but is not the XOR of
+      // anything. Accepted — correctly — it corrupts the decode, so it
+      // cannot share a receiver with a transfer that must complete.
+      // Putting it in the test above made that one fail on a BLAKE2b
+      // mismatch, which is the integrity check working.
+      final plaintext = Uint8List.fromList(List.generate(2048, (i) => i % 256));
+      final receiverKp = await ReceiverKeypair.generate(sodium);
+      final emitter = await Emitter.create(
+        sodium,
+        plaintext,
+        receiverKp,
+        chunkSize: 512,
+      );
+      final receiver = Receiver(sodium: sodium, keypair: receiverKp);
+      await receiver.startSession(emitter.bootstrapQrPayload());
+
+      const seq = 9999;
+      final k = receiver.decoder!.k;
+      final degree =
+          chunkIdsFor(seq: seq, seed: emitter.transferSeed, k: k).length;
+      final (nonce, ct) =
+          emitter.session.encryptPayload(sodium, Uint8List(512));
+
+      receiver.feedFrame(Frame(
+        fileId: emitter.session.fileId,
+        seq: seq,
+        seed: emitter.transferSeed,
+        degree: degree,
+        nonce: nonce,
+        payload: ct,
+      ).pack());
+
+      expect(receiver.framesRejectedBadChunkIds, 0,
+          reason: 'an honest degree must not be rejected');
     });
   });
 }

@@ -34,21 +34,34 @@ void main() {
       ));
 
       expect(hint.chunkSize, kDefaultChunkSize);
-      expect(hint.ecLevel, 'M');
+      // L, not M. Stronger correction spends modules on redundancy, so
+      // the same chunk becomes a denser code — and density is what a
+      // camera struggles with. Measured on a device, M read slower than
+      // L at the same frame rate and chunk size. Correction is raised
+      // by the decode-rate rule when frames are actually being lost.
+      expect(hint.ecLevel, 'L');
       expect(hint.fps, greaterThanOrEqualTo(12));
     });
 
-    test('emission stays below the camera, not level with it', () {
-      // Sampling exactly at the emission rate catches each code at an
-      // arbitrary point in its display, often mid-change. Headroom means
-      // most frames land on a stable code.
+    test('emission uses most of what the camera can sample', () {
+      // This used to assert the opposite — two thirds of the camera
+      // rate, so that frames caught mid-change would be rare. Measured
+      // on a device, that headroom cost far more than it bought: a
+      // camera reporting 12 fps was told to emit at 8 and read about
+      // 62% of the codes; at 12 it read 90%, and a 1 MB transfer went
+      // from 16.7 minutes to 7.7.
+      //
+      // A frame caught mid-change is dropped, and costs one frame. A
+      // frame never emitted costs one the camera could have read.
       final hint = suggestEmission(const CameraCapability(
         framesPerSecond: 12,
         width: 1280,
         height: 720,
       ));
 
-      expect(hint.fps, lessThan(12));
+      expect(hint.fps, greaterThanOrEqualTo(10));
+      expect(hint.fps, lessThanOrEqualTo(12),
+          reason: 'never faster than the camera can sample');
     });
 
     test('a slow camera gets a slower stream', () {
