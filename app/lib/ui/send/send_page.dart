@@ -1736,13 +1736,49 @@ class _ChunkSizeSelector extends StatelessWidget {
 /// hard to scan; a code with a button drawn across it cannot be scanned
 /// at all.
 double qrDisplaySize(double availableWidth, double availableHeight) {
-  final width = availableWidth.isFinite ? availableWidth - _qrPadding * 2 : 0.0;
-  final height = availableHeight.isFinite
-      ? availableHeight - _qrPadding * 2
-      : 0.0;
+  final width = availableWidth.isFinite ? availableWidth : 0.0;
+  final height = availableHeight.isFinite ? availableHeight : 0.0;
   final usable = width < height ? width : height;
   return usable.clamp(0.0, kQrMaxDisplaySize);
 }
+
+/// How many screen pixels each QR module gets, drawing [chunkSize] bytes
+/// at [ecLevel] into a code [displaySize] pixels across.
+///
+/// A decoder needs about three and cannot work below two, and this is
+/// only the first of two reductions — the receiving camera takes its own
+/// share. Below [kMinUsablePixelsPerModule] a transfer will not read at
+/// any distance, which is worth saying before someone spends three
+/// minutes at 0%.
+double pixelsPerModuleOnScreen({
+  required double displaySize,
+  required int chunkSize,
+  required String ecLevel,
+}) {
+  final modules = qrModuleCount(chunkSize, ecLevel);
+  if (modules == null || modules == 0) return 0;
+  return displaySize / modules;
+}
+
+/// The floor below which a sender's own screen cannot render a code
+/// another device will read.
+///
+/// Three pixels per module is what a decoder needs from the image it
+/// finally sees. This is the sender's screen, which is only the first
+/// of two reductions, so the bar here has to be higher — the camera
+/// takes its own share of what is left.
+///
+/// Calibrated against two measured outcomes rather than derived:
+///
+///  * Mac sending at 6.67 px/module: read, though slowly.
+///  * A Redmi Note 14 sending at 3.29: nothing decoded in three
+///    minutes.
+///
+/// 4.0 sits between them, which puts 256-byte chunks on that phone
+/// (4.26) just inside and 512 (3.29) outside. Two points are not a
+/// curve: this is a warning, not a prohibition, and the user can still
+/// choose whatever they like.
+const double kMinUsablePixelsPerModule = 4.0;
 
 /// The ceiling for [qrDisplaySize].
 ///
@@ -1750,7 +1786,6 @@ double qrDisplaySize(double availableWidth, double availableHeight) {
 /// hold entirely within the camera's view.
 const double kQrMaxDisplaySize = 720;
 
-const double _qrPadding = 16;
 
 /// Dumb QR renderer: displays exactly what the notifier produced. All frame
 /// generation logic lives in [SendNotifier], so there is a single source of
@@ -1763,31 +1798,73 @@ class _QrDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
+      builder: (context, constraints) {
+        final size = qrDisplaySize(constraints.maxWidth, constraints.maxHeight);
+        final density = pixelsPerModuleOnScreen(
+          displaySize: size,
+          chunkSize: state.chunkSize,
+          ecLevel: state.ecLevel,
+        );
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              // No padding of its own: a QR carries its quiet zone inside
+              // the image, and the page already has a margin. The 16 here
+              // was taken off the code twice over, and on a phone every
+              // pixel of it matters.
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: QrImageView(
+                data: state.currentQrData!,
+                version: QrVersions.auto,
+                errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
+                size: size,
+                backgroundColor: Colors.white,
+              ),
             ),
-            child: QrImageView(
-              data: state.currentQrData!,
-              version: QrVersions.auto,
-              errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-              size: qrDisplaySize(constraints.maxWidth, constraints.maxHeight),
-              backgroundColor: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (state.showingBootstrap)
-            Text(
-              'Session bootstrap — point the receiver camera here',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-        ],
-      ),
+            const SizedBox(height: 12),
+            // Said before the user spends minutes watching nothing
+            // happen. This screen cannot draw the chosen chunk size
+            // densely enough for any camera to read it, and no amount of
+            // aiming or lighting fixes that — only a smaller chunk does.
+            // Reported as a phone-to-Mac transfer sitting at 0% for three
+            // minutes.
+            if (density > 0 && density < kMinUsablePixelsPerModule)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: DeadDropColors.error,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'This screen is too small to show ${state.chunkSize}-'
+                        'byte chunks clearly. The receiver is unlikely to '
+                        'read anything — choose a smaller chunk size in '
+                        'Options.',
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: DeadDropColors.error),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (state.showingBootstrap)
+              Text(
+                'Session bootstrap — point the receiver camera here',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+          ],
+        );
+      },
     );
   }
 

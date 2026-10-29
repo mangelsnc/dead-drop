@@ -11,6 +11,12 @@ dependencies:
     sdk: flutter
   # QR rendering
   qr_flutter: ^4.1.0
+  # Used directly by lib/src/qrframe.dart, to ask the encoder how many
+  # modules a frame becomes — the figure that decides whether a screen
+  # can show it readably — and by the tests to render real codes. It
+  # arrives transitively via qr_flutter, but a direct import needs a
+  # direct dependency.
+  qr: ^3.0.2
   # Camera / QR scanning.
   #
   # mobile_scanner covers android, ios and macos. It has no Linux or Windows
@@ -52,9 +58,6 @@ dependencies:
   camera: ^0.12.2
 
 dev_dependencies:
-  # Used by the scanner tests to render real QR codes to decode. It arrives
-  # transitively via qr_flutter, but tests name it directly.
-  qr: ^3.0.2
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0

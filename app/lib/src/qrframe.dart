@@ -17,6 +17,8 @@ library;
 
 import 'dart:typed_data';
 
+import 'package:qr/qr.dart';
+
 import 'crypto.dart';
 
 // QR byte-mode capacity per version at each EC level (versions 1..40).
@@ -149,14 +151,47 @@ const _maxQrChars = {'L': 2953, 'M': 2331, 'Q': 1663, 'H': 1273};
 /// How many characters a data frame of [chunkSize] becomes once packed,
 /// encrypted and base64url-encoded for a QR.
 ///
-/// A fountain frame of degree d carries d chunk ids, but the payload is
-/// one chunk's worth however many were XORed into it, so the size is
-/// dominated by the chunk itself. Degree is bounded in practice; a
-/// generous allowance keeps this an upper bound rather than a guess.
-int encodedFrameChars(int chunkSize, {int maxDegree = 16}) {
-  final raw = frameHeaderSize + maxDegree * 2 + nonceSize + chunkSize + 16;
+/// Every data frame is the same size: the chunk ids are derived from the
+/// seed rather than transmitted, so degree no longer affects the length
+/// (docs/decisions/0001-derive-chunk-ids-from-the-seed.md). This used to
+/// carry an allowance for them.
+int encodedFrameChars(int chunkSize) {
+  final raw = frameHeaderSize + nonceSize + chunkSize + 16;
   // base64 is 4 characters per 3 bytes, plus the "DD1." prefix.
   return ((raw + 2) ~/ 3) * 4 + 4;
+}
+
+/// How many modules across the QR for a [chunkSize] frame at [ec] is,
+/// or null when no QR can hold it.
+///
+/// The module count is what decides whether a code can be read: a
+/// decoder needs roughly three screen or sensor pixels per module, so
+/// this is the denominator in every density calculation on both sides.
+///
+/// Asked of the encoder rather than derived from [qrCapacityAt], whose
+/// table lists every fifth version and so rounds down to one that is
+/// too small. Predicting from it was wrong by up to 16 modules, which
+/// is the difference between warning a user and not.
+int? qrModuleCount(int chunkSize, String ec) {
+  const levels = {
+    'L': QrErrorCorrectLevel.L,
+    'M': QrErrorCorrectLevel.M,
+    'Q': QrErrorCorrectLevel.Q,
+    'H': QrErrorCorrectLevel.H,
+  };
+  final level = levels[ec];
+  if (level == null) return null;
+  try {
+    return QrImage(
+      QrCode.fromData(
+        data: 'A' * encodedFrameChars(chunkSize),
+        errorCorrectLevel: level,
+      ),
+    ).moduleCount;
+  } catch (_) {
+    // No version can hold it.
+    return null;
+  }
 }
 
 /// Whether [chunkSize] can be rendered as a QR at [ec].

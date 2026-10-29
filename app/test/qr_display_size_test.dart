@@ -15,8 +15,8 @@ int _moduleCountFor(int bytes, int ecLevel) {
 void main() {
   group('qrDisplaySize', () {
     test('fills the space it is given', () {
-      expect(qrDisplaySize(500, 2000), 500 - 32);
-      expect(qrDisplaySize(2000, 500), 500 - 32);
+      expect(qrDisplaySize(500, 2000), 500);
+      expect(qrDisplaySize(2000, 500), 500);
     });
 
     test('is limited by height as well as width', () {
@@ -24,7 +24,7 @@ void main() {
       // than its box, and the frame counter and buttons below it were
       // painted over the modules -- corrupting the code the camera
       // reads. Reported from macOS.
-      expect(qrDisplaySize(1400, 420), 420 - 32);
+      expect(qrDisplaySize(1400, 420), 420);
       expect(qrDisplaySize(1400, 420), lessThan(qrDisplaySize(1400, 2000)));
     });
 
@@ -55,6 +55,52 @@ void main() {
       // sized to infinity would crash the layout.
       expect(qrDisplaySize(double.infinity, double.infinity), 0);
       expect(qrDisplaySize(double.infinity, 500).isFinite, isTrue);
+    });
+
+    test('a Redmi Note 14 cannot show 512-byte chunks readably', () {
+      // The case reported: phone sending, Mac receiving, 512 B at
+      // level M, nothing decoded in three minutes. The sending screen
+      // simply has not got the pixels — and the camera then takes its
+      // own share of what is left.
+      //
+      // 345 x 633 is that phone's logical screen less the page margins
+      // and the furniture in the sending column.
+      final size = qrDisplaySize(345, 633);
+      final density = pixelsPerModuleOnScreen(
+        displaySize: size,
+        chunkSize: 512,
+        ecLevel: 'M',
+      );
+      expect(density, lessThan(kMinUsablePixelsPerModule));
+    });
+
+    test('the same phone can show 256-byte chunks', () {
+      // The control. Without it the test above would be satisfied by a
+      // warning that fires for everything, which would be useless.
+      final size = qrDisplaySize(345, 633);
+      final density = pixelsPerModuleOnScreen(
+        displaySize: size,
+        chunkSize: 256,
+        ecLevel: 'M',
+      );
+      expect(density, greaterThanOrEqualTo(kMinUsablePixelsPerModule));
+    });
+
+    test('a desktop window can show every size it offers', () {
+      // All three clear the bar comfortably from a Mac, which matches
+      // the one direction that did transfer.
+      for (final chunk in [256, 512, 1024]) {
+        final size = qrDisplaySize(900, 700);
+        expect(
+          pixelsPerModuleOnScreen(
+            displaySize: size,
+            chunkSize: chunk,
+            ecLevel: 'M',
+          ),
+          greaterThanOrEqualTo(kMinUsablePixelsPerModule),
+          reason: '$chunk bytes on a desktop',
+        );
+      }
     });
 
     test('256 and 512 byte chunks clear three pixels per module on a '
