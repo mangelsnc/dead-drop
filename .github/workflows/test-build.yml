@@ -97,9 +97,38 @@ jobs:
           keyAlias=${KEY_ALIAS}
           EOF
 
+      # The version has to reach the binary, or Settings -> About reads
+      # "Development build" and a tester cannot say which build they are
+      # holding. Derived from pubspec.yaml so it cannot drift from the
+      # repository.
+      #
+      # tool/build_args.sh does this on branches that carry it; this
+      # computes the same values inline, so the workflow works against
+      # any ref.
+      - name: Work out the version defines
+        id: version
+        working-directory: app
+        shell: bash
+        run: |
+          line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
+          ver=${line%%+*}
+          build=${line##*+}
+          [ "$build" = "$line" ] && build=''
+          if [ -z "$ver" ]; then
+            echo "no version found in app/pubspec.yaml" >&2
+            exit 1
+          fi
+          args="--dart-define=DEADDROP_VERSION=${ver}"
+          [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
+          commit=$(git rev-parse --short HEAD 2>/dev/null || true)
+          [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          echo "args=${args}" >> "$GITHUB_OUTPUT"
+          echo "Version defines: ${args}"
+
       - name: Build release APK
         working-directory: app
-        run: flutter build apk --release
+        shell: bash
+        run: flutter build apk --release ${{ steps.version.outputs.args }}
 
       # The reason this workflow exists for the zxing2 branch: show what
       # the APK actually asks the user for. A build whose whole purpose is
@@ -165,9 +194,38 @@ jobs:
         working-directory: app
         run: flutter pub get
 
+      # The version has to reach the binary, or Settings -> About reads
+      # "Development build" and a tester cannot say which build they are
+      # holding. Derived from pubspec.yaml so it cannot drift from the
+      # repository.
+      #
+      # tool/build_args.sh does this on branches that carry it; this
+      # computes the same values inline, so the workflow works against
+      # any ref.
+      - name: Work out the version defines
+        id: version
+        working-directory: app
+        shell: bash
+        run: |
+          line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
+          ver=${line%%+*}
+          build=${line##*+}
+          [ "$build" = "$line" ] && build=''
+          if [ -z "$ver" ]; then
+            echo "no version found in app/pubspec.yaml" >&2
+            exit 1
+          fi
+          args="--dart-define=DEADDROP_VERSION=${ver}"
+          [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
+          commit=$(git rev-parse --short HEAD 2>/dev/null || true)
+          [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          echo "args=${args}" >> "$GITHUB_OUTPUT"
+          echo "Version defines: ${args}"
+
       - name: Build release
         working-directory: app
-        run: flutter build macos --release
+        shell: bash
+        run: flutter build macos --release ${{ steps.version.outputs.args }}
 
       # Ad-hoc signed, like the published releases: distributing a .app
       # that Gatekeeper accepts without a right-click needs a paid Apple
