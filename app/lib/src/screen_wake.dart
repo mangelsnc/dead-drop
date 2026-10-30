@@ -56,6 +56,13 @@ bool get isScreenAwakeHeld => _held;
 /// offering one that does nothing.
 bool get supportsTransferBrightness => _supported;
 
+/// Whether this platform's window is fixed to the whole screen.
+///
+/// Android and iOS, where "make the window larger" is not advice a user
+/// can act on. The send screen needs this to know whether the code
+/// could be drawn any bigger than it already is.
+bool get windowFillsTheScreen => _supported;
+
 /// The brightness a transfer runs at when nothing else is chosen.
 ///
 /// Full. Against a phone camera this is right, and it is what the screen

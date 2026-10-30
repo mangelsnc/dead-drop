@@ -199,6 +199,7 @@ void main() {
           currentSize: 300,
           currentChunk: 256,
           ecLevel: 'M',
+          reachableSize: kQrMaxDisplaySize,
         ),
         1024,
       );
@@ -210,6 +211,7 @@ void main() {
           currentSize: kQrMaxDisplaySize,
           currentChunk: 1024,
           ecLevel: 'M',
+          reachableSize: kQrMaxDisplaySize,
         ),
         isNull,
       );
@@ -222,6 +224,7 @@ void main() {
           currentSize: 600,
           currentChunk: 1024,
           ecLevel: 'M',
+          reachableSize: kQrMaxDisplaySize,
         ),
         isNull,
       );
@@ -233,6 +236,7 @@ void main() {
           currentSize: 300,
           currentChunk: 256,
           ecLevel: ec,
+          reachableSize: kQrMaxDisplaySize,
         );
         if (suggestion == null) continue;
         expect(
