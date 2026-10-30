@@ -99,4 +99,15 @@ abstract final class SettingHelp {
       'L is enough between two steady screens in good light. Move up if '
       'the receiver is struggling, especially hand-held or under a '
       'bright lamp.';
+
+  static const brightness =
+      'How bright this screen is while it is showing the codes.\n\n'
+      'Full brightness is usually right: the camera needs to tell the '
+      'dark squares from the light ones, and a dim screen makes that '
+      'harder.\n\n'
+      'Lower it if the receiving camera adjusts to the brightness and '
+      'washes the code out. Webcams do this more than phones — they '
+      'measure the whole bright screen, close down, and the dark '
+      'squares come out grey. If the other device sees the code but '
+      'cannot read it, try lowering this before anything else.';
 }

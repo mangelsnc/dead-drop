@@ -46,6 +46,7 @@ class SendState {
     this.appliedHint,
     this.qrDisplaySizePx = 0,
     this.qrDisplaySizeMeasured = false,
+    this.brightness = kDefaultTransferBrightness,
   });
 
   final String? fileName;
@@ -71,6 +72,16 @@ class SendState {
   /// against what this screen can actually draw, and only the layout
   /// knows it. Zero only before the send screen has laid out at all.
   final double qrDisplaySizePx;
+
+  /// How bright this screen runs while emitting, 0 dimmest to 1 full.
+  ///
+  /// Full by default, which is right against a phone camera. It is a
+  /// setting because it is not right against every camera: a webcam with
+  /// auto-exposure meters the whole bright screen, stops down, and the
+  /// code's dark modules lose their contrast. Measured on a Logitech
+  /// StreamCam, which could not complete a transfer a phone camera
+  /// completed easily.
+  final double brightness;
 
   /// Whether [qrDisplaySizePx] came from a drawn code rather than from a
   /// prediction made before one existed.
@@ -140,6 +151,7 @@ class SendState {
     HandshakeHint? appliedHint,
     double? qrDisplaySizePx,
     bool? qrDisplaySizeMeasured,
+    double? brightness,
     bool clearSendError = false,
     bool clearReceiverPk = false,
     bool clearHint = false,
@@ -165,6 +177,7 @@ class SendState {
       qrDisplaySizePx: qrDisplaySizePx ?? this.qrDisplaySizePx,
       qrDisplaySizeMeasured:
           qrDisplaySizeMeasured ?? this.qrDisplaySizeMeasured,
+      brightness: brightness ?? this.brightness,
     );
   }
 }
@@ -359,6 +372,25 @@ class SendNotifier extends StateNotifier<SendState> {
     state = state.copyWith(qrDisplaySizePx: px);
   }
 
+  /// Sets how bright this screen runs while emitting.
+  ///
+  /// Applied immediately when a transfer is already running, because the
+  /// whole point is to find the level the other camera can read: making
+  /// the user stop and restart to try one would turn a slider into a
+  /// guessing game. Releasing first is required because [keepScreenAwake]
+  /// ignores a repeat call while held.
+  void setBrightness(double value) {
+    final level = value.clamp(0.0, 1.0);
+    if ((state.brightness - level).abs() < 0.001) return;
+    state = state.copyWith(brightness: level);
+    if (state.isEmitting) {
+      unawaited(() async {
+        await allowScreenSleep();
+        await keepScreenAwake(brightness: level);
+      }());
+    }
+  }
+
   void setChunkSize(int size) {
     // Changing the chunk size mid-transfer cannot be applied to a running
     // emission — the receiver's decoder is built around the chunk count in
@@ -443,8 +475,9 @@ class SendNotifier extends StateNotifier<SendState> {
       currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
       clearSendError: true,
     );
-    // The screen must not dim while it is the transmission medium.
-    unawaited(keepScreenAwake());
+    // The screen must not dim while it is the transmission medium, and
+    // how bright it is changes how the receiving camera exposes.
+    unawaited(keepScreenAwake(brightness: state.brightness));
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
     _timer = Timer(const Duration(seconds: 4), _startDataPhase);
@@ -1469,6 +1502,24 @@ class _ConfigSection extends StatelessWidget {
               onChanged: notifier.setFps,
               help: SettingHelp.frameRate,
             ),
+            // Only where the platform can act on it. On desktop the
+            // window has no brightness of its own, and a slider that
+            // does nothing is worse than no slider.
+            if (supportsTransferBrightness)
+              _ParamSlider(
+                label: 'Screen brightness',
+                value: state.brightness,
+                min: 0.2,
+                // Not 0: a screen dark enough to be unreadable is never
+                // the answer, and a slider that can reach it invites
+                // someone to blame the app for a black screen.
+                max: 1,
+                divisions: 8,
+                unit: '',
+                format: (v) => '${(v * 100).round()}%',
+                onChanged: notifier.setBrightness,
+                help: SettingHelp.brightness,
+              ),
             const SizedBox(height: 12),
             const Row(
               children: [
@@ -1773,6 +1824,7 @@ class _ParamSlider extends StatelessWidget {
     required this.unit,
     required this.onChanged,
     this.help,
+    this.format,
   });
 
   final String label;
@@ -1785,6 +1837,11 @@ class _ParamSlider extends StatelessWidget {
   final int divisions;
   final String unit;
   final ValueChanged<double> onChanged;
+
+  /// Renders the value shown beside the label. Defaults to a rounded
+  /// number with [unit] after it, which suits a frame rate but not a
+  /// fraction: brightness runs 0 to 1 and would read as "1 fps".
+  final String Function(double)? format;
 
   @override
   Widget build(BuildContext context) {
@@ -1801,7 +1858,7 @@ class _ParamSlider extends StatelessWidget {
                 if (help != null) InfoPoint(title: label, body: help!),
               ],
             ),
-            Text('${value.round()}$unit'),
+            Text(format?.call(value) ?? '${value.round()}$unit'),
           ],
         ),
         Slider(

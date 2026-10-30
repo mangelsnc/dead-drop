@@ -48,14 +48,41 @@ bool _held = false;
 /// on. Exposed for tests and for the UI to reason about its own state.
 bool get isScreenAwakeHeld => _held;
 
-/// Asks the platform to keep the screen on for the duration of a transfer.
+/// Whether this platform can set the screen's brightness for a transfer.
 ///
-/// Safe to call when already held. Failures are swallowed: a screen that
-/// dims is an annoyance, and must never be the reason the app falls over.
-Future<void> keepScreenAwake() async {
+/// The same platforms that can hold the screen awake: Android sets it on
+/// its own window, iOS on the device. A desktop window has no brightness
+/// of its own, so the send screen hides the control there rather than
+/// offering one that does nothing.
+bool get supportsTransferBrightness => _supported;
+
+/// The brightness a transfer runs at when nothing else is chosen.
+///
+/// Full. Against a phone camera this is right, and it is what the screen
+/// did before the level was adjustable.
+const double kDefaultTransferBrightness = 1.0;
+
+/// Asks the platform to keep the screen on for the duration of a transfer,
+/// at [brightness] (0 dimmest, 1 full).
+///
+/// Safe to call when already held — a repeat is ignored rather than
+/// re-applied, so changing the level means releasing first. Failures are
+/// swallowed: a screen that dims is an annoyance, and must never be the
+/// reason the app falls over.
+///
+/// [brightness] exists because full is not right against every camera. A
+/// transfer from a phone to a Logitech StreamCam failed with the screen at
+/// full: the webcam's auto-exposure stopped down and the code's dark
+/// modules washed out to grey. Lowering the screen is the only lever the
+/// sender has over the receiver's exposure.
+Future<void> keepScreenAwake({
+  double brightness = kDefaultTransferBrightness,
+}) async {
   if (!_supported || _held) return;
   try {
-    await _channel.invokeMethod<void>('keepAwake');
+    await _channel.invokeMethod<void>('keepAwake', {
+      'level': brightness.clamp(0.0, 1.0),
+    });
     _held = true;
   } on PlatformException {
     // Deliberately ignored — see the doc comment.
