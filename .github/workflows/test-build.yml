@@ -127,6 +127,19 @@ jobs:
 
       - name: Build release APK
         working-directory: app
+        # More heap than android/gradle.properties asks for.
+        #
+        # That file is sized for the Docker container the project builds
+        # in locally, where 2 GB is the right answer and asking for more
+        # got the daemon killed by the kernel. A GitHub runner has 16 GB
+        # and no such constraint, and 2 GB is not enough for Jetifier to
+        # transform Flutter's x86_64 jar: the job failed intermittently
+        # with "Java heap space" on :app:mergeReleaseNativeLibs.
+        env:
+          GRADLE_OPTS: >-
+            -Dorg.gradle.jvmargs=-Xmx6G
+            -XX:MaxMetaspaceSize=1G
+            -XX:+HeapDumpOnOutOfMemoryError
         shell: bash
         run: flutter build apk --release ${{ steps.version.outputs.args }}
 
