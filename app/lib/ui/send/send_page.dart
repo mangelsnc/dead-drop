@@ -45,6 +45,7 @@ class SendState {
     this.sendError,
     this.appliedHint,
     this.qrDisplaySizePx = 0,
+    this.qrDisplaySizeMeasured = false,
   });
 
   final String? fileName;
@@ -64,13 +65,21 @@ class SendState {
   /// numbers that changed by themselves are indistinguishable from a bug.
   final HandshakeHint? appliedHint;
 
-  /// How many logical pixels the layout gives the QR, reported by the
-  /// send screen. Zero until it has laid out once.
+  /// How many logical pixels the layout gives the QR.
   ///
   /// The notifier needs it to negotiate settings a receiver asked for
   /// against what this screen can actually draw, and only the layout
-  /// knows it.
+  /// knows it. Zero only before the send screen has laid out at all.
   final double qrDisplaySizePx;
+
+  /// Whether [qrDisplaySizePx] came from a drawn code rather than from a
+  /// prediction made before one existed.
+  ///
+  /// The handshake happens before any QR is on screen, so the
+  /// negotiation it performs has to work from a prediction. Once the
+  /// sending view reports a real measurement it is authoritative and no
+  /// prediction may replace it.
+  final bool qrDisplaySizeMeasured;
 
   final Emitter? emitter;
   final Identity? identity;
@@ -130,6 +139,7 @@ class SendState {
     String? sendError,
     HandshakeHint? appliedHint,
     double? qrDisplaySizePx,
+    bool? qrDisplaySizeMeasured,
     bool clearSendError = false,
     bool clearReceiverPk = false,
     bool clearHint = false,
@@ -153,6 +163,8 @@ class SendState {
       sendError: clearSendError ? null : (sendError ?? this.sendError),
       appliedHint: clearHint ? null : (appliedHint ?? this.appliedHint),
       qrDisplaySizePx: qrDisplaySizePx ?? this.qrDisplaySizePx,
+      qrDisplaySizeMeasured:
+          qrDisplaySizeMeasured ?? this.qrDisplaySizeMeasured,
     );
   }
 }
@@ -276,6 +288,15 @@ class SendNotifier extends StateNotifier<SendState> {
     // that camera is. The UI already stops a user choosing such a pair
     // by hand — this is the path that bypassed it. Reported after a
     // phone accepted 512 bytes at level Q and transferred nothing.
+    //
+    // The size here is a prediction until the sending view has drawn a
+    // code, because the handshake happens before it exists. This used
+    // to be guarded with `> 0` and so skipped the negotiation entirely
+    // at exactly the moment it was needed: a phone accepted 512 bytes
+    // from a Mac Studio, then warned that it could not draw them once
+    // the code appeared. An unnegotiated setting is the failure this
+    // whole function exists to prevent, so a prediction is used rather
+    // than nothing.
     if (state.qrDisplaySizePx > 0) {
       final agreed = negotiateSettings(
         requestedChunkSize: chunkSize,
@@ -311,6 +332,29 @@ class SendNotifier extends StateNotifier<SendState> {
   /// place that knows. Ignored when unchanged, so it does not loop: a
   /// state change rebuilds the layout, which reports again.
   void reportQrDisplaySize(double px) {
+    if (state.qrDisplaySizeMeasured &&
+        (state.qrDisplaySizePx - px).abs() < 0.5) {
+      return;
+    }
+    state = state.copyWith(qrDisplaySizePx: px, qrDisplaySizeMeasured: true);
+  }
+
+  /// Records what the QR's size *will be*, before one has been drawn.
+  ///
+  /// [reportQrDisplaySize] is the real measurement and is always
+  /// preferred, but it only exists once the sending view is on screen —
+  /// which is after the handshake. The handshake is where a receiver's
+  /// hint has to be judged against what this screen can draw, so
+  /// without this the negotiation ran with a size of zero, skipped
+  /// itself entirely, accepted a chunk size the screen could not show,
+  /// and then warned about it once the code appeared. Reported from a
+  /// phone that accepted 512 bytes from a Mac Studio and could not draw
+  /// them.
+  ///
+  /// Never overwrites a real measurement: a prediction is only better
+  /// than nothing.
+  void predictQrDisplaySize(double px) {
+    if (state.qrDisplaySizeMeasured) return;
     if ((state.qrDisplaySizePx - px).abs() < 0.5) return;
     state = state.copyWith(qrDisplaySizePx: px);
   }
@@ -559,6 +603,22 @@ class _SendPageState extends ConsumerState<SendPage> {
     if (state.isEmitting && state.currentQrData != null) {
       return _SendingScreen(state: state, notifier: notifier);
     }
+
+    // Predict the code's size before one has been drawn, so a handshake
+    // arriving now is negotiated against this screen rather than
+    // against zero. The sending view's own measurement replaces this
+    // the moment it exists and is never overwritten by it.
+    //
+    // Derived from the window through the same qrDisplaySize the real
+    // layout uses, not from a constant for the sending view's
+    // furniture: that constant was the previous bug here, wrong by
+    // 300 pixels against a real layout.
+    final window = MediaQuery.sizeOf(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifier.predictQrDisplaySize(
+        qrDisplaySize(window.width, window.height),
+      );
+    });
 
     return Scaffold(
       appBar: AppBar(title: const Text('Send a file')),

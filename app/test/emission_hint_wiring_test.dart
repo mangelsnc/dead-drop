@@ -218,6 +218,65 @@ void main() {
       expect(notifier.state.appliedHint, isNull);
     });
 
+    group('negotiating against what this screen can draw', () {
+      // The handshake happens before any QR exists, so the size used to
+      // be zero and the negotiation was skipped by a `> 0` guard — at
+      // exactly the moment it was needed. Reported from a phone: it
+      // accepted 512 bytes from a Mac Studio's handshake, then warned
+      // that its own screen could not draw them. The warning was right
+      // and far too late.
+
+      test('a hint too dense for this screen is cut down, not accepted', () {
+        final notifier = build();
+        // A phone-sized code. 512 bytes needs more room than this.
+        notifier.predictQrDisplaySize(320);
+
+        notifier.setReceiverPk(
+          _key(10),
+          hint: const HandshakeHint(fps: 10, chunkSize: 512, ecLevel: 'L'),
+        );
+
+        expect(notifier.state.chunkSize, lessThan(512),
+            reason: 'a screen that cannot draw 512 must not agree to it');
+      });
+
+      test('a hint this screen can draw is accepted unchanged', () {
+        // The counterpart: the negotiation must not cut down a request
+        // that was fine, or every transfer runs slower than it could.
+        final notifier = build();
+        notifier.predictQrDisplaySize(kQrMaxDisplaySize);
+
+        notifier.setReceiverPk(
+          _key(11),
+          hint: const HandshakeHint(fps: 10, chunkSize: 512, ecLevel: 'L'),
+        );
+
+        expect(notifier.state.chunkSize, 512);
+      });
+
+      test('a real measurement replaces a prediction', () {
+        final notifier = build();
+        notifier.predictQrDisplaySize(320);
+
+        notifier.reportQrDisplaySize(700);
+
+        expect(notifier.state.qrDisplaySizePx, 700);
+        expect(notifier.state.qrDisplaySizeMeasured, isTrue);
+      });
+
+      test('a prediction never replaces a real measurement', () {
+        // The sending view knows the truth; the config page only
+        // estimates. A later estimate overwriting a measurement would
+        // reintroduce the guess this replaced.
+        final notifier = build();
+        notifier.reportQrDisplaySize(700);
+
+        notifier.predictQrDisplaySize(320);
+
+        expect(notifier.state.qrDisplaySizePx, 700);
+      });
+    });
+
     test('a key entered by hand clears a hint from an earlier scan', () {
       // Otherwise the screen keeps claiming "set from the receiver's
       // camera" for a receiver whose key was typed in by hand.
