@@ -230,4 +230,65 @@ void main() {
             'the warning to explain the stall is the bug this whole '
             'negotiation exists to prevent.');
   });
+
+  testWidgets('a phone is not told to enlarge a window it cannot enlarge',
+      (tester) async {
+    // A Redmi Note 14 emitting at 345 pixels was advised that "a larger
+    // window would fit chunks of 2048 bytes". At 345 pixels a
+    // 2048-byte code is 1.95 pixels per module, less than half the 4.0
+    // floor -- and a phone has no window to enlarge. The advice
+    // compared against the desktop ceiling, which a phone screen never
+    // reaches.
+    final container = await _pumpSendPage(tester, sodium, _redmiPortrait);
+    final notifier = container.read(sendProvider.notifier);
+    notifier.loadBytes('payload.bin', _file());
+    notifier.setReceiverPk(_receiverKey());
+    await notifier.startEmitting();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final drawn = container.read(sendProvider).qrDisplaySizePx;
+    notifier.stopEmitting();
+    await tester.pump();
+
+    // What the phone can actually draw: 256 clears the floor, and
+    // nothing larger does.
+    expect(
+      pixelsPerModuleOnScreen(
+          displaySize: drawn, chunkSize: 256, ecLevel: 'L'),
+      greaterThanOrEqualTo(kMinUsablePixelsPerModule),
+    );
+    expect(
+      pixelsPerModuleOnScreen(
+          displaySize: drawn, chunkSize: 512, ecLevel: 'L'),
+      lessThan(kMinUsablePixelsPerModule),
+      reason: 'if 512 now fits this phone the premise has changed',
+    );
+
+    // On a phone the window is already the screen, so nothing is
+    // unlocked by enlarging it.
+    final advice = qrSizeAdvice(
+      displaySize: drawn,
+      chunkSize: 256,
+      ecLevel: 'L',
+      reachableSize: drawn,
+    );
+    expect(advice?.text ?? '', isNot(contains('larger window')),
+        reason: 'the phone is at its best possible setting; telling its '
+            'owner to enlarge a window recommends an impossible fix');
+  });
+
+  test('a desktop is still told when a bigger window would help', () {
+    // The counterpart: the fix must not silence the advice where it is
+    // true and actionable. A half-sized desktop window really can be
+    // made larger.
+    final advice = qrSizeAdvice(
+      displaySize: 320,
+      chunkSize: 256,
+      ecLevel: 'L',
+      reachableSize: kQrMaxDisplaySize,
+    );
+
+    expect(advice, isNotNull);
+    expect(advice!.text, contains('larger window'));
+  });
 }
