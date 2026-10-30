@@ -25,6 +25,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sodium/sodium_sumo.dart';
 
 import 'package:dead_drop/main.dart';
+import 'package:dead_drop/src/handshake.dart';
 import 'package:dead_drop/ui/send/send_page.dart';
 import 'package:dead_drop/ui/theme.dart';
 
@@ -191,5 +192,42 @@ void main() {
             'quarter of what the screen can really draw ($drawn px), so '
             'a transfer that could run at a larger chunk size will be '
             'negotiated down for no reason');
+  });
+
+  testWidgets('a small window negotiates down rather than only warning',
+      (tester) async {
+    // Reported from a MacBook Pro: at full screen the warning is gone,
+    // at a normal window size it still appears. That is correct when
+    // the code really is too small -- but only if the handshake also
+    // lowered the chunk size rather than accepting one it cannot draw
+    // and leaving the warning to explain the failure afterwards.
+    // Swept rather than guessed: at 512 bytes and EC-L the code is 93
+    // modules across, so it needs about 372 pixels to reach the 4.0
+    // pixels-per-module floor. A 900x650 window predicts 470 and
+    // legitimately accepts 512; 900x520 predicts 340 and must not.
+    const smallWindow = Size(900, 520);
+    final container = await _pumpSendPage(tester, sodium, smallWindow);
+    final notifier = container.read(sendProvider.notifier);
+
+    notifier.loadBytes('payload.bin', _file());
+    // Let the configuration page's post-frame callback run, exactly as
+    // it has in the real app long before anyone scans a code. Without
+    // this the handshake is judged against a size of zero, which is a
+    // different bug and not the one under test.
+    await tester.pump();
+
+    // What a desktop receiver asks for, and what the Redmi's handshake
+    // carried: the densest option.
+    notifier.setReceiverPk(
+      _receiverKey(),
+      hint: const HandshakeHint(fps: 10, chunkSize: 512, ecLevel: 'L'),
+    );
+
+    final agreed = container.read(sendProvider).chunkSize;
+    expect(agreed, lessThan(512),
+        reason: 'a 900x650 window cannot draw 512-byte chunks, so the '
+            'handshake must cut them down. Accepting 512 and relying on '
+            'the warning to explain the stall is the bug this whole '
+            'negotiation exists to prevent.');
   });
 }
