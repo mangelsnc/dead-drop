@@ -189,6 +189,9 @@ class SendNotifier extends StateNotifier<SendState> {
   final IdentityStore _identityStore;
   Timer? _timer;
 
+  /// Data codes shown since the session header was last displayed.
+  int _sinceBootstrap = 0;
+
   Future<void> pickFile() async {
     // file_picker 13 made these static and returns the files directly;
     // `withData` is gone because bytes always come back.
@@ -478,6 +481,7 @@ class SendNotifier extends StateNotifier<SendState> {
     // The screen must not dim while it is the transmission medium, and
     // how bright it is changes how the receiving camera exposes.
     unawaited(keepScreenAwake(brightness: state.brightness));
+    _sinceBootstrap = 0;
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
     _timer = Timer(const Duration(seconds: 4), _startDataPhase);
@@ -548,11 +552,47 @@ class SendNotifier extends StateNotifier<SendState> {
   void _emitNextFrame() {
     final emitter = state.emitter;
     if (emitter == null || !state.isEmitting) return;
+
+    // Slip the session header back into the stream every so often.
+    //
+    // A receiver cannot decode anything without it, and it used to be
+    // shown once, for four seconds at the start, and never again. A
+    // receiver that was still focusing, aimed slightly wrong, or
+    // simply arrived a moment late would read hundreds of data codes
+    // and never begin -- with nothing on either screen to say why.
+    // Reported from a desktop receiver sitting at "read 55" with no
+    // progress while the sender was already at code 234.
+    //
+    // It also contradicts what the loop is for: the codes repeat so a
+    // transfer can be joined at any point, and the header has to
+    // repeat with them. The cost is one code in
+    // kBootstrapRepeatEvery, which a fountain code absorbs -- any
+    // other code carries the same payload round again.
+    _sinceBootstrap++;
+    if (_sinceBootstrap >= kBootstrapRepeatEvery) {
+      _sinceBootstrap = 0;
+      state = state.copyWith(
+        framesEmitted: state.framesEmitted + 1,
+        showingBootstrap: true,
+        currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
+      );
+      return;
+    }
+
     final frame = emitter.nextFrame();
     state = state.copyWith(
       framesEmitted: state.framesEmitted + 1,
+      showingBootstrap: false,
       currentQrData: encodeQrPayload(frame.pack()),
     );
+  }
+
+  /// Emits [count] frames without waiting for the timer. Tests only.
+  @visibleForTesting
+  void debugEmitFrames(int count) {
+    for (var i = 0; i < count; i++) {
+      _emitNextFrame();
+    }
   }
 
   @override
@@ -1659,11 +1699,22 @@ class _SendingScreen extends StatelessWidget {
     // Uses the size the QR was last given, which _QrDisplay reports as
     // it lays out. Zero before the first frame, when there is nothing
     // to advise about yet.
+    //
+    // The reachable size is what this device could draw if its window
+    // were made as large as it goes: the global ceiling on a desktop,
+    // and on a phone the screen it already fills. Advising a phone to
+    // enlarge a window it cannot enlarge recommended 2048-byte chunks
+    // to a Redmi Note 14 that would have drawn them at 1.95 pixels per
+    // module, less than half the floor.
+    final reachable = windowFillsTheScreen
+        ? predictedQrDisplaySize(MediaQuery.sizeOf(context))
+        : kQrMaxDisplaySize;
     final advice = state.qrDisplaySizePx > 0
         ? qrSizeAdvice(
             displaySize: state.qrDisplaySizePx,
             chunkSize: state.chunkSize,
             ecLevel: state.ecLevel,
+            reachableSize: reachable,
           )
         : null;
 
@@ -1782,60 +1833,57 @@ class _SendingScreen extends StatelessWidget {
               ],
               const SizedBox(height: 16),
 
-              // The three actions on one row. They were a 56-high row
-              // plus a 12 gap plus a full-width text button, and the
-              // third of them overflowed a 1280x800 window by 28
-              // pixels.
-              //
-              // Not Expanded. Stretching three buttons across a 24-inch
-              // monitor makes each one far wider than it is tall, which
-              // reads as a banner rather than something to press, and
-              // the row ends up a line of touching slabs. Natural width,
-              // centred, with real space between them.
-              //
-              // All three carry an outline. "New transfer" was a bare
-              // TextButton: no border and the page's own background, so
-              // on a dark theme it did not read as a button at all.
+              // Stacked, full width. They were tried side by side to
+              // win height for the code, and on a 24-inch monitor three
+              // buttons sharing a row came out far wider than they were
+              // tall -- a band of slabs rather than controls. Height is
+              // scarce here, but not at this price.
               //
               // Restart exists because finding workable fps and
               // chunk-size values is trial and error, and without it
               // the only way to apply a new value was to close the app
               // and re-pair with the receiver. New transfer clears the
               // file and the key, which Stop deliberately keeps.
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 16,
-                runSpacing: 12,
+              Row(
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: notifier.restartEmitting,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Restart'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(132, 48),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: notifier.restartEmitting,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Restart'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
-                  FilledButton.icon(
-                    onPressed: notifier.stopEmitting,
-                    icon: const Icon(Icons.stop, size: 18),
-                    label: const Text('Stop'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(132, 48),
-                      backgroundColor: DeadDropColors.error,
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      notifier.resetTransfer();
-                      Navigator.of(context).popUntil((r) => r.isFirst);
-                    },
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('New transfer'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(132, 48),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: notifier.stopEmitting,
+                      icon: const Icon(Icons.stop, size: 18),
+                      label: const Text('Stop'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                        backgroundColor: DeadDropColors.error,
+                      ),
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    notifier.resetTransfer();
+                    Navigator.of(context).popUntil((r) => r.isFirst);
+                  },
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('New transfer'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                  ),
+                ),
               ),
             ],
           ),
@@ -2162,7 +2210,7 @@ int negotiateChunkSize({
   return (chunkSize: requestedChunkSize, ecLevel: requestedEcLevel);
 }
 
-/// A chunk size larger than [currentChunk] that a full-size window could
+/// A chunk size larger than [currentChunk] that a bigger window could
 /// show at [ecLevel] but [currentSize] cannot, or null when there is
 /// nothing to gain.
 ///
@@ -2170,14 +2218,27 @@ int negotiateChunkSize({
 /// nothing on screen says so. A 1 MB file is about 5,000 codes at 256
 /// bytes and 1,250 at 1024 — minutes of difference, settled by how wide
 /// the window happens to be.
+///
+/// [reachableSize] is the largest code this device could draw if the
+/// window were made as big as it goes. On a desktop that is the global
+/// ceiling; on a phone the window is already the whole screen, so it is
+/// what is on screen now and there is nothing to advise.
+///
+/// Measuring against the ceiling regardless was wrong on mobile: a
+/// Redmi Note 14 drawing at 345 pixels was told a larger window would
+/// fit 2048-byte chunks, which at that size would be 1.95 pixels per
+/// module -- less than half the floor. The advice recommended a setting
+/// that could never work on that phone, and no window could be made
+/// larger to reach it.
 int? chunkUnlockedByABiggerWindow({
   required double currentSize,
   required int currentChunk,
   required String ecLevel,
+  required double reachableSize,
 }) {
-  if (currentSize >= kQrMaxDisplaySize) return null;
+  if (currentSize >= reachableSize) return null;
   final best = largestDisplayableChunk(
-    displaySize: kQrMaxDisplaySize,
+    displaySize: reachableSize,
     ecLevel: ecLevel,
   );
   if (best == null || best <= currentChunk) return null;
@@ -2201,6 +2262,7 @@ int? chunkUnlockedByABiggerWindow({
   required double displaySize,
   required int chunkSize,
   required String ecLevel,
+  double? reachableSize,
 }) {
   final density = pixelsPerModuleOnScreen(
     displaySize: displaySize,
@@ -2209,10 +2271,12 @@ int? chunkUnlockedByABiggerWindow({
   );
   if (density > 0 && density < kMinUsablePixelsPerModule) {
     return (
-      text:
-          'This window is too small to show $chunkSize-byte chunks '
-          'clearly. Make it larger, or choose a smaller chunk size in '
-          'Options.',
+      text: (reachableSize != null && displaySize >= reachableSize)
+          ? 'This screen is too small to show $chunkSize-byte chunks '
+                'clearly. Choose a smaller chunk size in Options.'
+          : 'This window is too small to show $chunkSize-byte chunks '
+                'clearly. Make it larger, or choose a smaller chunk '
+                'size in Options.',
       isProblem: true,
     );
   }
@@ -2220,6 +2284,7 @@ int? chunkUnlockedByABiggerWindow({
     currentSize: displaySize,
     currentChunk: chunkSize,
     ecLevel: ecLevel,
+    reachableSize: reachableSize ?? kQrMaxDisplaySize,
   );
   if (bigger != null) {
     return (
@@ -2266,6 +2331,17 @@ bool _hintDiffers(SendState state) {
 /// curve: this is a warning, not a prohibition, and the user can still
 /// choose whatever they like.
 const double kMinUsablePixelsPerModule = 4.0;
+
+/// How many data codes play between one showing of the session header
+/// and the next.
+///
+/// The header is what lets a receiver start at all, so it has to come
+/// round often enough that someone pointing a camera at a running
+/// transfer joins within a few seconds: at 10 fps this is about five.
+/// Every header shown is a data code not shown, which a fountain code
+/// absorbs -- there is no particular code it needs, only enough of
+/// them.
+const int kBootstrapRepeatEvery = 50;
 
 /// The ceiling for [qrDisplaySize].
 ///
