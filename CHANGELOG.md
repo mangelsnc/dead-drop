@@ -5,6 +5,12 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.7] — 2026-10-30
+
+### Fixed
+
+- *(ci)* Give the Android build enough heap (#79)
+
 ## [0.9.6] — 2026-10-30
 
 ### Miscellaneous
