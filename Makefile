@@ -174,6 +174,13 @@ test: $(STAMP) _volumes ## Run the test suite (excludes wall-clock timing tests)
 		flutter pub get && \
 		flutter test --exclude-tags timing"
 
+test-one: $(STAMP) _volumes ## Run a single test file: make test-one FILE=test/foo_test.dart
+	@test -n "$(FILE)" || { echo "Usage: make test-one FILE=test/foo_test.dart"; exit 1; }
+	$(DOCKER_RUN) $(IMAGE) bash -c "\
+		cd $(APP_DIR) && \
+		flutter pub get && \
+		flutter test --exclude-tags timing $(FILE)"
+
 test-timing: $(STAMP) _volumes ## Run the wall-clock timing tests (serial; needs a quiet, non-emulated machine)
 	@echo "Note: on an Apple Silicon host this runs under x86_64 emulation,"
 	@echo "where the measurement is dominated by emulator jitter. CI's Linux"
