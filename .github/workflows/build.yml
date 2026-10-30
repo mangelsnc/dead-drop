@@ -209,7 +209,7 @@ jobs:
             deaddrop-windows-x64.zip.sha256
 
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -422,7 +422,7 @@ jobs:
     # It produces nothing installable; the point is to catch iOS-specific
     # breakage (plugin podspecs, Info.plist, Swift/ObjC glue) in CI rather
     # than on the one machine in the team that has Xcode.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
