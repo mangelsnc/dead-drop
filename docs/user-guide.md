@@ -77,7 +77,8 @@ The codes on the screen travel through the camera, so reading quality depends on
 
 - **Distance:** between 15 and 30 centimetres between screen and camera is usually ideal. Neither touching nor far away.
 - **Light:** avoid reflections on the sender's screen. If there is a light source right behind the receiver, the camera may struggle. Change the angle slightly.
-- **Screen brightness:** turn it up to maximum on the sending device. The app raises it automatically during the transfer.
+- **Screen brightness:** the app raises the sending screen to full automatically during the transfer, which is what a phone camera wants. If the receiving device is a **webcam**, try lowering it with the "Screen brightness" control in Options: a webcam measures the whole bright screen, adjusts to it, and the dark squares of the code come out grey. If the other device sees the code but never reads it, this is the first thing to try.
+- **Screen size:** a big screen sending makes a large difference, because each square of the code gets more pixels for the camera to resolve. The same file that struggles phone-to-phone can go through in under a minute from a desktop monitor.
 - **Stay still:** both devices should be as still as possible. Resting them on a table helps a lot.
 - **Speed:** after the receiving device has read one transfer, it measures its own camera and puts a suggestion into the QR code it shows next time. The sender applies that suggestion automatically — the Options panel says "Set from the receiver's camera" when it has — and you can still change any of it by hand with the "Sending speed" control. On a first-ever transfer there is nothing measured yet, so the sender uses its defaults.
 
