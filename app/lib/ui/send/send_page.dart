@@ -1677,9 +1677,11 @@ class _SendingScreen extends StatelessWidget {
       body: SafeArea(
         child: Padding(
           // Was 24 on every side. The horizontal margin is kept because
-          // a code touching the bezel is awkward to aim at; the
-          // vertical one goes to the code.
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          // a code touching the bezel is awkward to aim at. The top is
+          // trimmed because that space goes to the code; the bottom
+          // keeps a real margin, since the button row sat against the
+          // edge of the window with 8.
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
           child: Column(
             children: [
               // Everything that is not the code, above it, on one line:
@@ -1778,54 +1780,59 @@ class _SendingScreen extends StatelessWidget {
                   ],
                 ),
               ],
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
 
-              // All three actions on one row. They were a 56-high row
+              // The three actions on one row. They were a 56-high row
               // plus a 12 gap plus a full-width text button, and the
               // third of them overflowed a 1280x800 window by 28
               // pixels.
+              //
+              // Not Expanded. Stretching three buttons across a 24-inch
+              // monitor makes each one far wider than it is tall, which
+              // reads as a banner rather than something to press, and
+              // the row ends up a line of touching slabs. Natural width,
+              // centred, with real space between them.
+              //
+              // All three carry an outline. "New transfer" was a bare
+              // TextButton: no border and the page's own background, so
+              // on a dark theme it did not read as a button at all.
               //
               // Restart exists because finding workable fps and
               // chunk-size values is trial and error, and without it
               // the only way to apply a new value was to close the app
               // and re-pair with the receiver. New transfer clears the
               // file and the key, which Stop deliberately keeps.
-              Row(
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 16,
+                runSpacing: 12,
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: notifier.restartEmitting,
-                      icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Restart'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 44),
-                      ),
+                  OutlinedButton.icon(
+                    onPressed: notifier.restartEmitting,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Restart'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(132, 48),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: notifier.stopEmitting,
-                      icon: const Icon(Icons.stop, size: 18),
-                      label: const Text('Stop'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 44),
-                        backgroundColor: DeadDropColors.error,
-                      ),
+                  FilledButton.icon(
+                    onPressed: notifier.stopEmitting,
+                    icon: const Icon(Icons.stop, size: 18),
+                    label: const Text('Stop'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(132, 48),
+                      backgroundColor: DeadDropColors.error,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: () {
-                        notifier.resetTransfer();
-                        Navigator.of(context).popUntil((r) => r.isFirst);
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('New'),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 44),
-                      ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      notifier.resetTransfer();
+                      Navigator.of(context).popUntil((r) => r.isFirst);
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('New transfer'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(132, 48),
                     ),
                   ),
                 ],
