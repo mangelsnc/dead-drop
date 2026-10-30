@@ -642,15 +642,15 @@ class _SendPageState extends ConsumerState<SendPage> {
     // against zero. The sending view's own measurement replaces this
     // the moment it exists and is never overwritten by it.
     //
-    // Derived from the window through the same qrDisplaySize the real
-    // layout uses, not from a constant for the sending view's
-    // furniture: that constant was the previous bug here, wrong by
-    // 300 pixels against a real layout.
+    // Derived through predictedQrDisplaySize, which subtracts what the
+    // sending view spends on everything that is not the code. Taking
+    // the window's shorter side instead overclaimed -- 720 against a
+    // real 394 on a laptop -- and an overclaim agrees to a chunk size
+    // this screen cannot draw, which is the failure the prediction
+    // exists to prevent.
     final window = MediaQuery.sizeOf(context);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      notifier.predictQrDisplaySize(
-        qrDisplaySize(window.width, window.height),
-      );
+      notifier.predictQrDisplaySize(predictedQrDisplaySize(window));
     });
 
     return Scaffold(
@@ -1668,66 +1668,90 @@ class _SendingScreen extends StatelessWidget {
         : null;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sending'),
-        automaticallyImplyLeading: false,
-      ),
+      // No AppBar. It cost 56 logical pixels of height on every screen
+      // and said only "Sending", which the codes on screen already make
+      // obvious. Height is the scarce dimension here: it is what the QR
+      // is sized from, and a 1280x800 laptop was drawing a 394-pixel
+      // code -- barely larger than a phone's 345 -- because the
+      // furniture around the code ate the window.
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          // Was 24 on every side. The horizontal margin is kept because
+          // a code touching the bezel is awkward to aim at; the
+          // vertical one goes to the code.
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
           child: Column(
             children: [
-              // File info
-              Text(
-                state.fileName ?? 'file',
-                style: Theme.of(context).textTheme.titleMedium,
-                overflow: TextOverflow.ellipsis,
+              // Everything that is not the code, above it, on one line:
+              // the file's name and size. Two Text widgets stacked cost
+              // two line heights to say what one says.
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      state.fileName ?? 'file',
+                      style: Theme.of(context).textTheme.titleSmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    formatFileSize(state.fileBytes?.length ?? 0),
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: DeadDropColors.textSecondary),
+                  ),
+                ],
               ),
-              Text(
-                formatFileSize(state.fileBytes?.length ?? 0),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
 
-              // QR display — takes remaining space
+              // The code takes everything left over.
               Expanded(
                 child: Center(
                   child: _QrDisplay(state: state, notifier: notifier),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
 
-              // Progress info
-              // Codes shown, against the fewest a receiver needs.
+              // Progress and settings on one line.
               //
-              // This read "Frame 599/195", which looks broken: the
-              // denominator was the chunk count, but the emitter loops
-              // for as long as it takes, so the numerator passes it
-              // routinely and says nothing is wrong. A fountain code
-              // has no total — only a floor.
-              Text(
-                state.showingBootstrap
-                    ? 'Session bootstrap'
-                    : state.totalFrames != null
-                    ? 'Code ${state.framesEmitted} · '
-                          '${state.totalFrames} needed at least'
-                    : 'Code ${state.framesEmitted}',
-                style: Theme.of(context).textTheme.titleMedium,
+              // The counter read "Frame 599/195", which looks broken:
+              // the denominator was the chunk count, but the emitter
+              // loops for as long as it takes, so the numerator passes
+              // it routinely and says nothing is wrong. A fountain code
+              // has no total -- only a floor.
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      state.showingBootstrap
+                          ? 'Session bootstrap — point the receiver '
+                                'camera here'
+                          : state.totalFrames != null
+                          ? 'Code ${state.framesEmitted} · '
+                                '${state.totalFrames} needed at least'
+                          : 'Code ${state.framesEmitted}',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${state.fps.round()} fps · ${state.chunkSize} B · '
+                    'EC-${state.ecLevel}',
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: DeadDropColors.textSecondary),
+                  ),
+                ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                '${state.fps.round()} fps · ${state.chunkSize} B/chunk · '
-                'EC-${state.ecLevel}',
-                style: Theme.of(context).textTheme.bodySmall
-                    ?.copyWith(color: DeadDropColors.textSecondary),
-              ),
+
               // Advice about the code's size on screen, in the column
               // rather than inside the QR widget. It used to sit in
               // _QrDisplay, which lives in an Expanded sized for the
               // code alone, so the text overflowed across the frame
               // counter and the settings line below it.
               if (advice != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1735,7 +1759,7 @@ class _SendingScreen extends StatelessWidget {
                       advice.isProblem
                           ? Icons.warning_amber_rounded
                           : Icons.open_in_full,
-                      size: 18,
+                      size: 16,
                       color: advice.isProblem
                           ? DeadDropColors.error
                           : DeadDropColors.textSecondary,
@@ -1754,53 +1778,57 @@ class _SendingScreen extends StatelessWidget {
                   ],
                 ),
               ],
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
 
-              // Restart and Stop. Restart exists because finding workable
-              // fps and chunk-size values is trial and error, and without
-              // it the only way to apply a new value was to close the app
-              // and re-pair with the receiver.
+              // All three actions on one row. They were a 56-high row
+              // plus a 12 gap plus a full-width text button, and the
+              // third of them overflowed a 1280x800 window by 28
+              // pixels.
+              //
+              // Restart exists because finding workable fps and
+              // chunk-size values is trial and error, and without it
+              // the only way to apply a new value was to close the app
+              // and re-pair with the receiver. New transfer clears the
+              // file and the key, which Stop deliberately keeps.
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: notifier.restartEmitting,
-                      icon: const Icon(Icons.refresh),
+                      icon: const Icon(Icons.refresh, size: 18),
                       label: const Text('Restart'),
                       style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 56),
+                        minimumSize: const Size(0, 44),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton.icon(
                       onPressed: notifier.stopEmitting,
-                      icon: const Icon(Icons.stop),
+                      icon: const Icon(Icons.stop, size: 18),
                       label: const Text('Stop'),
                       style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 56),
+                        minimumSize: const Size(0, 44),
                         backgroundColor: DeadDropColors.error,
                       ),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextButton.icon(
+                      onPressed: () {
+                        notifier.resetTransfer();
+                        Navigator.of(context).popUntil((r) => r.isFirst);
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('New'),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, 44),
+                      ),
+                    ),
+                  ),
                 ],
-              ),
-              const SizedBox(height: 12),
-              // Done with this file, on to the next. Stop keeps the file
-              // and the key so the user can retune and start again; this
-              // clears both. Without it the only way back to an empty
-              // form was to close the app.
-              SizedBox(
-                width: double.infinity,
-                child: TextButton.icon(
-                  onPressed: () {
-                    notifier.resetTransfer();
-                    Navigator.of(context).popUntil((r) => r.isFirst);
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('New transfer'),
-                ),
               ),
             ],
           ),
@@ -1975,6 +2003,46 @@ double qrDisplaySize(double availableWidth, double availableHeight) {
   final usable = width < height ? width : height;
   return usable.clamp(0.0, kQrMaxDisplaySize);
 }
+
+/// How big the emitted code will be in a window of [windowSize], before
+/// one has been drawn.
+///
+/// The handshake arrives while the configuration page is on screen, so
+/// the size the receiver's hint is judged against has to be predicted.
+/// Predicting it as the window's shorter side -- which is what this
+/// replaces -- ignores everything the sending view puts above and below
+/// the code, and so overclaims: 720 against a real 394 on a 1280x800
+/// laptop, 393 against 345 on a Redmi Note 14. An overclaim is the
+/// worst kind of error here, because it agrees to a chunk size the
+/// screen cannot draw and the user is told only after pressing Start.
+///
+/// [kSendingViewChromeHeight] is pinned against the real layout by
+/// qr_size_prediction_test.dart, which renders both screens and fails
+/// if this returns more than the sending view measures. That test is
+/// what keeps the number honest -- a constant guessed at this spot,
+/// wrong by 300 pixels, is the bug this function exists to fix.
+double predictedQrDisplaySize(Size windowSize) {
+  return qrDisplaySize(
+    windowSize.width - kSendingViewHorizontalPadding,
+    windowSize.height - kSendingViewChromeHeight,
+  );
+}
+
+/// The horizontal margin the sending view keeps around the code.
+///
+/// 24 logical pixels each side, so a code never touches the bezel.
+const double kSendingViewHorizontalPadding = 48;
+
+/// The vertical space the sending view spends on everything that is not
+/// the code: the file name row, the progress and settings row, the size
+/// advice when it is showing, the button row, and the gaps between
+/// them, plus the window's own safe area.
+///
+/// Deliberately generous. Under-reserving makes the prediction
+/// overclaim, which is the failure being fixed; over-reserving only
+/// costs a slightly conservative negotiation, and the real measurement
+/// replaces this the moment the code is drawn.
+const double kSendingViewChromeHeight = 180;
 
 /// How many screen pixels each QR module gets, drawing [chunkSize] bytes
 /// at [ecLevel] into a code [displaySize] pixels across.
@@ -2228,39 +2296,28 @@ class _QrDisplay extends StatelessWidget {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           notifier.reportQrDisplaySize(size);
         });
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              // No padding of its own: a QR carries its quiet zone inside
-              // the image, and the page already has a margin. The 16 here
-              // was taken off the code twice over, and on a phone every
-              // pixel of it matters.
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: QrImageView(
-                data: state.currentQrData!,
-                version: QrVersions.auto,
-                errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-                size: size,
-                backgroundColor: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Said before the user spends minutes watching nothing
-            // happen. This screen cannot draw the chosen chunk size
-            // densely enough for any camera to read it, and no amount of
-            // aiming or lighting fixes that — only a smaller chunk does.
-            // Reported as a phone-to-Mac transfer sitting at 0% for three
-            // minutes.
-            if (state.showingBootstrap)
-              Text(
-                'Session bootstrap — point the receiver camera here',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-          ],
+        // Nothing but the code goes in here. This widget is given a box
+        // sized for the QR, so anything stacked under it overflows that
+        // box -- a caption below the code made the column 28 pixels
+        // taller than its constraint on a 1280x800 window. The same
+        // mistake was already fixed once for the size advice; the
+        // bootstrap caption now lives in the parent column too.
+        return Container(
+          // No padding of its own: a QR carries its quiet zone inside
+          // the image, and the page already has a margin. The 16 here
+          // was taken off the code twice over, and on a phone every
+          // pixel of it matters.
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: QrImageView(
+            data: state.currentQrData!,
+            version: QrVersions.auto,
+            errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
+            size: size,
+            backgroundColor: Colors.white,
+          ),
         );
       },
     );
