@@ -113,7 +113,7 @@ DeadDrop is organized into **six core modules**, each with a single responsibili
 |  |  |  - X25519 key exchange                            |      |   |
 |  |  |  - XSalsa20-Poly1305 AEAD                         |      |   |
 |  |  |  - Ed25519 signatures                             |      |   |
-|  |  |  - Argon2id PIN derivation                        |      |   |
+|  |  |  - Argon2id passphrase derivation                 |      |   |
 |  |  +---------------------------------------------------+      |   |
 |  |  +------+----------+                   +------+----------+  |   |
 |  |  |  Fountain       |                   |  Fountain       |  |   |
@@ -121,7 +121,7 @@ DeadDrop is organized into **six core modules**, each with a single responsibili
 |  |  +-----------------+                   +-----------------+  |   |
 |  |  +------+----------+                   +------+----------+  |   |
 |  |  |   QR Renderer   |                   |   QR Scanner    |  |   |
-|  |  |  (qr_flutter)   |                   | (mobile_scanner)|  |   |
+|  |  |  (qr_flutter)   |                   |    (zxing2)     |  |   |
 |  |  +-----------------+                   +-----------------+  |   |
 |  +--------------------------------------------------------------+  |
 |  +---------------------------+---------------------------------+   |
@@ -337,7 +337,7 @@ SENDER                                    RECEIVER
 | **Symmetric encryption** | XSalsa20-Poly1305 (AEAD) | libsodium `crypto_secretbox` | 192-bit nonce (no counter management), authenticated |
 | **Signatures** | Ed25519 | libsodium `crypto_sign` | Fast, deterministic, sender authenticity |
 | **Hashing** | BLAKE2b-256 | libsodium `crypto_generichash` | Fast, file integrity |
-| **PIN derivation** | Argon2id | libsodium `crypto_pwhash` | Memory-hard, GPU-resistant, PIN -> encryption key |
+| **Passphrase derivation** | Argon2id | libsodium `crypto_pwhash` | Memory-hard, GPU-resistant, passphrase -> encryption key |
 
 **Why libsodium:**
 - Audited, mature, reference implementation
@@ -473,7 +473,7 @@ No custom RNG, no seeding from weak sources (time, PID, etc.).
 
 **Non-goals:**
 - Protection against a sophisticated forensic analyst with unlimited time (if they image the device and analyze it for days, they may find anomalies)
-- Protection against the user being forced to reveal the real PIN under torture (no technical solution exists for this)
+- Protection against the user being forced to reveal the real passphrase under torture (no technical solution exists for this)
 
 ### 4.2 Two-passphrase model
 
@@ -496,13 +496,13 @@ Both must independently clear `kMinimumEntropyBits = 60` (`app/lib/src/vault/pas
 +------------------------------------------------------------------+
 |  +-----------------------------------------------------------+   |
 |  |              Real Environment (encrypted)                 |   |
-|  |  - Encrypted with key derived from real PIN               |   |
+|  |  - Encrypted with key derived from real passphrase        |   |
 |  |  - Contains: user's actual files, history, settings       |   |
 |  |  - File names encrypted (never in cleartext)              |   |
 |  +-----------------------------------------------------------+   |
 |  +-----------------------------------------------------------+   |
 |  |              Decoy Environment (encrypted)                |   |
-|  |  - Encrypted with key derived from decoy PIN              |   |
+|  |  - Encrypted with key derived from decoy passphrase       |   |
 |  |  - Contains: fake files, fake history, copied settings    |   |
 |  |  - Looks like a normal, boring user's data                |   |
 |  +-----------------------------------------------------------+   |
@@ -513,10 +513,10 @@ Both must independently clear `kMinimumEntropyBits = 60` (`app/lib/src/vault/pas
 ```
 
 **Implementation:**
-- Each environment is a separate encrypted database (SQLite with SQLCipher, or a custom encrypted file tree)
-- The encryption key is derived from the PIN via Argon2id (section 3.4)
-- The app attempts decryption with the entered PIN; if it succeeds, that environment opens
-- If decryption fails, "Incorrect PIN" (no hint whether the PIN is wrong or the environment doesn't exist)
+- Each environment is a separate encrypted file tree (the option taken: one AEAD-sealed file per entry, no SQLCipher)
+- The encryption key is derived from the passphrase via Argon2id (section 3.4)
+- The app attempts decryption with the entered passphrase; if it succeeds, that environment opens
+- If decryption fails, "Incorrect passphrase" (no hint whether the passphrase is wrong or the environment doesn't exist)
 
 ### 4.4 Decoy environment content
 
@@ -532,11 +532,11 @@ This is a narrower feature than originally specified, not an equivalent one reac
 ### 4.5 Behavioral indistinguishability
 
 **Timing:**
-- PIN entry -> key derivation -> environment unlock takes **exactly the same time** for both PINs (same Argon2id parameters)
-- No artificial delay after an incorrect PIN (that would reveal there are two modes)
+- Passphrase entry -> key derivation -> environment unlock takes **exactly the same time** for both passphrases (same Argon2id parameters)
+- No artificial delay after an incorrect passphrase (that would reveal there are two modes)
 
 **UI:**
-- The login screen is **identical** regardless of which PIN is entered
+- The login screen is **identical** regardless of which passphrase is entered
 - The home screen is **identical** in layout, colors, typography — only the content differs
 - Settings menu in the decoy environment **does not show** the "Duress mode" section (no trace it exists)
 
@@ -547,7 +547,7 @@ This is a narrower feature than originally specified, not an equivalent one reac
 
 ### 4.6 What the attacker sees
 
-When the attacker enters the decoy PIN:
+When the attacker enters the decoy passphrase:
 
 ```
 +--------------------------------------+
@@ -579,7 +579,7 @@ If the attacker navigates to Settings:
 - Real history
 - The existence of duress mode
 - The existence of a second environment
-- Any hint that the decoy PIN is not the real PIN
+- Any hint that the decoy passphrase is not the real one
 
 ### 4.8 Self-destruct
 
@@ -629,11 +629,11 @@ This inversion applies only to the vault/coercion feature. It does not change th
 | **Language** | Dart 3.x | Flutter's language, modern, null-safe |
 | **Crypto** | libsodium via `sodium_libs` | Audited, same backend on all platforms |
 | **QR rendering** | `qr_flutter` | Mature, customizable, pure Dart |
-| **QR scanning** | `mobile_scanner` | Fast, cross-platform, supports all QR formats |
+| **QR scanning** | `zxing2` (pure Dart) over `camera_desktop` | One decoder on all five platforms, and no Play Services: `mobile_scanner` decodes with ML Kit, which drags in the datatransport stack and `android.permission.INTERNET` — fatal for an app whose claim is that it makes no network calls |
 | **Camera** | `camera` plugin | Official Flutter plugin, cross-platform |
 | **File picker** | `file_picker` | Cross-platform file selection |
 | **Secure storage** | `flutter_secure_storage` | OS keychain integration (Keychain on macOS/iOS, Keystore on Android, DPAPI on Windows, libsecret on Linux) |
-| **Local database** | `sqflite` (SQLite) | Mature, cross-platform, encrypted via SQLCipher |
+| **Local database** | None — an encrypted file tree | Of the two options section 4 left open, this is the one built: `VaultStore` keeps one AEAD-sealed file per entry under `slots/` and `entries/`. No SQLCipher, so no native crypto outside libsodium |
 
 ### 5.3 Native dependencies
 
@@ -729,7 +729,7 @@ checksums for every artifact and users can verify them locally.
 |---|---|---|
 | **Session header scan** | 30 seconds | "No transfer detected. Make sure the sender is showing the QR code." |
 | **Data frame scan** | No timeout | The receiver keeps scanning indefinitely. The user decides when to give up. |
-| **PIN entry** | No timeout | No lockout (that would reveal there are two modes). Internal rate limiting: invisible exponential delay after 5 failed attempts. |
+| **Passphrase entry** | No timeout | No lockout (that would reveal there are two modes). Internal rate limiting: invisible exponential delay after 5 failed attempts. |
 | **File save** | 10 seconds | "Could not save the file. Check that you have enough space." |
 
 ### 6.4 Resource limits
@@ -790,7 +790,7 @@ abstract class CryptoContext {
     PublicKey? senderVerifyKey, // optional: verify sender identity
   });
 
-  /// Derive an encryption key from a PIN (for duress mode).
+  /// Derive an encryption key from a passphrase (for duress mode).
   Future<SecretKey> deriveKeyFromPin({
     required String pin,
     required Uint8List salt,
@@ -883,7 +883,7 @@ abstract class SecureStorage {
 
 /// Environment manager: handles real vs. decoy environments.
 abstract class EnvironmentManager {
-  /// Unlock an environment with a PIN. Returns null if PIN is wrong.
+  /// Unlock an environment with a passphrase. Returns null if it is wrong.
   Future<Environment?> unlock(String pin);
 
   /// Create a new environment (real or decoy).
@@ -1075,14 +1075,14 @@ These will be in `/tests/vectors/` and must pass on all platforms.
 - [x] Sender authentication via Ed25519 signature
 - [x] Receiver binding (only intended receiver can decrypt)
 - [x] BLAKE2b file integrity check
-- [x] Argon2id for PIN derivation (memory-hard)
-- [x] Identical timing for real vs. decoy PIN
+- [x] Argon2id for passphrase derivation (memory-hard)
+- [x] Identical timing for real vs. decoy passphrase
 - [x] No network code in the app
 - [x] No telemetry, no analytics, no crash reporting
 - [x] Secure storage via OS keychain
 - [x] File names encrypted (never in cleartext)
 - [x] Cross-session protection via FILE_ID
-- [ ] Reproducible builds (CI, phase 2)
+- [x] Reproducible builds (verified in CI: the Linux job rebuilds and compares hashes — see `.github/workflows/build.yml` and docs/reproducibility-verification.md)
 - [ ] External security audit (post-MVP)
 
 ---
