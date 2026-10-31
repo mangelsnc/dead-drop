@@ -1,0 +1,264 @@
+## Builds installable artifacts from any branch, for testing on real
+## devices.
+##
+## The release pipeline only builds main and publishes to a tag, which is
+## right for releases and useless for the case this exists to serve:
+## deciding whether a change is good enough to merge at all. The zxing2
+## scanner is one of those — whether it reads as well as ML Kit cannot be
+## answered by CI, only by someone holding a phone.
+##
+## Android and macOS, because a transfer needs both ends: the emission
+## parameters are chosen by the SENDER, so testing a change to them with
+## an old build on the other side measures nothing.
+##
+## Artifacts are attached to the run rather than published as a release:
+## these are builds to try, not versions anybody should install expecting
+## support.
+name: Test build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to build'
+        required: true
+        type: string
+        default: main
+      platforms:
+        description: 'What to build'
+        required: true
+        default: both
+        type: choice
+        options: [both, android, macos]
+
+env:
+  # Must match .fvmrc, as in build.yml.
+  FLUTTER_VERSION: '3.47.8'
+
+jobs:
+  apk:
+    if: inputs.platforms == 'both' || inputs.platforms == 'android'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get
+
+      # Same retry as build.yml: sdkmanager has handed back a truncated
+      # archive before and taken a whole build down with it.
+      - name: Pre-fetch the Android NDK
+        run: |
+          NDK="28.2.13676358"
+          for attempt in 1 2 3; do
+            if yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
+                 "ndk;${NDK}" >/dev/null; then
+              echo "NDK $NDK installed on attempt $attempt"
+              exit 0
+            fi
+            echo "::warning::NDK download failed (attempt $attempt), retrying"
+            rm -rf "${ANDROID_HOME}/ndk/${NDK}"
+            sleep 10
+          done
+          echo "::error::Could not install NDK $NDK after 3 attempts"
+          exit 1
+
+      - name: Write the signing config
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::No Android signing secrets. An unsigned APK cannot be installed as an update over a signed one, so this build would not be testable."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "${RUNNER_TEMP}/upload-keystore.jks"
+          cat > app/android/key.properties <<EOF
+          storeFile=${RUNNER_TEMP}/upload-keystore.jks
+          storePassword=${STORE_PASSWORD}
+          keyPassword=${KEY_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          EOF
+
+      # The version has to reach the binary, or Settings -> About reads
+      # "Development build" and a tester cannot say which build they are
+      # holding. Derived from pubspec.yaml so it cannot drift from the
+      # repository.
+      #
+      # tool/build_args.sh does this on branches that carry it; this
+      # computes the same values inline, so the workflow works against
+      # any ref.
+      - name: Work out the version defines
+        id: version
+        working-directory: app
+        shell: bash
+        run: |
+          line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
+          ver=${line%%+*}
+          build=${line##*+}
+          [ "$build" = "$line" ] && build=''
+          if [ -z "$ver" ]; then
+            echo "no version found in app/pubspec.yaml" >&2
+            exit 1
+          fi
+          args="--dart-define=DEADDROP_VERSION=${ver}"
+          [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
+          commit=$(git rev-parse --short HEAD 2>/dev/null || true)
+          [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          echo "args=${args}" >> "$GITHUB_OUTPUT"
+          echo "Version defines: ${args}"
+
+      - name: Build release APK
+        working-directory: app
+        # More heap than android/gradle.properties asks for.
+        #
+        # That file is sized for the Docker container the project builds
+        # in locally, where 2 GB is the right answer and asking for more
+        # got the daemon killed by the kernel. A GitHub runner has 16 GB
+        # and no such constraint, and 2 GB is not enough for Jetifier to
+        # transform Flutter's x86_64 jar: the job failed intermittently
+        # with "Java heap space" on :app:mergeReleaseNativeLibs.
+        env:
+          GRADLE_OPTS: >-
+            -Dorg.gradle.jvmargs=-Xmx6G
+            -XX:MaxMetaspaceSize=1G
+            -XX:+HeapDumpOnOutOfMemoryError
+        shell: bash
+        run: flutter build apk --release ${{ steps.version.outputs.args }}
+
+      # The reason this workflow exists for the zxing2 branch: show what
+      # the APK actually asks the user for. A build whose whole purpose is
+      # removing a permission should prove it in its own log.
+      - name: Report the permissions this APK requests
+        run: |
+          APK=app/build/app/outputs/flutter-apk/app-release.apk
+          AAPT=$(find "${ANDROID_HOME}/build-tools" -name aapt2 \
+                 | sort -V | tail -n1)
+          echo "### Permissions requested" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          "$AAPT" dump permissions "$APK" \
+            | grep -oE 'android\.permission\.[A-Z_]+' \
+            | sort -u | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package
+        env:
+          # Through the environment, never interpolated into the script.
+          # A ref is attacker-controlled in the general case, and
+          # ${{ }} inside run: substitutes before the shell parses the
+          # line, so a crafted value would execute rather than be read.
+          REF: ${{ inputs.ref }}
+        run: |
+          REF_SLUG=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')
+          cp app/build/app/outputs/flutter-apk/app-release.apk \
+             "${GITHUB_WORKSPACE}/deaddrop-${REF_SLUG}.apk"
+          cd "${GITHUB_WORKSPACE}"
+          sha256sum "deaddrop-${REF_SLUG}.apk" \
+            > "deaddrop-${REF_SLUG}.apk.sha256"
+          cat "deaddrop-${REF_SLUG}.apk.sha256" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deaddrop-apk
+          path: |
+            deaddrop-*.apk
+            deaddrop-*.apk.sha256
+          retention-days: 14
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f app/android/key.properties "${RUNNER_TEMP}/upload-keystore.jks"
+
+  macos:
+    if: inputs.platforms == 'both' || inputs.platforms == 'macos'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get
+
+      # The version has to reach the binary, or Settings -> About reads
+      # "Development build" and a tester cannot say which build they are
+      # holding. Derived from pubspec.yaml so it cannot drift from the
+      # repository.
+      #
+      # tool/build_args.sh does this on branches that carry it; this
+      # computes the same values inline, so the workflow works against
+      # any ref.
+      - name: Work out the version defines
+        id: version
+        working-directory: app
+        shell: bash
+        run: |
+          line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
+          ver=${line%%+*}
+          build=${line##*+}
+          [ "$build" = "$line" ] && build=''
+          if [ -z "$ver" ]; then
+            echo "no version found in app/pubspec.yaml" >&2
+            exit 1
+          fi
+          args="--dart-define=DEADDROP_VERSION=${ver}"
+          [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
+          commit=$(git rev-parse --short HEAD 2>/dev/null || true)
+          [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          echo "args=${args}" >> "$GITHUB_OUTPUT"
+          echo "Version defines: ${args}"
+
+      - name: Build release
+        working-directory: app
+        shell: bash
+        run: flutter build macos --release ${{ steps.version.outputs.args }}
+
+      # Ad-hoc signed, like the published releases: distributing a .app
+      # that Gatekeeper accepts without a right-click needs a paid Apple
+      # certificate, which this project does not have. Said here so the
+      # tester is not surprised by the warning.
+      - name: Package
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          REF_SLUG=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')
+          cd app/build/macos/Build/Products/Release
+          APP=$(ls -d *.app | head -1)
+          test -n "$APP" || { echo "::error::no .app bundle"; exit 1; }
+          tar czf "${GITHUB_WORKSPACE}/deaddrop-${REF_SLUG}-macos.tar.gz" "$APP"
+          cd "${GITHUB_WORKSPACE}"
+          shasum -a 256 "deaddrop-${REF_SLUG}-macos.tar.gz" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deaddrop-macos
+          path: deaddrop-*-macos.tar.gz
+          retention-days: 14
