@@ -59,9 +59,13 @@ On the internet: nothing, because there is no internet. On the devices: the app 
 
 **It depends where you saved them.** When a transfer finishes you choose: the device, or the vault. Saved to the device, a file is an ordinary file, protected only by your operating system (user account, disk encryption such as FileVault/BitLocker/LUKS if you enabled it). Saved to the vault, it is encrypted at rest with a key derived from your passphrase (Argon2id), and only that passphrase opens it. Self-destruct is available too, off unless you turn it on.
 
-### What if I forget my PIN?
+### What if I forget my vault passphrase?
 
-The current version has no PIN, so there is nothing to forget. When PIN protection ships, there will be no way to recover a forgotten PIN — no "security question" or recovery email, because that would require servers and accounts, exactly what DeadDrop avoids.
+**There is no recovery** — no security question, no hint, no reset link. All of those need servers and accounts, which is exactly what DeadDrop does not have, and a recovery route is also a route for somebody else. Nobody can be made to hand over something that does not exist.
+
+What you can always do is **delete the vault** and start again (Settings → Security → Delete vault, or the same option on the unlock screen). It asks you to type `DELETE` rather than your passphrase, precisely because forgetting it is one of the reasons to use it. The files are gone, but they were encrypted and stay encrypted.
+
+This is why the app offers you six random words and refuses anything under 60 bits of entropy: the passphrase is the only thing between your files and someone who has copied your storage.
 
 ### Can I trust the encryption? Who has reviewed it?
 

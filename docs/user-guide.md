@@ -13,6 +13,7 @@ DeadDrop is in **active development** (MVP target: February 2027). To avoid any 
 **✅ Works today:**
 
 - Air-gapped file transfer via animated QR codes (screen → camera, no network).
+- Camera scanning on **all five platforms** — Windows, macOS, GNU/Linux, Android and iOS.
 - End-to-end encryption of the transfer: only the receiving device can read the file.
 - File integrity check: the app verifies the file arrived identical to the original.
 - Resume after interruption: the codes repeat in a loop and the transfer continues where it left off.
@@ -22,7 +23,6 @@ DeadDrop is in **active development** (MVP target: February 2027). To avoid any 
 
 **📋 Not yet:**
 
-- **Scanning with the camera on Linux and Windows.** The desktop builds have no scanner, so there you type or paste the other device's key instead. Android, iOS and macOS scan normally.
 - **An external audit.** Nobody independent has reviewed this code.
 
 > ⚠️ **Three things to understand before you rely on the vault.** It is **opt-in**: a file you save outside it has no protection from DeadDrop. The decoy holds **whatever you put in it** — the app invents nothing, and an empty decoy is not convincing. And self-destruct **discards keys, it does not erase files**; on the flash storage phones use, nobody can promise the bytes are physically gone. The limits are spelled out in [docs/security.md](security.md).
