@@ -27,9 +27,9 @@ on:
       platforms:
         description: 'What to build'
         required: true
-        default: both
+        default: all
         type: choice
-        options: [both, android, macos]
+        options: [all, android, macos, linux]
 
 env:
   # Must match .fvmrc, as in build.yml.
@@ -37,7 +37,7 @@ env:
 
 jobs:
   apk:
-    if: inputs.platforms == 'both' || inputs.platforms == 'android'
+    if: inputs.platforms == 'all' || inputs.platforms == 'android'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -187,7 +187,7 @@ jobs:
         run: rm -f app/android/key.properties "${RUNNER_TEMP}/upload-keystore.jks"
 
   macos:
-    if: inputs.platforms == 'both' || inputs.platforms == 'macos'
+    if: inputs.platforms == 'all' || inputs.platforms == 'macos'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -261,4 +261,88 @@ jobs:
         with:
           name: deaddrop-macos
           path: deaddrop-*-macos.tar.gz
+          retention-days: 14
+
+  # Linux, so a branch can be tried on the third mandatory platform
+  # without waiting for it to reach main. The release pipeline's own
+  # Linux job also analyses, tests and proves the packaging is
+  # deterministic; none of that is repeated here, because this builds
+  # something to run, not something to publish.
+  linux:
+    if: inputs.platforms == 'all' || inputs.platforms == 'linux'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Same list as build.yml. GStreamer is camera_desktop's capture
+      # backend on Linux; without it CMake fails before any Dart is
+      # compiled, and plugins-good carries the V4L2 element that talks
+      # to a webcam. libunwind-dev is named explicitly because apt on
+      # this image will not pull it in by itself.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev libunwind-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Get packages
+        working-directory: app
+        run: flutter pub get
+
+      # The version has to reach the binary, or Settings -> About reads
+      # "Development build" and a tester cannot say which build they are
+      # holding. Derived from pubspec.yaml so it cannot drift from the
+      # repository.
+      - name: Work out the version defines
+        id: version
+        working-directory: app
+        shell: bash
+        run: |
+          line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
+          ver=${line%%+*}
+          build=${line##*+}
+          [ "$build" = "$line" ] && build=''
+          if [ -z "$ver" ]; then
+            echo "no version found in app/pubspec.yaml" >&2
+            exit 1
+          fi
+          args="--dart-define=DEADDROP_VERSION=${ver}"
+          [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
+          commit=$(git rev-parse --short HEAD 2>/dev/null || true)
+          [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          echo "args=${args}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release
+        working-directory: app
+        shell: bash
+        run: flutter build linux --release ${{ steps.version.outputs.args }}
+
+      - name: Package
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          REF_SLUG=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')
+          cd app/build/linux/x64/release/bundle
+          tar czf "${GITHUB_WORKSPACE}/deaddrop-${REF_SLUG}-linux-x64.tar.gz" .
+          cd "${GITHUB_WORKSPACE}"
+          sha256sum "deaddrop-${REF_SLUG}-linux-x64.tar.gz" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deaddrop-linux
+          path: deaddrop-*-linux-x64.tar.gz
           retention-days: 14
