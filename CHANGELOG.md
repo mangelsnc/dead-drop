@@ -5,6 +5,42 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.7] — 2026-10-30
+
+### Fixed
+
+- *(ci)* Give the Android build enough heap (#79)
+
+## [0.9.6] — 2026-10-30
+
+### Miscellaneous
+
+- Move the macOS and iOS jobs off a runner being retired (#80)
+
+## [0.9.5] — 2026-10-30
+
+### Fixed
+
+- *(ci)* Pass the version to test builds (#78)
+
+## [0.9.4] — 2026-10-28
+
+### Miscellaneous
+
+- Pin every action to a commit SHA
+
+## [0.9.3] — 2026-10-28
+
+### Miscellaneous
+
+- Update the actions that were warning about Node 20
+
+## [0.9.2] — 2026-10-28
+
+### Miscellaneous
+
+- Build macOS too, so a branch can be tested on both ends
+
 ## [0.9.1] — 2026-10-28
 
 ### Miscellaneous
