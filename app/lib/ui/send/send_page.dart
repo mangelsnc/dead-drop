@@ -1732,7 +1732,7 @@ class _SendingScreen extends StatelessWidget {
           // trimmed because that space goes to the code; the bottom
           // keeps a real margin, since the button row sat against the
           // edge of the window with 8.
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
           child: Column(
             children: [
               // Everything that is not the code, above it, on one line:
@@ -1833,55 +1833,77 @@ class _SendingScreen extends StatelessWidget {
               ],
               const SizedBox(height: 16),
 
-              // Stacked, full width. They were tried side by side to
-              // win height for the code, and on a 24-inch monitor three
-              // buttons sharing a row came out far wider than they were
-              // tall -- a band of slabs rather than controls. Height is
-              // scarce here, but not at this price.
+              // Stacked, and capped rather than stretched.
               //
-              // Restart exists because finding workable fps and
-              // chunk-size values is trial and error, and without it
-              // the only way to apply a new value was to close the app
-              // and re-pair with the receiver. New transfer clears the
-              // file and the key, which Stop deliberately keeps.
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: notifier.restartEmitting,
-                      icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Restart'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
-                    ),
+              // They were tried side by side to win height for the
+              // code, and on a 24-inch monitor three buttons sharing a
+              // row came out far wider than they were tall -- a band of
+              // slabs rather than controls. Splitting the full width
+              // between two of them has the same problem at that size,
+              // so the block stops growing at kTransferControlsMaxWidth
+              // and sits centred.
+              //
+              // Three weights, because these are not three equal
+              // actions. Stop is the one being reached for, so it is
+              // filled. Restart is the considered second choice --
+              // finding workable fps and chunk-size values is trial and
+              // error, and without it the only way to apply a new value
+              // was to close the app and re-pair with the receiver.
+              // New transfer abandons the file and the key that Stop
+              // deliberately keeps, so it is the quietest of the three:
+              // giving it Restart's outline made two very different
+              // actions look like a pair.
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: kTransferControlsMaxWidth,
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: notifier.stopEmitting,
-                      icon: const Icon(Icons.stop, size: 18),
-                      label: const Text('Stop'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                        backgroundColor: DeadDropColors.error,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: notifier.restartEmitting,
+                              icon: const Icon(Icons.refresh, size: 18),
+                              label: const Text('Restart'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(0, 48),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: notifier.stopEmitting,
+                              icon: const Icon(Icons.stop, size: 18),
+                              label: const Text('Stop'),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(0, 48),
+                                backgroundColor: DeadDropColors.error,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    notifier.resetTransfer();
-                    Navigator.of(context).popUntil((r) => r.isFirst);
-                  },
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('New transfer'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 48),
+                      // The same 12 as the gap inside the row above and
+                      // as the page's bottom margin, so the block does
+                      // not read as lopsided.
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: () {
+                          notifier.resetTransfer();
+                          Navigator.of(context).popUntil((r) => r.isFirst);
+                        },
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('New transfer'),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                          foregroundColor: DeadDropColors.textSecondary,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -2331,6 +2353,13 @@ bool _hintDiffers(SendState state) {
 /// curve: this is a warning, not a prohibition, and the user can still
 /// choose whatever they like.
 const double kMinUsablePixelsPerModule = 4.0;
+
+/// How wide the transfer controls are allowed to get.
+///
+/// Two buttons splitting a 24-inch monitor between them come out far
+/// wider than they are tall and stop reading as buttons. Past this the
+/// block stays put and centres instead.
+const double kTransferControlsMaxWidth = 460;
 
 /// How many data codes play between one showing of the session header
 /// and the next.
