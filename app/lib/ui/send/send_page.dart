@@ -1741,192 +1741,208 @@ class _SendingScreen extends StatelessWidget {
       // furniture around the code ate the window.
       body: SafeArea(
         child: Padding(
-          // Was 24 on every side. The horizontal margin is kept because
-          // a code touching the bezel is awkward to aim at. The top is
-          // trimmed because that space goes to the code; the bottom
-          // keeps a real margin, since the button row sat against the
-          // edge of the window with 8.
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
-          child: Column(
-            children: [
-              // Everything that is not the code, above it, on one line:
-              // the file's name and size. Two Text widgets stacked cost
-              // two line heights to say what one says.
-              Row(
+          // Everything lines up with the code.
+          //
+          // The column used to be the width of the window, so on a
+          // 24-inch monitor the file name sat in one far corner, its
+          // size in the other, and the controls floated under a code
+          // they had no relationship to. The code is what this screen
+          // is for; it sets the measure, and the rest is a caption to
+          // it.
+          //
+          // The width comes from what _QrDisplay reported last frame.
+          // Before the first frame there is nothing to align to, so the
+          // block is unconstrained for one frame and then settles.
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: state.qrDisplaySizePx > 0
+                    ? state.qrDisplaySizePx
+                    : double.infinity,
+              ),
+              child: Column(
                 children: [
+                  // The file, on one line: name left, size right.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          state.fileName ?? 'file',
+                          style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        formatFileSize(state.fileBytes?.length ?? 0),
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: DeadDropColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // The code takes everything left over.
                   Expanded(
-                    child: Text(
-                      state.fileName ?? 'file',
-                      style: Theme.of(context).textTheme.titleSmall,
-                      overflow: TextOverflow.ellipsis,
+                    child: Center(
+                      child: _QrDisplay(state: state, notifier: notifier),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    formatFileSize(state.fileBytes?.length ?? 0),
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: DeadDropColors.textSecondary),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
+                  const SizedBox(height: 12),
 
-              // The code takes everything left over.
-              Expanded(
-                child: Center(
-                  child: _QrDisplay(state: state, notifier: notifier),
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // Progress and settings on one line.
-              //
-              // The counter read "Frame 599/195", which looks broken:
-              // the denominator was the chunk count, but the emitter
-              // loops for as long as it takes, so the numerator passes
-              // it routinely and says nothing is wrong. A fountain code
-              // has no total -- only a floor.
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Flexible(
-                    child: Text(
-                      state.showingBootstrap
-                          ? 'Session bootstrap — point the receiver '
-                                'camera here'
-                          : state.totalFrames != null
-                          ? 'Code ${state.framesEmitted} · '
-                                '${state.totalFrames} needed at least'
-                          : 'Code ${state.framesEmitted}',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  // Progress and settings, on one line.
+                  //
+                  // The counter read "Frame 599/195", which looks
+                  // broken: the denominator was the chunk count, but
+                  // the emitter loops for as long as it takes, so the
+                  // numerator passes it routinely and says nothing is
+                  // wrong. A fountain code has no total -- only a
+                  // floor.
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          state.showingBootstrap
+                              ? 'Session bootstrap — point the receiver '
+                                    'camera here'
+                              : state.totalFrames != null
+                              ? 'Code ${state.framesEmitted} · '
+                                    '${state.totalFrames} needed at least'
+                              : 'Code ${state.framesEmitted}',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        // The rate measured, when the screen cannot
+                        // keep up with the rate requested. A Linux
+                        // laptop asked for ten managed about four, and
+                        // said "10 fps" -- the number agreed with the
+                        // slider and disagreed with the screen in front
+                        // of the user.
+                        '${_emissionRateLabel(state)} · '
+                        '${state.chunkSize} B · EC-${state.ecLevel}',
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: DeadDropColors.textSecondary),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    // The rate measured, when the screen cannot keep up
-                    // with the rate requested. A Linux laptop asked for
-                    // ten managed about four, and said "10 fps" --
-                    // the number agreed with the slider and disagreed
-                    // with the screen in front of the user.
-                    '${_emissionRateLabel(state)} · '
-                    '${state.chunkSize} B · EC-${state.ecLevel}',
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: DeadDropColors.textSecondary),
-                  ),
-                ],
-              ),
 
-              // Advice about the code's size on screen, in the column
-              // rather than inside the QR widget. It used to sit in
-              // _QrDisplay, which lives in an Expanded sized for the
-              // code alone, so the text overflowed across the frame
-              // counter and the settings line below it.
-              if (advice != null) ...[
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      advice.isProblem
-                          ? Icons.warning_amber_rounded
-                          : Icons.open_in_full,
-                      size: 16,
-                      color: advice.isProblem
-                          ? DeadDropColors.error
-                          : DeadDropColors.textSecondary,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        advice.text,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  // Advice about the code's size on screen, in the
+                  // column rather than inside the QR widget: that
+                  // widget is given a box sized for the code, so
+                  // anything stacked under it overflows that box.
+                  if (advice != null) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          advice.isProblem
+                              ? Icons.warning_amber_rounded
+                              : Icons.open_in_full,
+                          size: 18,
                           color: advice.isProblem
                               ? DeadDropColors.error
                               : DeadDropColors.textSecondary,
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            advice.text,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: advice.isProblem
+                                      ? DeadDropColors.error
+                                      : DeadDropColors.textSecondary,
+                                ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
-              ],
-              const SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
-              // Stacked, and capped rather than stretched.
-              //
-              // They were tried side by side to win height for the
-              // code, and on a 24-inch monitor three buttons sharing a
-              // row came out far wider than they were tall -- a band of
-              // slabs rather than controls. Splitting the full width
-              // between two of them has the same problem at that size,
-              // so the block stops growing at kTransferControlsMaxWidth
-              // and sits centred.
-              //
-              // Three weights, because these are not three equal
-              // actions. Stop is the one being reached for, so it is
-              // filled. Restart is the considered second choice --
-              // finding workable fps and chunk-size values is trial and
-              // error, and without it the only way to apply a new value
-              // was to close the app and re-pair with the receiver.
-              // New transfer abandons the file and the key that Stop
-              // deliberately keeps, so it is the quietest of the three:
-              // giving it Restart's outline made two very different
-              // actions look like a pair.
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: kTransferControlsMaxWidth,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                  // Restart and Stop share the measure; New transfer
+                  // takes all of it.
+                  //
+                  // Rank is carried by weight, not by size: Stop is
+                  // filled because it is the one being reached for,
+                  // Restart is outlined, and New transfer is a quiet
+                  // text button because it abandons the file and the
+                  // key that Stop deliberately keeps. Giving it
+                  // Restart's outline made two very different actions
+                  // look like a pair; giving it a narrower box would
+                  // make it look like a third of the same thing.
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: notifier.restartEmitting,
-                              icon: const Icon(Icons.refresh, size: 18),
-                              label: const Text('Restart'),
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(0, 48),
-                              ),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: notifier.restartEmitting,
+                          icon: const Icon(Icons.refresh, size: 20),
+                          label: const Text('Restart'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 56),
+                            textStyle: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: notifier.stopEmitting,
-                              icon: const Icon(Icons.stop, size: 18),
-                              label: const Text('Stop'),
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size(0, 48),
-                                backgroundColor: DeadDropColors.error,
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                      // The same 12 as the gap inside the row above and
-                      // as the page's bottom margin, so the block does
-                      // not read as lopsided.
-                      const SizedBox(height: 12),
-                      TextButton.icon(
-                        onPressed: () {
-                          notifier.resetTransfer();
-                          Navigator.of(context).popUntil((r) => r.isFirst);
-                        },
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('New transfer'),
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(0, 44),
-                          foregroundColor: DeadDropColors.textSecondary,
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: notifier.stopEmitting,
+                          icon: const Icon(Icons.stop, size: 20),
+                          label: const Text('Stop'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 56),
+                            backgroundColor: DeadDropColors.error,
+                            textStyle: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        notifier.resetTransfer();
+                        Navigator.of(context).popUntil((r) => r.isFirst);
+                      },
+                      icon: const Icon(Icons.add, size: 20),
+                      label: const Text('New transfer'),
+                      // Its own outline and its own colour. Sharing
+                      // Restart's made two very different actions read
+                      // as a pair -- one retunes and keeps the file and
+                      // the key, the other throws both away. The accent
+                      // separates them where shape alone did not.
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 56),
+                        foregroundColor: DeadDropColors.accent,
+                        side: const BorderSide(
+                          color: DeadDropColors.accent,
+                          width: 1.5,
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
