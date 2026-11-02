@@ -1099,4 +1099,4 @@ These will be in `/tests/vectors/` and must pass on all platforms.
 
 **End of specification.**
 
-*This document is version 1.0. Changes require CTO approval and a version bump. Last updated: 2026-10-17.*
+*This document is version 1.0. The code is the final reference; this document is the map, and it is versioned with the project, so `git log docs/technical-spec.md` is its history.*
