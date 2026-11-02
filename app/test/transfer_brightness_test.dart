@@ -80,14 +80,36 @@ void main() {
     expect(levelOf(calls.single), 1.0);
   });
 
-  test('a repeat while held does not re-apply', () async {
-    // keepScreenAwake is called on every start; re-sending would fight a
-    // level the user changed mid-transfer.
-    await keepScreenAwake(brightness: 0.5);
-    await keepScreenAwake(brightness: 0.9);
+  test('a second request applies its level, even while held', () async {
+    // Reported from a Redmi Note 14: a transfer configured at 60% emitted
+    // at full brightness. The receive screen takes the wakelock when it
+    // opens, with no level, so by the time the send screen asked for 60%
+    // the lock was already held -- and the whole call, level included,
+    // was dropped on the floor.
+    //
+    // Holding the screen awake and setting its brightness are two
+    // different things travelling on one call. The lock is idempotent;
+    // the level is not.
+    await keepScreenAwake();
+    calls.clear();
 
-    expect(calls.length, 1);
-    expect(levelOf(calls.single), closeTo(0.5, 0.0001));
+    await keepScreenAwake(brightness: 0.6);
+
+    expect(calls, hasLength(1),
+        reason: 'the level has to reach the window even though the '
+            'wakelock is already held');
+    expect(levelOf(calls.single), closeTo(0.6, 0.0001));
+  });
+
+  test('the same level twice does not re-send', () async {
+    // The counterpart: every start calls this, and re-sending an
+    // unchanged level would be chatter on the channel for nothing.
+    await keepScreenAwake(brightness: 0.5);
+    calls.clear();
+
+    await keepScreenAwake(brightness: 0.5);
+
+    expect(calls, isEmpty);
   });
 
   test('releasing then re-acquiring applies the new level', () async {

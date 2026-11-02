@@ -44,6 +44,10 @@ bool get _supported =>
 /// asserted in tests.
 bool _held = false;
 
+/// The level last sent to the platform, so an unchanged repeat is not
+/// re-sent while a genuinely new one still gets through.
+double? _level;
+
 /// Whether this process is currently asking the platform to keep the screen
 /// on. Exposed for tests and for the UI to reason about its own state.
 bool get isScreenAwakeHeld => _held;
@@ -72,10 +76,14 @@ const double kDefaultTransferBrightness = 1.0;
 /// Asks the platform to keep the screen on for the duration of a transfer,
 /// at [brightness] (0 dimmest, 1 full).
 ///
-/// Safe to call when already held — a repeat is ignored rather than
-/// re-applied, so changing the level means releasing first. Failures are
-/// swallowed: a screen that dims is an annoyance, and must never be the
-/// reason the app falls over.
+/// Safe to call when already held: the wakelock is idempotent, but the
+/// level is not, so a call carrying a *different* level is passed on
+/// even while the lock is held. Dropping the whole call was a bug --
+/// the receive screen takes the lock with no level when it opens, so a
+/// transfer the user had configured at 60% emitted at full brightness
+/// on a device that had been receiving. Failures are swallowed: a
+/// screen that dims is an annoyance, and must never be the reason the
+/// app falls over.
 ///
 /// [brightness] exists because full is not right against every camera. A
 /// transfer from a phone to a Logitech StreamCam failed with the screen at
@@ -85,12 +93,13 @@ const double kDefaultTransferBrightness = 1.0;
 Future<void> keepScreenAwake({
   double brightness = kDefaultTransferBrightness,
 }) async {
-  if (!_supported || _held) return;
+  if (!_supported) return;
+  final level = brightness.clamp(0.0, 1.0);
+  if (_held && _level != null && (_level! - level).abs() < 0.001) return;
   try {
-    await _channel.invokeMethod<void>('keepAwake', {
-      'level': brightness.clamp(0.0, 1.0),
-    });
+    await _channel.invokeMethod<void>('keepAwake', {'level': level});
     _held = true;
+    _level = level;
   } on PlatformException {
     // Deliberately ignored — see the doc comment.
   } on MissingPluginException {
@@ -114,6 +123,7 @@ Future<void> allowScreenSleep() async {
     // As above.
   } finally {
     _held = false;
+    _level = null;
   }
 }
 
@@ -121,5 +131,6 @@ Future<void> allowScreenSleep() async {
 @visibleForTesting
 void debugResetScreenWake() {
   _held = false;
+  _level = null;
   debugSupportedOverride = null;
 }
