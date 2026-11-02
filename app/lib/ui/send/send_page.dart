@@ -44,6 +44,7 @@ class SendState {
     this.showingBootstrap = false,
     this.sendError,
     this.appliedHint,
+    this.measuredFps,
     this.qrDisplaySizePx = 0,
     this.qrDisplaySizeMeasured = false,
     this.brightness = kDefaultTransferBrightness,
@@ -71,6 +72,11 @@ class SendState {
   /// The notifier needs it to negotiate settings a receiver asked for
   /// against what this screen can actually draw, and only the layout
   /// knows it. Zero only before the send screen has laid out at all.
+  /// Codes per second the screen is really managing, or null before
+  /// there is enough to measure. The configured [fps] is a request; this
+  /// is what happened.
+  final double? measuredFps;
+
   final double qrDisplaySizePx;
 
   /// How bright this screen runs while emitting, 0 dimmest to 1 full.
@@ -149,6 +155,7 @@ class SendState {
     bool? showingBootstrap,
     String? sendError,
     HandshakeHint? appliedHint,
+    double? measuredFps,
     double? qrDisplaySizePx,
     bool? qrDisplaySizeMeasured,
     double? brightness,
@@ -174,6 +181,7 @@ class SendState {
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
       sendError: clearSendError ? null : (sendError ?? this.sendError),
       appliedHint: clearHint ? null : (appliedHint ?? this.appliedHint),
+      measuredFps: measuredFps ?? this.measuredFps,
       qrDisplaySizePx: qrDisplaySizePx ?? this.qrDisplaySizePx,
       qrDisplaySizeMeasured:
           qrDisplaySizeMeasured ?? this.qrDisplaySizeMeasured,
@@ -191,6 +199,11 @@ class SendNotifier extends StateNotifier<SendState> {
 
   /// Data codes shown since the session header was last displayed.
   int _sinceBootstrap = 0;
+
+  /// What the screen is really managing, as opposed to what was asked
+  /// for. Drawing a QR is not free, and a slow compositor cannot do it
+  /// ten times a second however short the timer's interval is.
+  final EmissionRate _rate = EmissionRate();
 
   Future<void> pickFile() async {
     // file_picker 13 made these static and returns the files directly;
@@ -377,21 +390,16 @@ class SendNotifier extends StateNotifier<SendState> {
 
   /// Sets how bright this screen runs while emitting.
   ///
-  /// Applied immediately when a transfer is already running, because the
-  /// whole point is to find the level the other camera can read: making
-  /// the user stop and restart to try one would turn a slider into a
-  /// guessing game. Releasing first is required because [keepScreenAwake]
-  /// ignores a repeat call while held.
+  /// Takes effect when the transfer starts. It used to re-apply itself
+  /// mid-transfer too, on the theory that someone would hunt for the
+  /// level the other camera can read without stopping -- but the
+  /// sending view replaces the whole screen, controls included, so that
+  /// path could never be reached. A phone's own brightness control is
+  /// there for an adjustment mid-transfer, and it is better at it.
   void setBrightness(double value) {
     final level = value.clamp(0.0, 1.0);
     if ((state.brightness - level).abs() < 0.001) return;
     state = state.copyWith(brightness: level);
-    if (state.isEmitting) {
-      unawaited(() async {
-        await allowScreenSleep();
-        await keepScreenAwake(brightness: level);
-      }());
-    }
   }
 
   void setChunkSize(int size) {
@@ -482,6 +490,7 @@ class SendNotifier extends StateNotifier<SendState> {
     // how bright it is changes how the receiving camera exposes.
     unawaited(keepScreenAwake(brightness: state.brightness));
     _sinceBootstrap = 0;
+    _rate.reset();
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
     _timer = Timer(const Duration(seconds: 4), _startDataPhase);
@@ -540,6 +549,7 @@ class SendNotifier extends StateNotifier<SendState> {
 
   void _startDataTimer() {
     _stopTimer();
+    _rate.reset();
     final interval = Duration(milliseconds: (1000 / state.fps).round());
     _timer = Timer.periodic(interval, (_) => _emitNextFrame());
   }
@@ -571,19 +581,23 @@ class SendNotifier extends StateNotifier<SendState> {
     _sinceBootstrap++;
     if (_sinceBootstrap >= kBootstrapRepeatEvery) {
       _sinceBootstrap = 0;
+      _rate.recordFrame();
       state = state.copyWith(
         framesEmitted: state.framesEmitted + 1,
         showingBootstrap: true,
         currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
+        measuredFps: _rate.measuredFps,
       );
       return;
     }
 
+    _rate.recordFrame();
     final frame = emitter.nextFrame();
     state = state.copyWith(
       framesEmitted: state.framesEmitted + 1,
       showingBootstrap: false,
       currentQrData: encodeQrPayload(frame.pack()),
+      measuredFps: _rate.measuredFps,
     );
   }
 
@@ -1790,8 +1804,13 @@ class _SendingScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '${state.fps.round()} fps · ${state.chunkSize} B · '
-                    'EC-${state.ecLevel}',
+                    // The rate measured, when the screen cannot keep up
+                    // with the rate requested. A Linux laptop asked for
+                    // ten managed about four, and said "10 fps" --
+                    // the number agreed with the slider and disagreed
+                    // with the screen in front of the user.
+                    '${_emissionRateLabel(state)} · '
+                    '${state.chunkSize} B · EC-${state.ecLevel}',
                     style: Theme.of(context).textTheme.bodySmall
                         ?.copyWith(color: DeadDropColors.textSecondary),
                   ),
@@ -2353,6 +2372,76 @@ bool _hintDiffers(SendState state) {
 /// curve: this is a warning, not a prohibition, and the user can still
 /// choose whatever they like.
 const double kMinUsablePixelsPerModule = 4.0;
+
+/// How the sending screen names its frame rate.
+///
+/// Just the setting while the screen is keeping up, and both figures
+/// when it is not: a transfer running at four codes a second while the
+/// slider says ten is a fact the user needs, and the first instinct
+/// otherwise is to blame the receiver.
+///
+/// The threshold is generous. A timer never fires exactly on its
+/// interval, and reporting "10 → 9.6" every time would be noise.
+String _emissionRateLabel(SendState state) {
+  final asked = state.fps;
+  final got = state.measuredFps;
+  if (got == null || got >= asked * 0.85) {
+    return '${asked.round()} fps';
+  }
+  return '${got.toStringAsFixed(1)} of ${asked.round()} fps';
+}
+
+/// Measures how fast codes actually reach the screen.
+///
+/// The sending screen printed the configured frame rate, which is a
+/// request, not a fact. On a Linux laptop the codes changed about four
+/// times a second with the setting at ten -- drawing a QR means
+/// recomputing its matrix and rasterising it, and a slow compositor
+/// cannot do that ten times a second. Nothing on screen said so, because
+/// the number came from the slider.
+///
+/// A median of the gaps between frames, for the same reason the
+/// receiver's decode cost is a median: one garbage-collection pause or
+/// one dragged window would pull a mean away from the rate the transfer
+/// is really running at.
+class EmissionRate {
+  final List<int> _gapMicros = [];
+  DateTime? _last;
+
+  /// Enough gaps that a figure means something. Below this the screen
+  /// says nothing rather than something it cannot support.
+  static const int _minSamples = 5;
+  static const int _window = 30;
+
+  /// Records that a code reached the screen.
+  void recordFrame({DateTime? at}) {
+    final now = at ?? DateTime.now();
+    final previous = _last;
+    _last = now;
+    if (previous == null) return;
+    _gapMicros.add(now.difference(previous).inMicroseconds);
+    if (_gapMicros.length > _window) _gapMicros.removeAt(0);
+  }
+
+  /// Codes per second as measured, or null before there is enough.
+  double? get measuredFps {
+    if (_gapMicros.length < _minSamples) return null;
+    final sorted = [..._gapMicros]..sort();
+    final mid = sorted.length ~/ 2;
+    final micros = sorted.length.isOdd
+        ? sorted[mid].toDouble()
+        : (sorted[mid - 1] + sorted[mid]) / 2;
+    if (micros <= 0) return null;
+    return 1000000 / micros;
+  }
+
+  /// Forgets everything. Called when the timer restarts, so a new frame
+  /// rate is not averaged with the old one.
+  void reset() {
+    _gapMicros.clear();
+    _last = null;
+  }
+}
 
 /// How wide the transfer controls are allowed to get.
 ///
