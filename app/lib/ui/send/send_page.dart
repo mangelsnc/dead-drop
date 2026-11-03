@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../../src/qrframe.dart';
 import '../../src/crypto.dart';
 import '../../src/screen_wake.dart';
 import '../../src/emission_profile.dart';
+import '../../src/qr_raster.dart';
 import '../../src/emitter.dart';
 import '../../src/file_metadata.dart';
 import '../../src/handshake.dart';
@@ -2530,7 +2532,7 @@ const double kQrMaxDisplaySize = 720;
 /// Dumb QR renderer: displays exactly what the notifier produced. All frame
 /// generation logic lives in [SendNotifier], so there is a single source of
 /// truth for the emitted sequence.
-class _QrDisplay extends StatelessWidget {
+class _QrDisplay extends StatefulWidget {
   const _QrDisplay({required this.state, required this.notifier});
 
   final SendState state;
@@ -2540,7 +2542,68 @@ class _QrDisplay extends StatelessWidget {
   final SendNotifier notifier;
 
   @override
+  State<_QrDisplay> createState() => _QrDisplayState();
+}
+
+class _QrDisplayState extends State<_QrDisplay> {
+  /// Renders each code to an image instead of drawing its 7,921 modules
+  /// one rectangle at a time. See `qr_raster.dart` for the measurements.
+  QrRasteriser? _rasteriser;
+  int? _rasteriserEcLevel;
+
+  /// The image currently on screen, and the one being prepared.
+  ///
+  /// The old image stays up while the next rasterises, so a frame is
+  /// never blank: at the rates this runs at, a flash of nothing is worse
+  /// for the receiver than one repeated code, which the fountain absorbs.
+  RasterisedQr? _shown;
+  String? _rendering;
+  int _renderSize = 0;
+
+  @override
+  void dispose() {
+    _shown?.dispose();
+    super.dispose();
+  }
+
+  /// Starts rasterising [payload] unless it is already shown or in flight.
+  void _ensureRendered(String payload, int sizePx) {
+    if (sizePx <= 0) return;
+    if (_shown?.payload == payload && _shown?.sizePx == sizePx) return;
+    if (_rendering == payload && _renderSize == sizePx) return;
+
+    final ecLevel = _ecLevelToQr(widget.state.ecLevel);
+    if (_rasteriser == null || _rasteriserEcLevel != ecLevel) {
+      // A new error-correction level changes which version fits, so the
+      // pinned one would be wrong.
+      _rasteriser = QrRasteriser(errorCorrectionLevel: ecLevel);
+      _rasteriserEcLevel = ecLevel;
+    }
+
+    _rendering = payload;
+    _renderSize = sizePx;
+    unawaited(_rasteriser!.rasterise(payload, sizePx).then((image) {
+      if (!mounted) {
+        image?.dispose();
+        return;
+      }
+      // A later frame may have overtaken this one while it rendered.
+      if (_rendering != payload || _renderSize != sizePx) {
+        image?.dispose();
+        return;
+      }
+      if (image == null) return;
+      setState(() {
+        _shown?.dispose();
+        _shown = image;
+      });
+    }));
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final state = widget.state;
+    final notifier = widget.notifier;
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = qrDisplaySize(constraints.maxWidth, constraints.maxHeight);
@@ -2577,15 +2640,38 @@ class _QrDisplay extends StatelessWidget {
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: QrImageView(
-            data: state.currentQrData!,
-            version: QrVersions.auto,
-            errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-            size: size,
-            backgroundColor: Colors.white,
-          ),
+          child: _buildCode(context, state.currentQrData!, size),
         );
       },
+    );
+  }
+
+  /// The code itself: an image rendered ahead of time, not 7,921
+  /// rectangles drawn into this frame.
+  ///
+  /// Rasterised at the device's physical resolution, so the modules land
+  /// on pixel boundaries. Scaling a logical-size image up on a 2x screen
+  /// would blur exactly the edges a decoder needs.
+  Widget _buildCode(BuildContext context, String payload, double size) {
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    final sizePx = (size * ratio).round();
+
+    // Scheduled rather than called inline: rasterising is async and
+    // setState during build is not allowed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ensureRendered(payload, sizePx);
+    });
+
+    final shown = _shown;
+    if (shown == null) {
+      // Before the first image exists. A white square is what the panel
+      // behind the code already is, so nothing flashes.
+      return SizedBox(width: size, height: size);
+    }
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(painter: _QrImagePainter(shown.image)),
     );
   }
 
@@ -2598,6 +2684,37 @@ class _QrDisplay extends StatelessWidget {
       _ => QrErrorCorrectLevel.M,
     };
   }
+}
+
+/// Draws a pre-rasterised QR, scaled to the box it is given.
+///
+/// This is the whole point of `qr_raster.dart`: one `drawImageRect`
+/// against the 7,921 `drawRect` calls `QrPainter` issues for a version 18
+/// code. Measured at 0.196 ms against 14.4 ms in the dev container.
+///
+/// `FilterQuality.none` on purpose. The image is rendered at the device's
+/// physical pixel size, so it is drawn 1:1 and no filtering is needed —
+/// and if rounding ever leaves it off by a pixel, a hard edge is what a
+/// decoder can still read. Smoothing would blur the module boundaries
+/// that carry the data.
+class _QrImagePainter extends CustomPainter {
+  const _QrImagePainter(this.image);
+
+  final ui.Image image;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..filterQuality = FilterQuality.none,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_QrImagePainter oldDelegate) =>
+      !identical(oldDelegate.image, image);
 }
 
 // ---------------------------------------------------------------------------
