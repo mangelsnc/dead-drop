@@ -17,7 +17,8 @@ SHELL := /bin/bash
 # drift apart.
 FLUTTER_VERSION := $(shell sed -n 's/.*"flutter"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .fvmrc)
 
-IMAGE        := deaddrop-dev:$(FLUTTER_VERSION)
+IMAGE_REPO   := deaddrop-dev
+IMAGE        := $(IMAGE_REPO):$(FLUTTER_VERSION)
 DOCKERFILE   := docker/Dockerfile
 APP_DIR      := app
 PLATFORM     := linux/amd64
@@ -107,6 +108,7 @@ $(STAMP): $(DOCKERFILE)
 	@echo "⟳ Dev image out of date — rebuilding (first run takes ~10-15 min)…"
 	docker build --platform $(PLATFORM) -f $(DOCKERFILE) -t $(IMAGE) \
 		--label $(DOCKER_LABEL) \
+		--build-arg FLUTTER_VERSION=$(FLUTTER_VERSION) \
 		--build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) .
 	@touch $@
 	@echo "✔ Image $(IMAGE) up to date"
@@ -215,20 +217,30 @@ _check-host-flutter:
 	fi
 
 docker-status: ## Show what this project is using in Docker, and what is reclaimable
-	@echo "Images (label $(DOCKER_LABEL)):"
-	@docker images --filter "label=$(DOCKER_LABEL)" \
+	@echo "Images ($(IMAGE_REPO), label $(DOCKER_LABEL)):"
+	@docker images "$(IMAGE_REPO)" --filter "label=$(DOCKER_LABEL)" \
 		--format "  {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}" || true
 	@echo ""
 	@echo "Volumes (label $(DOCKER_LABEL)) — caches, keep unless you want a slow rebuild:"
 	@docker volume ls --filter "label=$(DOCKER_LABEL)" --format "  {{.Name}}" || true
 	@echo ""
 	@echo "Stale images (this project, not the current $(IMAGE)):"
-	@docker images --filter "label=$(DOCKER_LABEL)" --format "{{.Repository}}:{{.Tag}} {{.Size}}" \
+	@docker images "$(IMAGE_REPO)" --filter "label=$(DOCKER_LABEL)" \
+		--format "{{.Repository}}:{{.Tag}} {{.Size}}" \
 		| grep -v "^$(IMAGE) " | sed 's/^/  /' || echo "  none"
+	@echo ""
+	@other=$$(docker images --filter "label=$(DOCKER_LABEL)" --format "{{.Repository}}:{{.Tag}}" \
+		| grep -v "^$(IMAGE_REPO):" | sort -u); \
+	if [ -n "$$other" ]; then \
+		echo "Carrying this project's label but NOT this project's image name:"; \
+		echo "$$other" | sed 's/^/  /'; \
+		echo "  (another project copied docker/Dockerfile; docker-clean leaves these alone)"; \
+	fi
 
 docker-clean: ## Remove this project's stale Docker images (keeps caches and the current image)
-	@echo "Removing images labelled $(DOCKER_LABEL) other than $(IMAGE)…"
-	@ids=$$(docker images --filter "label=$(DOCKER_LABEL)" --format "{{.ID}} {{.Repository}}:{{.Tag}}" \
+	@echo "Removing $(IMAGE_REPO) images other than $(IMAGE)…"
+	@ids=$$(docker images "$(IMAGE_REPO)" --filter "label=$(DOCKER_LABEL)" \
+		--format "{{.ID}} {{.Repository}}:{{.Tag}}" \
 		| grep -v " $(IMAGE)$$" | awk '{print $$1}' | sort -u); \
 	if [ -z "$$ids" ]; then echo "  nothing to remove"; else \
 		docker rmi $$ids || true; fi
