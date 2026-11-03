@@ -19,8 +19,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
+import '../../src/secure_storage.dart';
 import '../theme.dart';
 import '../technical_text.dart';
 import '../senders/known_senders_page.dart';
@@ -30,10 +29,7 @@ import '../vault/vault_controller.dart';
 import '../vault/delete_vault_dialog.dart';
 import '../vault/vault_setup_page.dart';
 
-const _secureStorage = FlutterSecureStorage(
-  lOptions: LinuxOptions(),
-  mOptions: MacOsOptions(),
-);
+const _secureStorage = kSecureStorage;
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});

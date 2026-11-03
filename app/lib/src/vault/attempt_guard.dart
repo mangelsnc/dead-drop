@@ -41,6 +41,8 @@ library;
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../secure_storage.dart';
+
 /// Consecutive failures after which self-destruct fires, when the user has
 /// enabled it. Follows technical-spec.md §4.8.
 const int kSelfDestructThreshold = 10;
@@ -76,10 +78,7 @@ const String kAttemptCounterStorageKey = 'deaddrop_unlock_failures';
 /// and the enforcement drift apart.
 const String kSelfDestructStorageKey = 'deaddrop_self_destruct_enabled';
 
-const FlutterSecureStorage _defaultStorage = FlutterSecureStorage(
-  lOptions: LinuxOptions(),
-  mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-);
+const FlutterSecureStorage _defaultStorage = kSecureStorage;
 
 /// Tracks consecutive failed unlock attempts and, if the user opted in,
 /// triggers self-destruct once [kSelfDestructThreshold] is reached.
