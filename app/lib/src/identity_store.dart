@@ -69,12 +69,17 @@ class IdentityStore {
   /// Subsequent calls return the cached instance.
   ///
   /// On first run this touches the keychain three times: the read below,
-  /// then the write and its read-back in [_persist]. On macOS the owner saw
-  /// two permission dialogs for that sequence, so the prompts are neither
-  /// one per call nor one for the lot; the legacy keychain prompts per item
-  /// ACL, and what exactly collapses three calls into two prompts has not
-  /// been established. Keeping every call on one service ([kSecureStorage])
-  /// is what keeps it from being worse.
+  /// then the write and its read-back in [_persist]. That cost nothing in
+  /// prompts once the service was named: under the plugin's default service
+  /// macOS asked twice, and under [kKeychainService] — with the old items
+  /// deleted — it asks not at all. Three calls, zero dialogs, measured on
+  /// macOS on 2026-11-03.
+  ///
+  /// So the prompts were never about how many calls this makes. The best
+  /// available reading is that they were about ownership: a generic service
+  /// name holds an item any Flutter app on the machine may have created, and
+  /// a binary reaching into an item it does not own is what macOS asks about.
+  /// That is inference from one measurement, not an established mechanism.
   Future<Identity> loadOrGenerate() async {
     if (_cached != null) return _cached!;
 

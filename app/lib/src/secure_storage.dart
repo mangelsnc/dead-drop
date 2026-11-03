@@ -12,6 +12,14 @@
 /// use confidential information stored in flutter_secure_storage_service in
 /// your keychain". Someone who did not install a library by that name has no
 /// way to judge whether that is their app asking.
+///
+/// Naming the service turned out to matter more than the wording. Measured
+/// on macOS on 2026-11-03: under the default name the first run raised two
+/// permission dialogs, and under this one — with the old items deleted —
+/// it raises none. The default is the service every Flutter app using this
+/// plugin shares, so DeadDrop's identity sat in a drawer anything else on
+/// the machine could have opened, and macOS asked because the binary was
+/// reaching for an item it did not own.
 library;
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';

@@ -69,8 +69,15 @@ void main() {
   group('the dialog names this app, not the plugin', () {
     test('the service is not the plugin default', () {
       // The string this replaced. Pinned as a literal so that reverting to
-      // the default fails here rather than quietly going back to a prompt
-      // nobody can act on.
+      // the default fails here rather than quietly going back.
+      //
+      // Two things ride on this, and the second is why it is a security
+      // test and not a cosmetic one. The prompt named a library instead of
+      // the app, which nobody can act on. And the default is the service
+      // EVERY Flutter app using this plugin shares, so the device identity
+      // — the Ed25519 secret key correspondents verify this device by —
+      // was stored under a name any other such app on the machine also
+      // reaches for.
       expect(kKeychainService, isNot('flutter_secure_storage_service'));
     });
 
