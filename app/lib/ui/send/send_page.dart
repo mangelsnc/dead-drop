@@ -11,6 +11,7 @@ import '../../src/chunking.dart';
 import '../../src/qrframe.dart';
 import '../../src/crypto.dart';
 import '../../src/screen_wake.dart';
+import '../../src/emission_profile.dart';
 import '../../src/emitter.dart';
 import '../../src/file_metadata.dart';
 import '../../src/handshake.dart';
@@ -204,6 +205,13 @@ class SendNotifier extends StateNotifier<SendState> {
   /// for. Drawing a QR is not free, and a slow compositor cannot do it
   /// ten times a second however short the timer's interval is.
   final EmissionRate _rate = EmissionRate();
+
+  /// Where a frame's time goes, split into preparing and drawing.
+  ///
+  /// Only filled when the binary was built with
+  /// `DEADDROP_PROFILE_EMISSION`; see `emission_profile.dart` for what
+  /// [EmissionRate] alone cannot answer.
+  final EmissionProfile profile = EmissionProfile();
 
   Future<void> pickFile() async {
     // file_picker 13 made these static and returns the files directly;
@@ -550,6 +558,7 @@ class SendNotifier extends StateNotifier<SendState> {
   void _startDataTimer() {
     _stopTimer();
     _rate.reset();
+    profile.reset();
     final interval = Duration(milliseconds: (1000 / state.fps).round());
     _timer = Timer.periodic(interval, (_) => _emitNextFrame());
   }
@@ -582,23 +591,40 @@ class SendNotifier extends StateNotifier<SendState> {
     if (_sinceBootstrap >= kBootstrapRepeatEvery) {
       _sinceBootstrap = 0;
       _rate.recordFrame();
+      final stopwatch = profileEmission ? (Stopwatch()..start()) : null;
+      final payload = encodeQrPayload(emitter.bootstrapQrPayload());
+      _recordPrepared(stopwatch);
       state = state.copyWith(
         framesEmitted: state.framesEmitted + 1,
         showingBootstrap: true,
-        currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
+        currentQrData: payload,
         measuredFps: _rate.measuredFps,
       );
       return;
     }
 
     _rate.recordFrame();
+    final stopwatch = profileEmission ? (Stopwatch()..start()) : null;
     final frame = emitter.nextFrame();
+    final payload = encodeQrPayload(frame.pack());
+    _recordPrepared(stopwatch);
     state = state.copyWith(
       framesEmitted: state.framesEmitted + 1,
       showingBootstrap: false,
-      currentQrData: encodeQrPayload(frame.pack()),
+      currentQrData: payload,
       measuredFps: _rate.measuredFps,
     );
+  }
+
+  /// Closes the prepare timer and opens the draw one.
+  ///
+  /// The two are adjacent on purpose: between them is the handover of the
+  /// new code to the widget, so together they account for a whole frame
+  /// without a gap either could be hiding in.
+  void _recordPrepared(Stopwatch? stopwatch) {
+    if (!profileEmission || stopwatch == null) return;
+    profile.recordPrepare(stopwatch.elapsed);
+    profile.markDrawStart();
   }
 
   /// Emits [count] frames without waiting for the timer. Tests only.
@@ -1831,6 +1857,24 @@ class _SendingScreen extends StatelessWidget {
                     ],
                   ),
 
+                  // Where a frame's time goes. Absent from any build
+                  // without DEADDROP_PROFILE_EMISSION, which makes
+                  // profileEmission a compile-time false and takes this
+                  // and the recording with it.
+                  //
+                  // In this column rather than under the QR for the
+                  // reason the size advice is: the QR's widget is given
+                  // a box sized for the code, and anything stacked
+                  // inside it overflows.
+                  if (profileEmission) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      notifier.profile.summary ?? 'profiling: no frames yet',
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: DeadDropColors.accent),
+                    ),
+                  ],
+
                   // Advice about the code's size on screen, in the
                   // column rather than inside the QR widget: that
                   // widget is given a box sized for the code, so
@@ -2512,6 +2556,11 @@ class _QrDisplay extends StatelessWidget {
         // beats guessing at something the layout already knows.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           notifier.reportQrDisplaySize(size);
+          // The first moment the code is actually on screen. Building
+          // this widget does not draw it -- QrImageView's matrix and
+          // rasterisation land in Flutter's pipeline after build()
+          // returns -- so this is the only place the cost can be closed.
+          if (profileEmission) notifier.profile.markDrawEnd();
         });
         // Nothing but the code goes in here. This widget is given a box
         // sized for the QR, so anything stacked under it overflows that
