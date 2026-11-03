@@ -24,6 +24,23 @@ void main() {
       expect(profileEmission, isFalse);
     });
 
+    test('the no-QR diagnostic is off too', () {
+      // It makes the app unable to transfer, so shipping it enabled
+      // would be worse than shipping the overlay.
+      expect(profileWithoutQr, isFalse);
+    });
+
+    test('the no-QR flag is a compile-time constant', () {
+      final source =
+          File('lib/src/emission_profile.dart').readAsStringSync();
+      expect(source, contains('const bool profileWithoutQr ='),
+          reason: 'a `final` here would ship a build that cannot transfer');
+      expect(
+        source,
+        contains("bool.fromEnvironment('DEADDROP_PROFILE_WITHOUT_QR')"),
+      );
+    });
+
     test('the flag is a compile-time constant', () {
       // `const` is what lets the tree shaker remove the overlay and the
       // recording from a release build. A `final` would compile and run

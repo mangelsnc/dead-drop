@@ -721,7 +721,7 @@ checksums for every artifact and users can verify them locally.
 | **Frame loss tolerance** | >= 30% | **50%** (completes even with half the frames lost) |
 | **Fountain overhead** | <= 1.5x | **1.31x** (21 frames for 16 chunks) |
 
-**Bottleneck:** camera frame rate and QR decode speed. The spike assumes 12 fps; real hardware may be slower (10 fps) or faster (15 fps). The protocol is adaptive — the receiver just scans until it has enough frames.
+**Bottleneck:** the slowest of three, not just the receiver's two. A frame has to be *drawn* as well as captured and decoded, and on a modest laptop drawing has been the binding constraint: a sending screen that manages a fifth of its configured rate caps the transfer there, however fast the camera reads. The configured rate is a request — the sending screen reports what it actually achieves beneath the code, and that is the figure a measurement should use. The protocol is adaptive either way: the receiver just scans until it has enough frames.
 
 ### 6.3 Timeouts
 

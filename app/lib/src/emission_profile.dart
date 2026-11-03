@@ -47,6 +47,33 @@ library;
 const bool profileEmission =
     bool.fromEnvironment('DEADDROP_PROFILE_EMISSION');
 
+/// Replaces the QR with a blank square of the same size, to find out how
+/// much of a frame the code is actually responsible for.
+///
+/// The first attempt at this problem guessed, and guessed wrong. The
+/// sending screen's frame costs about 130 ms on an M3; `QrPainter` issues
+/// one `drawRect` per module and a 512-byte chunk is 89×89, so 7,921
+/// rectangles looked like the answer. Rendering each code to an image
+/// instead — 73× cheaper in a bench — moved the frame from 132.5 ms to
+/// 120.0 ms. Nothing.
+///
+/// Two facts say the modules are not the cost. That change, and this:
+/// 256-byte codes cost the same as 512-byte ones (122.8 against 120.0 ms)
+/// although they carry far fewer modules. What does not change between
+/// them is the area in pixels the code is drawn over, because the QR
+/// fills whatever the layout gives it.
+///
+/// [profileEmission] measures the whole frame, not the QR — it was
+/// written that way and says so. Nothing has yet separated the two. With
+/// this flag the screen draws everything except the code, so the
+/// difference between the two runs is the code's share, measured rather
+/// than reasoned about.
+///
+/// A transfer cannot be received in this mode. It exists to be run for
+/// twenty seconds against a profiling build, never shipped.
+const bool profileWithoutQr =
+    bool.fromEnvironment('DEADDROP_PROFILE_WITHOUT_QR');
+
 /// Microsecond timings for one phase of frame emission, summarised as a
 /// median so a single stall cannot move the figure.
 ///
