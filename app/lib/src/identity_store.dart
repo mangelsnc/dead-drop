@@ -12,10 +12,10 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sodium/sodium.dart';
 
 import 'crypto.dart';
+import 'secure_storage.dart';
 
 /// The identity could not be stored, so it would not survive a restart.
 ///
@@ -40,18 +40,7 @@ class IdentityNotPersistedException implements Exception {
 /// Loads, stores, and provides the device's persistent Ed25519 identity.
 class IdentityStore {
   static const _unscopedStorageKey = 'deaddrop_identity_ed25519';
-  static const _storage = FlutterSecureStorage(
-    // On Linux, use libsecret (available on all desktop distros).
-    lOptions: LinuxOptions(),
-    // On macOS, use the system Keychain.
-    //
-    // usesDataProtectionKeychain is off because it requires entitlements
-    // that only a build signed with a real Apple Developer identity can
-    // carry. DeadDrop ships an ad-hoc-signed .app, so with the default
-    // (true) every keychain call fails and the device identity never
-    // loads — which is exactly how it failed on macOS 0.5.4.
-    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-  );
+  static const _storage = kSecureStorage;
 
   final Sodium _sodium;
   final String _storageKey;
@@ -78,6 +67,14 @@ class IdentityStore {
   /// first run.
   ///
   /// Subsequent calls return the cached instance.
+  ///
+  /// On first run this touches the keychain three times: the read below,
+  /// then the write and its read-back in [_persist]. On macOS the owner saw
+  /// two permission dialogs for that sequence, so the prompts are neither
+  /// one per call nor one for the lot; the legacy keychain prompts per item
+  /// ACL, and what exactly collapses three calls into two prompts has not
+  /// been established. Keeping every call on one service ([kSecureStorage])
+  /// is what keeps it from being worse.
   Future<Identity> loadOrGenerate() async {
     if (_cached != null) return _cached!;
 

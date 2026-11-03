@@ -24,15 +24,12 @@ library;
 
 import 'dart:convert';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'secure_storage.dart';
 
 /// Tracks which sender fingerprints this device has seen before.
 class TofuStore {
   static const _unscopedStorageKey = 'deaddrop_tofu_known_senders';
-  static const _storage = FlutterSecureStorage(
-    lOptions: LinuxOptions(),
-    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-  );
+  static const _storage = kSecureStorage;
 
   final String _storageKey;
 
