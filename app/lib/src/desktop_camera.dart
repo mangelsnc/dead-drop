@@ -210,10 +210,45 @@ class DesktopCameraScanner {
     );
   }
 
-  /// Fires whenever [framesSeen] or [framesDecoded] changes, so a widget
-  /// can rebuild without polling.
+  /// Fires while the camera is reading, so a widget can rebuild without
+  /// polling.
+  ///
+  /// Rate-limited to [_activityPeriod], which is the whole point of it.
+  /// It used to fire once per frame, and the only listener rebuilds the
+  /// receive screen — a rebuild that costs 132 ms on an M3 and 542 ms on
+  /// a Slimbook running Kali, measured on 2026-11-03. Thirty of those a
+  /// second is four seconds of work per second of clock, and what starves
+  /// is everything else on the isolate, including the `initializeCamera`
+  /// await inside [start]. The camera then fails with an initialisation
+  /// timeout, which is what macOS reported the moment a transfer began.
+  ///
+  /// Nothing downstream needs every frame: the listener reads counters
+  /// and a decode rate, both of which are summaries. Two or three
+  /// refreshes a second keep the status line alive to a person's eye.
   final _activity = StreamController<void>.broadcast();
   Stream<void> get activity => _activity.stream;
+
+  /// The shortest gap between two activity events.
+  ///
+  /// 250 ms leaves a 542 ms rebuild — the worst measured — well inside
+  /// its budget while still reading as live.
+  static const Duration _activityPeriod = Duration(milliseconds: 250);
+
+  DateTime? _lastActivityAt;
+
+  /// Emits on [activity] unless one was emitted within [_activityPeriod].
+  ///
+  /// Every emitter goes through here. A raw `_activity.add` anywhere else
+  /// reintroduces the stall this exists to prevent, and
+  /// `desktop_scanner_view_rebuild_test.dart` fails if one appears.
+  void _signalActivity({DateTime? at}) {
+    if (_activity.isClosed) return;
+    final now = at ?? DateTime.now();
+    final last = _lastActivityAt;
+    if (last != null && now.difference(last) < _activityPeriod) return;
+    _lastActivityAt = now;
+    _activity.add(null);
+  }
 
   /// Whether a frame is being decoded right now.
   ///
@@ -338,7 +373,7 @@ class DesktopCameraScanner {
             // the image is turned for display.
             _previewWidth = event.previewWidth.round();
             _previewHeight = event.previewHeight.round();
-            if (!_activity.isClosed) _activity.add(null);
+            _signalActivity();
           }
         });
       } catch (_) {
@@ -425,7 +460,7 @@ class DesktopCameraScanner {
     if (_payloads.isClosed) return;
     _decoding = true;
     _framesSeen++;
-    if (!_activity.isClosed) _activity.add(null);
+    _signalActivity();
     final startedAt = Stopwatch()..start();
     try {
       // Decoded here, not on a spawned isolate.
@@ -445,7 +480,7 @@ class DesktopCameraScanner {
       if (_recent.length > _windowSize) _recent.removeAt(0);
       if (payload != null && !_payloads.isClosed) {
         _framesDecoded++;
-        _activity.add(null);
+        _signalActivity();
         // Consecutive reads of the same code are dropped.
         //
         // The camera runs far faster than the sender's display — 30 fps
