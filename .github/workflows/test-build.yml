@@ -35,6 +35,11 @@ on:
         required: false
         default: false
         type: boolean
+      profile_without_qr:
+        description: 'Diagnostic: draw everything EXCEPT the QR, to measure its share. Cannot transfer.'
+        required: false
+        default: false
+        type: boolean
 
 env:
   # Must match .fvmrc, as in build.yml.
@@ -116,6 +121,7 @@ jobs:
         shell: bash
         env:
           PROFILE_EMISSION: ${{ inputs.profile_emission }}
+          PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -134,6 +140,9 @@ jobs:
           # reach a shell as code, whatever its declared type.
           if [ "$PROFILE_EMISSION" = "true" ]; then
             args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
+          if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
@@ -234,6 +243,7 @@ jobs:
         shell: bash
         env:
           PROFILE_EMISSION: ${{ inputs.profile_emission }}
+          PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -252,6 +262,9 @@ jobs:
           # reach a shell as code, whatever its declared type.
           if [ "$PROFILE_EMISSION" = "true" ]; then
             args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
+          if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
@@ -333,6 +346,7 @@ jobs:
         shell: bash
         env:
           PROFILE_EMISSION: ${{ inputs.profile_emission }}
+          PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -351,6 +365,9 @@ jobs:
           # reach a shell as code, whatever its declared type.
           if [ "$PROFILE_EMISSION" = "true" ]; then
             args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
+          if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
 

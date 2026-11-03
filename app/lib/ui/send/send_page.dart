@@ -1869,7 +1869,8 @@ class _SendingScreen extends StatelessWidget {
                   if (profileEmission) ...[
                     const SizedBox(height: 6),
                     Text(
-                      notifier.profile.summary ?? 'profiling: no frames yet',
+                      '${profileWithoutQr ? 'NO QR · ' : ''}'
+                      '${notifier.profile.summary ?? 'no frames yet'}',
                       style: Theme.of(context).textTheme.bodySmall
                           ?.copyWith(color: DeadDropColors.accent),
                     ),
@@ -2577,13 +2578,20 @@ class _QrDisplay extends StatelessWidget {
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: QrImageView(
-            data: state.currentQrData!,
-            version: QrVersions.auto,
-            errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-            size: size,
-            backgroundColor: Colors.white,
-          ),
+          // With DEADDROP_PROFILE_WITHOUT_QR the code is replaced by a
+          // blank square of the same size, so the profiler's `draw`
+          // figure can be compared against a run that drew it. See
+          // emission_profile.dart: the first attempt at the frame cost
+          // blamed this widget without ever measuring its share.
+          child: profileWithoutQr
+              ? SizedBox(width: size, height: size)
+              : QrImageView(
+                  data: state.currentQrData!,
+                  version: QrVersions.auto,
+                  errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
+                  size: size,
+                  backgroundColor: Colors.white,
+                ),
         );
       },
     );
