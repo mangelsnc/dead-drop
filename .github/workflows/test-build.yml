@@ -30,6 +30,11 @@ on:
         default: all
         type: choice
         options: [all, android, macos, linux]
+      profile_emission:
+        description: 'Show where a sent frame spends its time (diagnostic overlay)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   # Must match .fvmrc, as in build.yml.
@@ -109,6 +114,8 @@ jobs:
         id: version
         working-directory: app
         shell: bash
+        env:
+          PROFILE_EMISSION: ${{ inputs.profile_emission }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -122,6 +129,12 @@ jobs:
           [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
           commit=$(git rev-parse --short HEAD 2>/dev/null || true)
           [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          # Opt-in diagnostic overlay. Read from the environment rather
+          # than interpolated into this script: a workflow input must not
+          # reach a shell as code, whatever its declared type.
+          if [ "$PROFILE_EMISSION" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
 
@@ -219,6 +232,8 @@ jobs:
         id: version
         working-directory: app
         shell: bash
+        env:
+          PROFILE_EMISSION: ${{ inputs.profile_emission }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -232,6 +247,12 @@ jobs:
           [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
           commit=$(git rev-parse --short HEAD 2>/dev/null || true)
           [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          # Opt-in diagnostic overlay. Read from the environment rather
+          # than interpolated into this script: a workflow input must not
+          # reach a shell as code, whatever its declared type.
+          if [ "$PROFILE_EMISSION" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
 
@@ -310,6 +331,8 @@ jobs:
         id: version
         working-directory: app
         shell: bash
+        env:
+          PROFILE_EMISSION: ${{ inputs.profile_emission }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -323,6 +346,12 @@ jobs:
           [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
           commit=$(git rev-parse --short HEAD 2>/dev/null || true)
           [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          # Opt-in diagnostic overlay. Read from the environment rather
+          # than interpolated into this script: a workflow input must not
+          # reach a shell as code, whatever its declared type.
+          if [ "$PROFILE_EMISSION" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
 
       - name: Build release
