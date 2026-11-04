@@ -198,6 +198,46 @@ int? qrModuleCount(int chunkSize, String ec) {
 /// hand one level's answer to another.
 final Map<String, int?> _moduleCountCache = {};
 
+/// How many modules across the code for [payload] at [ec] is.
+///
+/// [qrModuleCount] answers for the chunk size a transfer is configured
+/// with, which is what the negotiation needs. This answers for a string
+/// actually about to be drawn, which is not always the same code: the
+/// bootstrap frame carries the session header rather than a chunk, so it
+/// is far shorter and makes a sparser code. Sizing that frame's quiet
+/// zone from the chunk size describes a code that is not on the screen,
+/// and the bootstrap is the one frame a receiver cannot start without.
+///
+/// Cached on the payload's length and [ec], not the payload itself: the
+/// module count depends only on how much data there is, every frame of a
+/// transfer is the same length, and keying on the text would grow a new
+/// entry for every frame.
+int? qrModuleCountForPayload(String payload, String ec) {
+  final key = '${payload.length}c/$ec';
+  if (_moduleCountCache.containsKey(key)) return _moduleCountCache[key];
+  final count = _computeModuleCountForChars(payload.length, ec);
+  _moduleCountCache[key] = count;
+  return count;
+}
+
+int? _computeModuleCountForChars(int chars, String ec) {
+  const levels = {
+    'L': QrErrorCorrectLevel.L,
+    'M': QrErrorCorrectLevel.M,
+    'Q': QrErrorCorrectLevel.Q,
+    'H': QrErrorCorrectLevel.H,
+  };
+  final level = levels[ec];
+  if (level == null) return null;
+  try {
+    return QrImage(
+      QrCode.fromData(data: 'A' * chars, errorCorrectLevel: level),
+    ).moduleCount;
+  } catch (_) {
+    return null;
+  }
+}
+
 int? _computeModuleCount(int chunkSize, String ec) {
   const levels = {
     'L': QrErrorCorrectLevel.L,
