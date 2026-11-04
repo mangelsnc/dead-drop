@@ -125,11 +125,22 @@ class DesktopCameraScanner {
         ? 'decode: measuring…'
         : 'decode ${median.toStringAsFixed(1)} ms median'
               '${load == null ? '' : ' · ${(load * 100).round()}% of the frame'}';
+    // The pixel format, and how many frames the converter could not
+    // read. Without these, a frame whose format is unsupported is
+    // indistinguishable from a frame that simply held no code: both
+    // leave `read` at zero while `decoded` climbs, which is what macOS
+    // reported on 2026-11-04 — 1705 decoded, 0 read, with the decoder
+    // using 23% of its budget.
+    final format = _lastFormat == null ? '' : ' · $_lastFormat';
+    final unreadable = _framesUnreadable == 0
+        ? ''
+        : ' · unreadable $_framesUnreadable';
     return 'sensor ${w}x$h · rot ${_sensorOrientation ?? '?'}°'
-        ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}\n'
+        ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}'
+        '$format\n'
         'cam ${fps == null ? '?' : fps.toStringAsFixed(1)} fps'
         ' · got $_framesDelivered · decoded $_framesSeen'
-        ' · read $_framesDecoded\n'
+        ' · read $_framesDecoded$unreadable\n'
         '$decode';
   }
 
@@ -142,6 +153,15 @@ class DesktopCameraScanner {
   /// that prompted it.
   int _framesSeen = 0;
   int _framesDecoded = 0;
+
+  /// Frames whose pixel format [frameToArgb] does not understand.
+  ///
+  /// Separate from "no code in this frame", which is the normal case.
+  /// This one means the image was never looked at.
+  int _framesUnreadable = 0;
+
+  /// The pixel format the camera is actually delivering, as its own name.
+  String? _lastFormat;
   int get framesSeen => _framesSeen;
   int get framesDecoded => _framesDecoded;
 
@@ -475,6 +495,8 @@ class DesktopCameraScanner {
       // The decode itself is 5.3 ms median on this project's own frames.
       // That fits inside a frame interval at any usable rate, so the
       // preview does not stutter for it.
+      _lastFormat ??= frame.format.group.toString().split('.').last;
+      if (frameToArgb(frame) == null) _framesUnreadable++;
       final payload = decodeFrame(frame);
       _recent.add(payload != null);
       if (_recent.length > _windowSize) _recent.removeAt(0);
