@@ -172,7 +172,33 @@ int encodedFrameChars(int chunkSize) {
 /// table lists every fifth version and so rounds down to one that is
 /// too small. Predicting from it was wrong by up to 16 modules, which
 /// is the difference between warning a user and not.
+///
+/// Cached, because asking the encoder means building a whole code — a
+/// version search and a Reed-Solomon matrix — and the sending screen asks
+/// eleven times per frame. `qrSizeAdvice` calls [pixelsPerModuleOnScreen]
+/// once and `chunkUnlockedByABiggerWindow` twice, and each of those loops
+/// over every chunk size. Measured on an M3 on 2026-11-04: 125.7 ms per
+/// frame on the UI thread against 2.3 ms rasterising, while the one code
+/// actually shown costs about 17 ms. The throwaway codes were the frame.
+///
+/// Safe to cache: the answer is a pure function of [chunkSize] and [ec],
+/// both drawn from small fixed sets, and a QR's geometry does not change
+/// between runs. Nulls are cached too — a combination no version can hold
+/// costs a full failed search to discover.
 int? qrModuleCount(int chunkSize, String ec) {
+  final key = '$chunkSize/$ec';
+  if (_moduleCountCache.containsKey(key)) return _moduleCountCache[key];
+  final count = _computeModuleCount(chunkSize, ec);
+  _moduleCountCache[key] = count;
+  return count;
+}
+
+/// Keyed on both arguments: the same chunk needs a denser code at a
+/// stronger error-correction level, so caching on the size alone would
+/// hand one level's answer to another.
+final Map<String, int?> _moduleCountCache = {};
+
+int? _computeModuleCount(int chunkSize, String ec) {
   const levels = {
     'L': QrErrorCorrectLevel.L,
     'M': QrErrorCorrectLevel.M,
