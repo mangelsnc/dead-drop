@@ -6,8 +6,11 @@
 /// pick one or the other without knowing how either works.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../src/camera_permission.dart';
 import '../src/capability_hint.dart';
 import '../src/desktop_camera.dart';
 import 'theme.dart';
@@ -24,6 +27,7 @@ class DesktopScannerView extends StatefulWidget {
     required this.onDetect,
     this.onMeasured,
     this.scanner,
+    this.platformOverride,
   });
 
   /// Called for each payload read. May fire many times for the same code:
@@ -42,6 +46,10 @@ class DesktopScannerView extends StatefulWidget {
   /// Injectable for tests; production creates its own.
   final DesktopCameraScanner? scanner;
 
+  /// Which platform's settings advice to show. Tests set it; production
+  /// leaves it null and the real operating system answers.
+  final String? platformOverride;
+
   @override
   State<DesktopScannerView> createState() => _DesktopScannerViewState();
 }
@@ -50,6 +58,32 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
   late final DesktopCameraScanner _scanner;
   String? _error;
   bool _ready = false;
+
+  /// Set when the failure was the user declining the camera, which needs
+  /// different words and a way out — see camera_permission.dart.
+  bool _permissionDenied = false;
+
+  /// Named so a test can drive this without a real desktop.
+  String get _platform => widget.platformOverride ?? Platform.operatingSystem;
+
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _error = message;
+      _permissionDenied = isPermissionDenied(message);
+    });
+  }
+
+  Future<void> _openCameraSettings() async {
+    final command = cameraSettingsCommand(_platform);
+    if (command == null) return;
+    try {
+      await Process.run(command.executable, command.arguments);
+    } on ProcessException {
+      // Nothing useful to say: the hint already names the panel, so a
+      // person who cannot be taken there can still walk there.
+    }
+  }
 
   @override
   void initState() {
@@ -63,9 +97,7 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       await _scanner.start();
       _scanner.payloads.listen(
         widget.onDetect,
-        onError: (Object e) {
-          if (mounted) setState(() => _error = e.toString());
-        },
+        onError: (Object e) => _fail(e.toString()),
       );
       // Frame counts and the aspect ratio both arrive after start().
       _scanner.activity.listen((_) {
@@ -75,9 +107,9 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       });
       if (mounted) setState(() => _ready = true);
     } on DesktopCameraException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      _fail(e.message);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not start the camera: $e');
+      _fail('Could not start the camera: $e');
     }
   }
 
@@ -102,23 +134,48 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
+      // A declined camera is not a broken one. It gets the heading that
+      // names what happened, the panel it is fixed in, and — where the
+      // platform has one page to open — a button that goes there. macOS
+      // never asks a second time, so "try again" would be a lie.
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.videocam_off,
-                  color: DeadDropColors.error, size: 48),
+              Icon(
+                _permissionDenied ? Icons.no_photography : Icons.videocam_off,
+                color: DeadDropColors.error,
+                size: 48,
+              ),
               const SizedBox(height: 12),
               Text(
-                _error!,
+                _permissionDenied
+                    ? 'DeadDrop cannot use the camera'
+                    : _error!,
                 textAlign: TextAlign.center,
                 style: Theme.of(context)
                     .textTheme
                     .bodyMedium
                     ?.copyWith(color: DeadDropColors.error),
               ),
+              if (_permissionDenied) ...[
+                const SizedBox(height: 12),
+                Text(
+                  cameraSettingsHint(_platform),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (canOpenCameraSettings(_platform)) ...[
+                  const SizedBox(height: 16),
+                  FilledButton.tonalIcon(
+                    onPressed: _openCameraSettings,
+                    icon: const Icon(Icons.settings),
+                    label: const Text('Open camera settings'),
+                  ),
+                ],
+              ],
             ],
           ),
         ),
