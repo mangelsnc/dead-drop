@@ -71,7 +71,7 @@ void main() {
       for (var i = 0; i < lines.length; i++) {
         final line = lines[i];
         if (line.trimLeft().startsWith('//')) continue;
-        if (!RegExp(r'\bprofile\.(recordPrepare|markDraw|summary)')
+        if (!RegExp(r'\bprofile\.(recordPrepare|markDraw|recordEngineFrame|summary)')
             .hasMatch(line)) {
           continue;
         }
@@ -168,7 +168,7 @@ void main() {
       profile.markDrawStart(at: start);
       profile.markDrawEnd(at: start.add(const Duration(milliseconds: 420)));
 
-      expect(profile.draw.medianMillis, 420.0);
+      expect(profile.frameGap.medianMillis, 420.0);
     });
 
     test('a frame callback with no draw outstanding records nothing', () {
@@ -183,8 +183,8 @@ void main() {
       // A second frame with no new code behind it.
       profile.markDrawEnd(at: start.add(const Duration(milliseconds: 900)));
 
-      expect(profile.draw.count, 1);
-      expect(profile.draw.medianMillis, 400.0);
+      expect(profile.frameGap.count, 1);
+      expect(profile.frameGap.medianMillis, 400.0);
     });
 
     test('keeps prepare and draw apart', () {
@@ -198,7 +198,7 @@ void main() {
       profile.markDrawEnd(at: start.add(const Duration(milliseconds: 450)));
 
       expect(profile.prepare.medianMillis, 3.0);
-      expect(profile.draw.medianMillis, 450.0);
+      expect(profile.frameGap.medianMillis, 450.0);
     });
 
     test('summary names both halves and their sample counts', () {
@@ -210,12 +210,69 @@ void main() {
 
       final summary = profile.summary!;
       expect(summary, contains('prepare 3.0 ms'));
-      expect(summary, contains('draw 450.0 ms'));
+      expect(summary, contains('gap 450.0 ms'));
       expect(summary, contains('n=1'));
     });
 
     test('summary is null before anything has been measured', () {
       expect(EmissionProfile().summary, isNull);
+    });
+
+    test('records the engine figures as separate phases', () {
+      // The whole reason this instrumentation was rewritten: build and
+      // raster come from the engine, across two threads, and the one that
+      // is large says whether the cost is this app or the machine.
+      final profile = EmissionProfile();
+
+      profile.recordEngineFrame(
+        buildDuration: const Duration(milliseconds: 12),
+        rasterDuration: const Duration(milliseconds: 480),
+      );
+
+      expect(profile.build.medianMillis, 12.0);
+      expect(profile.raster.medianMillis, 480.0);
+    });
+
+    test('summary leads with build and raster', () {
+      // They are what the next measurement is for. `gap` is kept because
+      // the frame period is worth seeing beside them, but it is the figure
+      // that misled this investigation for a day and does not lead.
+      final profile = EmissionProfile();
+      profile.recordEngineFrame(
+        buildDuration: const Duration(milliseconds: 12),
+        rasterDuration: const Duration(milliseconds: 480),
+      );
+
+      final summary = profile.summary!;
+      expect(summary, contains('build 12.0 ms'));
+      expect(summary, contains('raster 480.0 ms'));
+      expect(summary.indexOf('build'), lessThan(summary.indexOf('gap')));
+    });
+
+    test('a summary exists from engine frames alone', () {
+      // The engine reports frames whether or not a code was published, so
+      // the overlay must not stay blank waiting for a gap sample.
+      final profile = EmissionProfile();
+      profile.recordEngineFrame(
+        buildDuration: const Duration(milliseconds: 9),
+        rasterDuration: const Duration(milliseconds: 4),
+      );
+
+      expect(profile.summary, isNotNull);
+    });
+
+    test('reset forgets the engine figures too', () {
+      final profile = EmissionProfile();
+      profile.recordEngineFrame(
+        buildDuration: const Duration(milliseconds: 9),
+        rasterDuration: const Duration(milliseconds: 4),
+      );
+
+      profile.reset();
+
+      expect(profile.build.count, 0);
+      expect(profile.raster.count, 0);
+      expect(profile.summary, isNull);
     });
 
     test('reset forgets the samples and any outstanding draw', () {
@@ -231,7 +288,7 @@ void main() {
       profile.markDrawEnd(at: start.add(const Duration(seconds: 5)));
 
       expect(profile.summary, isNull);
-      expect(profile.draw.count, 0);
+      expect(profile.frameGap.count, 0);
       expect(profile.prepare.count, 0);
     });
   });
