@@ -111,6 +111,26 @@ class ReceiveState {
 
   bool get sessionActive => receiver != null;
 
+  /// How long the finished transfer took, or null while one is running.
+  ///
+  /// Kept on the state rather than computed where it is shown, because
+  /// the live readout lives inside the progress block and that block is
+  /// gone by the time this matters: finishing clears the receiver,
+  /// [sessionActive] goes false, and the figure disappeared at the
+  /// moment it stopped changing and became worth reading.
+  ///
+  /// Null rather than zero for an unfinished transfer: a running one has
+  /// no final figure, and 0:00 is a lie shaped like a measurement. Null
+  /// too if the clock stepped backwards — an NTP correction mid-transfer
+  /// would otherwise report a negative duration.
+  Duration? get transferDuration {
+    final started = startedAt;
+    final finished = completedAt;
+    if (started == null || finished == null) return null;
+    final elapsed = finished.difference(started);
+    return elapsed.isNegative ? null : elapsed;
+  }
+
   /// True while an unrecognised sender is waiting for the user's decision.
   bool get awaitingSenderApproval => pendingSender != null;
 
@@ -968,6 +988,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                             const SizedBox(height: 8),
                             Text(
                               '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB received'
+                              '${state.transferDuration != null ? ' in ${formatElapsed(state.transferDuration!)}' : ''}'
                               '${state.fileName != null ? ' · ${state.fileName}' : ''}',
                               style: Theme.of(context).textTheme.bodyMedium,
                             ),
