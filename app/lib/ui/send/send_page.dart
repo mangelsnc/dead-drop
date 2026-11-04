@@ -2245,6 +2245,34 @@ const double kSendingViewHorizontalPadding = 48;
 /// replaces this the moment the code is drawn.
 const double kSendingViewChromeHeight = 180;
 
+/// The quiet zone ISO/IEC 18004 requires, in modules, on every side.
+const int kQuietZoneModules = 4;
+
+/// The margin to leave around a code of [modules] modules drawn into a
+/// box [displaySize] pixels across, in logical pixels per side.
+///
+/// `qr_flutter`'s own default is a flat 10 pixels, which is the wrong
+/// shape of answer: the margin has to be measured in modules, not
+/// pixels, so a constant is too mean exactly where the code is largest.
+/// At 1280x800 the code is drawn at 578 px with about 5 px per module,
+/// and 10 px of margin is 1.6 modules — under half the standard, and
+/// the finder patterns' outer rings then merge into whatever the code
+/// is sitting on.
+///
+/// Both terms matter. The box has to hold the code *and* two margins,
+/// so the module pitch is `displaySize / (modules + 2 * quiet)` and the
+/// margin is [kQuietZoneModules] of those. Solving it the other way --
+/// pitch from `displaySize / modules`, then margin from that -- asks
+/// for a box bigger than the one it was given.
+double qrQuietZonePadding({
+  required double displaySize,
+  required int modules,
+}) {
+  if (displaySize <= 0 || modules <= 0) return 0;
+  final pitch = displaySize / (modules + 2 * kQuietZoneModules);
+  return pitch * kQuietZoneModules;
+}
+
 /// How many screen pixels each QR module gets, drawing [chunkSize] bytes
 /// at [ecLevel] into a code [displaySize] pixels across.
 ///
@@ -2253,6 +2281,20 @@ const double kSendingViewChromeHeight = 180;
 /// share. Below [kMinUsablePixelsPerModule] a transfer will not read at
 /// any distance, which is worth saying before someone spends three
 /// minutes at 0%.
+///
+/// [displaySize] is the whole box, quiet zone included, so this is not
+/// the pitch the modules are actually drawn at — they get the box less
+/// two margins, which is about 10% less on a phone. Dividing by the
+/// module count alone therefore overstates the density.
+///
+/// Left that way on purpose. [kMinUsablePixelsPerModule] was fitted to
+/// this denominator against measurements from a Redmi Note 14: 512 B
+/// read as 3.29 and transferred nothing, 256 B read as 4.26 and
+/// finished in a minute. The floor and the denominator are one
+/// calibration, so correcting the arithmetic here without re-measuring
+/// the floor makes the app refuse 256 B on the very phone that was
+/// watched transferring at it. Changing both belongs in one task, with
+/// hardware, not in a tidy-up.
 double pixelsPerModuleOnScreen({
   required double displaySize,
   required int chunkSize,
@@ -2589,6 +2631,22 @@ class _QrDisplay extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = qrDisplaySize(constraints.maxWidth, constraints.maxHeight);
+        // The box holds the code and a quiet zone on each side, so the
+        // code itself gets what is left. Both come from the same module
+        // pitch, which is why they are computed together.
+        // From the payload on screen, not the configured chunk size.
+        // The bootstrap frame carries the session header instead of a
+        // chunk, so it is shorter and its code sparser; sizing its
+        // margin from the chunk size measures a code that is not there,
+        // and the bootstrap is the one frame a receiver cannot start
+        // without.
+        final payload = state.currentQrData;
+        final modules = payload == null
+            ? 0
+            : qrModuleCountForPayload(payload, state.ecLevel) ?? 0;
+        final quietZone =
+            qrQuietZonePadding(displaySize: size, modules: modules);
+        final codeSize = size - 2 * quietZone;
         // Report the size the QR is actually given, from the one place
         // that knows it.
         //
@@ -2613,31 +2671,70 @@ class _QrDisplay extends StatelessWidget {
         // taller than its constraint on a 1280x800 window. The same
         // mistake was already fixed once for the size advice; the
         // bootstrap caption now lives in the parent column too.
-        return Container(
-          // No padding of its own: a QR carries its quiet zone inside
-          // the image, and the page already has a margin. The 16 here
-          // was taken off the code twice over, and on a phone every
-          // pixel of it matters.
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          // With DEADDROP_PROFILE_WITHOUT_QR the code is replaced by a
-          // blank square of the same size, so the profiler's `draw`
-          // figure can be compared against a run that drew it. See
-          // emission_profile.dart: the first attempt at the frame cost
-          // blamed this widget without ever measuring its share.
-          child: profileWithoutQr
-              ? SizedBox(width: size, height: size)
-              : QrImageView(
-                  data: state.currentQrData!,
-                  version: QrVersions.auto,
-                  errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-                  size: size,
-                  backgroundColor: Colors.white,
+        // The boundary is what qr_quiet_zone_test.dart reads the drawn
+        // pixels from. It is load-bearing for that test, not decoration.
+        return RepaintBoundary(
+          key: const ValueKey('qr-code-boundary'),
+          child: Container(
+            // This padding is the quiet zone. qr_flutter's own is a flat
+            // 10 px, which is not four modules at any useful size.
+            padding: EdgeInsets.all(quietZone),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            // With DEADDROP_PROFILE_WITHOUT_QR the code is replaced by a
+            // blank square of the same size, so the profiler's `draw`
+            // figure can be compared against a run that drew it. See
+            // emission_profile.dart: the first attempt at the frame cost
+            // blamed this widget without ever measuring its share.
+            child: profileWithoutQr
+                ? SizedBox(width: codeSize, height: codeSize)
+                : _scaledFromOnePixelPerModule(
+                    size: codeSize,
+                    modules: modules,
+                    child: QrImageView(
+                    data: state.currentQrData!,
+                    version: QrVersions.auto,
+                    errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
+                    size: modules > 0 ? modules.toDouble() : codeSize,
+                    backgroundColor: Colors.white,
+                    // Adjacent modules must touch. The package's default
+                    // leaves a quarter-pixel light gap between every
+                    // pair, which breaks up the solid runs a decoder
+                    // measures -- the 1:1:3:1:1 through each finder
+                    // above all -- and spends 18 px of a 73-module code
+                    // on gaps that help nobody.
+                    gapless: true,
+                    // The margin is the Container's, above.
+                    padding: EdgeInsets.zero,
+                  ),
                 ),
+          ),
         );
       },
+    );
+  }
+
+  /// Draws [child] at one pixel per module and scales it to [size].
+  ///
+  /// `QrPainter` rounds its module pitch to the nearest half pixel and
+  /// centres the result in its box. When it rounds up, the code is drawn
+  /// wider than the box and spills into the quiet zone: 4.48 -> 4.5 on a
+  /// Redmi Note 14 and 7.36 -> 7.5 on a 1280x800 laptop took the margin
+  /// from four modules to 3.8 and 3.4. Given a box exactly `modules`
+  /// wide, the pitch rounds to 1 and the code fills it exactly; the
+  /// scale then lands it on the pitch [qrQuietZonePadding] assumed.
+  /// qr_quiet_zone_test.dart measures the result.
+  Widget _scaledFromOnePixelPerModule({
+    required double size,
+    required int modules,
+    required Widget child,
+  }) {
+    if (modules <= 0) return child;
+    return SizedBox.square(
+      dimension: size,
+      child: FittedBox(child: child),
     );
   }
 
