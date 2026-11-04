@@ -40,6 +40,11 @@ on:
         required: false
         default: false
         type: boolean
+      dump_frames:
+        description: 'Diagnostic: SAVES CAMERA FRAMES TO DISK. Never for a release.'
+        required: false
+        default: false
+        type: boolean
 
 env:
   # Must match .fvmrc, as in build.yml.
@@ -122,6 +127,7 @@ jobs:
         env:
           PROFILE_EMISSION: ${{ inputs.profile_emission }}
           PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
+          DUMP_FRAMES: ${{ inputs.dump_frames }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -143,6 +149,9 @@ jobs:
           fi
           if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
             args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
+          fi
+          if [ "$DUMP_FRAMES" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_DUMP_FRAMES=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
@@ -244,6 +253,7 @@ jobs:
         env:
           PROFILE_EMISSION: ${{ inputs.profile_emission }}
           PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
+          DUMP_FRAMES: ${{ inputs.dump_frames }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -265,6 +275,9 @@ jobs:
           fi
           if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
             args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
+          fi
+          if [ "$DUMP_FRAMES" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_DUMP_FRAMES=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
@@ -347,6 +360,7 @@ jobs:
         env:
           PROFILE_EMISSION: ${{ inputs.profile_emission }}
           PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
+          DUMP_FRAMES: ${{ inputs.dump_frames }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -368,6 +382,9 @@ jobs:
           fi
           if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
             args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
+          fi
+          if [ "$DUMP_FRAMES" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_DUMP_FRAMES=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
 
