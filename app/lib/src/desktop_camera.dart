@@ -22,6 +22,7 @@ import 'package:flutter/widgets.dart';
 
 import 'capability_hint.dart';
 import 'desktop_scanner.dart';
+import 'frame_dump.dart';
 
 /// What went wrong, in words a person can act on.
 ///
@@ -131,6 +132,12 @@ class DesktopCameraScanner {
     // leave `read` at zero while `decoded` climbs, which is what macOS
     // reported on 2026-11-04 — 1705 decoded, 0 read, with the decoder
     // using 23% of its budget.
+    // Said out loud, because a build that writes camera images to disk
+    // must never do it silently — see frame_dump.dart.
+    final dump = _dumper == null
+        ? ''
+        : '\nDUMPING FRAMES → ${_dumper!.directory} '
+            '(${_dumper!.written}/$kMaxDumpedFrames)';
     final format = _lastFormat == null ? '' : ' · $_lastFormat';
     final unreadable = _framesUnreadable == 0
         ? ''
@@ -141,7 +148,7 @@ class DesktopCameraScanner {
         'cam ${fps == null ? '?' : fps.toStringAsFixed(1)} fps'
         ' · got $_framesDelivered · decoded $_framesSeen'
         ' · read $_framesDecoded$unreadable\n'
-        '$decode';
+        '$decode$dump';
   }
 
   int? _sensorOrientation;
@@ -162,6 +169,17 @@ class DesktopCameraScanner {
 
   /// The pixel format the camera is actually delivering, as its own name.
   String? _lastFormat;
+
+  /// Writes frames to disk, in a build that asked for it. Null otherwise,
+  /// and the field itself is dead code the tree shaker removes.
+  FrameDumper? _dumper;
+
+  /// Where frames are being written, for the on-screen notice. Null in
+  /// any ordinary build.
+  String? get dumpDirectory => _dumper?.directory;
+
+  /// How many frames have been written so far.
+  int get dumpedFrames => _dumper?.written ?? 0;
   int get framesSeen => _framesSeen;
   int get framesDecoded => _framesDecoded;
 
@@ -408,6 +426,14 @@ class DesktopCameraScanner {
       );
     }
 
+    if (dumpFrames) {
+      // Under the system temp directory, not the user's documents: these
+      // are diagnostic artefacts, and a diagnostic build should not leave
+      // camera images somewhere a person keeps their own files.
+      final directory = await Directory.systemTemp.createTemp('deaddrop-frames-');
+      _dumper = FrameDumper(directory.path);
+    }
+
     _frames = _platform.onStreamedFrameAvailable(_cameraId!).listen(
           _onFrame,
           onError: (Object e) => _payloads.addError(
@@ -496,7 +522,15 @@ class DesktopCameraScanner {
       // That fits inside a frame interval at any usable rate, so the
       // preview does not stutter for it.
       _lastFormat ??= frame.format.group.toString().split('.').last;
-      if (frameToArgb(frame) == null) _framesUnreadable++;
+      final pixels = frameToArgb(frame);
+      if (pixels == null) _framesUnreadable++;
+      if (dumpFrames && pixels != null) {
+        // Every tenth frame: enough to see a pattern across a few
+        // seconds without writing 30 files a second.
+        if (_framesSeen % 10 == 0) {
+          await _dumper?.write(pixels, frame.width, frame.height);
+        }
+      }
       final payload = decodeFrame(frame);
       _recent.add(payload != null);
       if (_recent.length > _windowSize) _recent.removeAt(0);
