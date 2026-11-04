@@ -25,19 +25,40 @@
 /// so it sees only that a tick was late, never what made it late. This
 /// measures the two separately.
 ///
-/// ## Why drawing is timed with a post-frame callback
+/// ## What `frameGap` is, and what it is not
 ///
-/// Building a widget does not draw it. `QrImageView`'s cost lands in
-/// Flutter's own pipeline after the build method returns, so a stopwatch
-/// around the build would report approximately zero and prove nothing. The
-/// draw timer therefore starts when the new code is handed to the widget and
-/// stops in the frame callback that follows, which is the first moment the
-/// pixels exist.
+/// It was called `draw` and was read as the cost of drawing. It is not.
+/// [markDrawEnd] is called from an `addPostFrameCallback`, which does not
+/// fire when a widget finishes painting: it fires when Flutter produces its
+/// next frame. So the interval is the frame period, governed by vsync and by
+/// whatever else holds the UI isolate.
 ///
-/// That interval also contains the rest of the frame — the whole page's
-/// layout and paint. On this screen the QR dominates it, but the figure is
-/// "the frame this QR was drawn in", not "the QR alone", and the overlay
-/// labels it accordingly.
+/// The arithmetic settles it. On 2026-11-04 the figure was 115.7 ms on an M3
+/// and 503 ms on a Slimbook; the same screens reported 8.6 and ~2 fps, which
+/// are their reciprocals. `frameGap` and `EmissionRate` are one quantity
+/// counted twice, from the two ends of the same interval.
+///
+/// That is why three experiments came back flat — rasterising the code,
+/// halving the chunk size, and removing the code from the tree altogether.
+/// Each changed what gets painted; none could change when the next frame
+/// arrives. It is kept under an honest name because the frame period is
+/// still worth seeing next to the engine's own figures.
+///
+/// ## Where the real split comes from
+///
+/// `SchedulerBinding.addTimingsCallback` hands over `buildDuration` and
+/// `rasterDuration` for every frame, measured by the engine across both of
+/// its threads. Those are the two figures this instrumentation could not
+/// produce for itself:
+///
+///  * **build** — the UI thread: widget builds, layout, and recording the
+///    paint commands. Our code.
+///  * **raster** — the raster thread: turning those commands into pixels and
+///    presenting them. The GPU, the driver and the compositor.
+///
+/// The distinction decides where the half second lives. A large `build`
+/// points at this app; a large `raster` points at the machine's presentation
+/// path, which no change to a widget can fix.
 library;
 
 /// Whether this binary records emission timings.
@@ -137,9 +158,17 @@ class EmissionProfile {
   /// the timer callback.
   final PhaseTimings prepare = PhaseTimings();
 
-  /// From handing a new code to the widget until the frame carrying it has
-  /// been drawn.
-  final PhaseTimings draw = PhaseTimings();
+  /// From handing a new code to the widget until Flutter produces its next
+  /// frame. The frame period, not the cost of drawing — see the library doc.
+  final PhaseTimings frameGap = PhaseTimings();
+
+  /// The engine's own UI-thread figure: widget builds, layout, and recording
+  /// the paint commands. Fed by `addTimingsCallback`, not by this class.
+  final PhaseTimings build = PhaseTimings();
+
+  /// The engine's own raster-thread figure: turning the recorded commands
+  /// into pixels and presenting them.
+  final PhaseTimings raster = PhaseTimings();
 
   DateTime? _drawStartedAt;
 
@@ -165,12 +194,27 @@ class EmissionProfile {
     final started = _drawStartedAt;
     if (started == null) return;
     _drawStartedAt = null;
-    draw.record((at ?? DateTime.now()).difference(started).inMicroseconds);
+    frameGap.record(
+        (at ?? DateTime.now()).difference(started).inMicroseconds);
+  }
+
+  /// Records one frame as the engine measured it.
+  ///
+  /// Called from a `SchedulerBinding` timings callback, which reports frames
+  /// in batches and includes frames this screen did not cause.
+  void recordEngineFrame({
+    required Duration buildDuration,
+    required Duration rasterDuration,
+  }) {
+    build.record(buildDuration.inMicroseconds);
+    raster.record(rasterDuration.inMicroseconds);
   }
 
   void reset() {
     prepare.reset();
-    draw.reset();
+    frameGap.reset();
+    build.reset();
+    raster.reset();
     _drawStartedAt = null;
   }
 
@@ -181,11 +225,15 @@ class EmissionProfile {
   /// frames have been through each.
   String? get summary {
     final p = prepare.medianMillis;
-    final d = draw.medianMillis;
-    if (p == null && d == null) return null;
-    return 'prepare ${_ms(p)} (max ${_ms(prepare.worstMillis)}, '
-        'n=${prepare.count})  ·  '
-        'draw ${_ms(d)} (max ${_ms(draw.worstMillis)}, n=${draw.count})';
+    final g = frameGap.medianMillis;
+    final b = build.medianMillis;
+    if (p == null && g == null && b == null) return null;
+    return 'build ${_ms(b)} (max ${_ms(build.worstMillis)}, '
+        'n=${build.count})  ·  '
+        'raster ${_ms(raster.medianMillis)} '
+        '(max ${_ms(raster.worstMillis)})  ·  '
+        'prepare ${_ms(p)}  ·  '
+        'gap ${_ms(g)} (n=${frameGap.count})';
   }
 
   static String _ms(double? value) =>

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -212,6 +213,36 @@ class SendNotifier extends StateNotifier<SendState> {
   /// `DEADDROP_PROFILE_EMISSION`; see `emission_profile.dart` for what
   /// [EmissionRate] alone cannot answer.
   final EmissionProfile profile = EmissionProfile();
+
+  /// Registered only in a profiling build, and removed in [dispose].
+  ///
+  /// The engine reports every frame the app produces, including ones this
+  /// screen did not cause. That is acceptable here because the sending view
+  /// is the only thing on screen while it runs, and a median over a window
+  /// absorbs the few frames around entering and leaving it.
+  TimingsCallback? _timingsCallback;
+
+  void _startEngineTimings() {
+    if (!profileEmission || _timingsCallback != null) return;
+    void onTimings(List<FrameTiming> timings) {
+      for (final timing in timings) {
+        profile.recordEngineFrame(
+          buildDuration: timing.buildDuration,
+          rasterDuration: timing.rasterDuration,
+        );
+      }
+    }
+
+    _timingsCallback = onTimings;
+    SchedulerBinding.instance.addTimingsCallback(onTimings);
+  }
+
+  void _stopEngineTimings() {
+    final callback = _timingsCallback;
+    if (callback == null) return;
+    SchedulerBinding.instance.removeTimingsCallback(callback);
+    _timingsCallback = null;
+  }
 
   Future<void> pickFile() async {
     // file_picker 13 made these static and returns the files directly;
@@ -557,6 +588,7 @@ class SendNotifier extends StateNotifier<SendState> {
 
   void _startDataTimer() {
     _stopTimer();
+    _startEngineTimings();
     _rate.reset();
     profile.reset();
     final interval = Duration(milliseconds: (1000 / state.fps).round());
@@ -600,6 +632,7 @@ class SendNotifier extends StateNotifier<SendState> {
         currentQrData: payload,
         measuredFps: _rate.measuredFps,
       );
+      _markPublished();
       return;
     }
 
@@ -614,6 +647,7 @@ class SendNotifier extends StateNotifier<SendState> {
       currentQrData: payload,
       measuredFps: _rate.measuredFps,
     );
+    _markPublished();
   }
 
   /// Closes the prepare timer and opens the draw one.
@@ -624,6 +658,15 @@ class SendNotifier extends StateNotifier<SendState> {
   void _recordPrepared(Stopwatch? stopwatch) {
     if (!profileEmission || stopwatch == null) return;
     profile.recordPrepare(stopwatch.elapsed);
+  }
+
+  /// Opens the frame-period timer, after the payload has been published.
+  ///
+  /// Separate from [_recordPrepared] because it has to run on the far side
+  /// of the `state = ...` assignment. It used to run before it, while the
+  /// doc comment claimed the handover sat between the two.
+  void _markPublished() {
+    if (!profileEmission) return;
     profile.markDrawStart();
   }
 
@@ -638,6 +681,7 @@ class SendNotifier extends StateNotifier<SendState> {
   @override
   void dispose() {
     _stopTimer();
+    _stopEngineTimings();
     // A wakelock outliving the notifier would keep the screen on for the
     // rest of the app's life, draining a device whose owner may have no way
     // to charge it.
