@@ -39,10 +39,21 @@ bool? debugSupportedOverride;
 bool get _supported =>
     debugSupportedOverride ?? (Platform.isAndroid || Platform.isIOS);
 
+/// How many callers currently want the screen awake.
+///
+/// Counted rather than flagged because both screens take the lock and
+/// one process holds the state. A phone used as receiver and then as
+/// sender runs the send screen's acquire before the receive screen's
+/// dispose — Flutter builds the incoming route before disposing the
+/// outgoing one — so a plain boolean let the departing screen release
+/// the lock the arriving one had just taken, and the sender emitted
+/// with the screen free to sleep.
+int _holders = 0;
+
 /// Whether the wakelock is currently believed to be held. Tracked so a
 /// double release cannot leave the screen pinned on, and so [isHeld] can be
 /// asserted in tests.
-bool _held = false;
+bool get _held => _holders > 0;
 
 /// The level last sent to the platform, so an unchanged repeat is not
 /// re-sent while a genuinely new one still gets through.
@@ -95,10 +106,15 @@ Future<void> keepScreenAwake({
 }) async {
   if (!_supported) return;
   final level = brightness.clamp(0.0, 1.0);
-  if (_held && _level != null && (_level! - level).abs() < 0.001) return;
+  final unchanged = _held && _level != null && (_level! - level).abs() < 0.001;
+  // Counted before the call, and kept whatever the platform answers.
+  // Every caller releases exactly once, including the ones whose request
+  // the platform refused, so a claim dropped on failure would let their
+  // release free a lock another screen is still holding.
+  _holders++;
+  if (unchanged) return;
   try {
     await _channel.invokeMethod<void>('keepAwake', {'level': level});
-    _held = true;
     _level = level;
   } on PlatformException {
     // Deliberately ignored — see the doc comment.
@@ -114,6 +130,11 @@ Future<void> keepScreenAwake({
 /// owner may have no way to charge it.
 Future<void> allowScreenSleep() async {
   if (!_supported || !_held) return;
+  // Another screen still wants it: give up this caller's claim only.
+  if (_holders > 1) {
+    _holders--;
+    return;
+  }
   try {
     await _channel.invokeMethod<void>('allowSleep');
   } on PlatformException {
@@ -122,7 +143,7 @@ Future<void> allowScreenSleep() async {
   } on MissingPluginException {
     // As above.
   } finally {
-    _held = false;
+    _holders = 0;
     _level = null;
   }
 }
@@ -130,7 +151,7 @@ Future<void> allowScreenSleep() async {
 /// Resets the tracked state. Tests only — the platform side is untouched.
 @visibleForTesting
 void debugResetScreenWake() {
-  _held = false;
+  _holders = 0;
   _level = null;
   debugSupportedOverride = null;
 }
