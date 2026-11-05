@@ -5,11 +5,66 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-11-05
+
+### Documentation
+
+- *(faq)* The keychain prompts are per item, not per signature
+
+### Fixed
+
+- *(receive)* Say what to do about a rejected session
+- *(send)* Recalibrate the density floor against hardware
+
+### Other
+
+- The zxing2 scanner, and the quiet zone that made it work
+
 ## [0.9.8] — 2026-10-31
+
+### Added
+
+- *(send)* Show the frame rate the screen manages, not the one asked for
+- *(scanner)* Give a declined camera a way back
+- *(receive)* Keep the time a transfer took after it finishes
+
+### Documentation
+
+- Correct what the documentation says the app does
+- Describe the product, not the development
+- *(macos)* Record what the keychain measurement actually showed
+- *(faq)* Explain the macOS keychain prompts
+
+### Fixed
+
+- *(send)* A transfer set to 60% brightness emitted at full
+- *(send)* Line the sending screen up with the code
+- *(docker)* Stop compose drifting and docker-clean deleting other projects
+- *(macos)* Name the app in the keychain prompt, not the plugin
+- *(scanner)* Stop the camera asking for 30 repaints a second
+- *(send)* Give the emitted code its quiet zone
+- *(receive)* Report where the user is looking
+- *(screen)* Count wakelock holders instead of flagging one
 
 ### Miscellaneous
 
 - Build Linux from a branch too (#81)
+- Let a test build carry the emission profiler
+- Let a test build save camera frames for diagnosis
+- Build Linux from a branch too (#81)
+
+### Other
+
+- *(send)* Time the two halves of a frame, behind a build flag
+- *(send)* Measure the QR's share of a frame instead of assuming it
+- *(send)* Measure the frame with the engine's own clock
+- *(scanner)* Say which pixel format the camera delivers
+- *(scanner)* Let a debug build save the frames it decodes
+
+### Performance
+
+- *(send)* Draw the QR as an image, not 7,921 rectangles
+- *(send)* Stop building eleven throwaway QR codes per frame
 
 ## [0.9.7] — 2026-10-30
 
@@ -43,9 +98,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.2] — 2026-10-28
 
+### Added
+
+- *(scanner)* Decode in Dart everywhere, so the APK stops asking for INTERNET
+- *(settings)* Show the app version in About
+- [**breaking**] Derive chunk ids from the seed instead of transmitting them
+- *(send)* Explain the transfer settings, and fix the EC selector on a phone
+- *(vault)* Recolour the icon, and let a forgotten passphrase delete
+- *(send)* Let the sender choose how bright the screen emits
+
+### Documentation
+
+- Record why frames vary in size, and what it would cost to fix
+- A device test plan for the Redmi Note 14 and macOS
+- Drop the device test plan
+
+### Fixed
+
+- Fewer codes to scan, an undistorted preview, and a transfer that survives
+- *(scanner)* The camera preview was rendering as a single pixel
+- *(scanner)* The preview was stretched because the sensor is sideways
+- *(scanner)* Let the preview keep its own shape instead of imposing one
+- *(scanner)* Lay the preview out with the displayed ratio, not the sensor's
+- *(scanner)* Drop a code read twice in a row
+- *(scanner)* Decode on the main isolate, and refuse QR sizes that cannot render
+- *(scanner)* Capture enough pixels to resolve the code
+- *(send)* Draw the QR at the size the screen allows, and stop the flash
+- *(send)* Stop the QR overflowing its box and hiding under the controls
+- *(scanner)* The desktop was capturing at 320x240
+- *(receive)* Keep the progress on screen on a phone
+- *(receive)* Report progress that reflects the work done
+- *(receive)* A progress bar that rises, inside the step it belongs to
+- Say when a screen cannot show a code, and stop it dimming
+- *(receive)* The sender appeared twice at once
+- *(scanner)* Measure the camera's rate, not our own throughput
+- *(hint)* Stop recommending stronger error correction
+- *(scanner)* Measure what a decode costs, replacing a counter that could only read zero
+- *(receive)* Centre the content when there is no second column to fill
+- *(send)* Negotiate the handshake against a predicted size, not against zero
+- *(send)* Give the code the height the furniture was taking
+- *(send)* Make the transfer controls look like controls again
+- *(send)* Let a late receiver join a transfer already running
+- *(send)* Stop advising a phone to enlarge a window it has not got
+- *(send)* Size and rank the transfer controls
+
 ### Miscellaneous
 
+- Record qr as a direct dependency in the lock file
 - Build macOS too, so a branch can be tested on both ends
+
+### Other
+
+- *(scanner)* Show where the frames are going
+- *(scanner)* Show what fraction of frames the decoder drops
+- *(send)* Show what the receiver asked for, beside what is in force
+- Add a target for running one test file
+
+### Tests
+
+- *(scanner)* Measure which module colours this decoder will read
 
 ## [0.9.1] — 2026-10-28
 
