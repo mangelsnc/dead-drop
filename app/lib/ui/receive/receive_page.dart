@@ -441,6 +441,17 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     return true;
   }
 
+  /// Puts the screen into an error state. Tests only.
+  ///
+  /// The errors worth laying out are thrown deep inside a real session —
+  /// a header addressed to another receiver, a failed decrypt — and
+  /// reaching them through the camera is not something a widget test
+  /// can do.
+  @visibleForTesting
+  void debugSetError(String message) {
+    state = state.copyWith(error: message);
+  }
+
   /// Clears everything about the current transfer, keeping this device's
   /// receiver keypair so the sender does not have to re-scan the handshake
   /// QR. Use when a transfer is going badly and the sender is going to
@@ -711,6 +722,50 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             ),
           ];
 
+          // Both of these live inside step 2, under the camera, rather
+          // than in the reporting column beside it. While scanning, the
+          // camera has the user's attention, and the column next to it
+          // is not read: a rejected session was reported as "it looked
+          // broken" with the reason at the top of the window in red,
+          // and before that an unknown-sender prompt went unanswered
+          // with the transfer sitting at nothing. Both are things the
+          // user must act on to carry on scanning, so they belong where
+          // the scanning is.
+          final senderBlock = <Widget>[
+            if (state.awaitingSenderApproval) ...[
+              _UnknownSenderPrompt(
+                fingerprint: state.pendingSender!.fingerprint,
+                onAccept: (name) => notifier.acceptPendingSender(name: name),
+                onReject: notifier.rejectPendingSender,
+              ),
+              const SizedBox(height: 16),
+            ],
+          ];
+
+          final errorBlock = <Widget>[
+            if (state.error != null)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[900]!.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[700]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error, color: Colors.red[400]),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        state.error!,
+                        style: TextStyle(color: Colors.red[400]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ];
+
           final scanStep = <Widget>[
             // Step 2: scan the sender's bootstrap + data frames.
             _StepCard(
@@ -719,6 +774,14 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Why scanning is not getting anywhere, and the
+                  // question that has to be answered before it can.
+                  // Above the camera and outside the isScanning branch:
+                  // an error that stops the scanner would otherwise
+                  // disappear along with it.
+                  ...errorBlock,
+                  if (state.error != null) const SizedBox(height: 12),
+                  ...senderBlock,
                   if (!state.isScanning && state.fileBytes == null)
                     FilledButton.icon(
                       onPressed: () {
@@ -927,19 +990,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
           // describes what that step is doing. This block kept its own
           // copy as well, so "From MacBook" appeared twice on the
           // screen at once.
-          //
-          // A prompt that must be answered before decoding can continue
-          // is a different thing, and keeps its own card.
-          final senderBlock = <Widget>[
-            if (state.awaitingSenderApproval) ...[
-              _UnknownSenderPrompt(
-                fingerprint: state.pendingSender!.fingerprint,
-                onAccept: (name) => notifier.acceptPendingSender(name: name),
-                onReject: notifier.rejectPendingSender,
-              ),
-              const SizedBox(height: 16),
-            ],
-          ];
 
           final progressBlock = <Widget>[
             // Step 3: the received file.
@@ -1074,30 +1124,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             ],
           ];
 
-          final errorBlock = <Widget>[
-            if (state.error != null)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red[900]!.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red[700]!),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.error, color: Colors.red[400]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        state.error!,
-                        style: TextStyle(color: Colors.red[400]),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ];
-
           List<Widget> spaced(List<Widget> items) => [
             for (final w in items) ...[w, const SizedBox(height: 16)],
           ];
@@ -1106,11 +1132,13 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
             // Camera on the left, everything that reports on the right.
             // The sender block no longer displaces the progress bar,
             // because the two are not in the same column any more.
-            final reporting = [
-              ...senderBlock,
-              ...progressBlock,
-              ...errorBlock,
-            ];
+            // Only the finished file. The trust prompt and the error
+            // moved inside step 2; leaving them here meant the column
+            // appeared the moment something went wrong, which turned
+            // the single centred column into two and shifted every
+            // card on screen — including the handshake QR a sender
+            // may be pointing a camera at — by about 400 px.
+            final reporting = [...progressBlock];
 
             // Before a scan starts there is nothing to report, and a
             // second column holding nothing is not a column — it is an
@@ -1167,9 +1195,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                 // numbered 2. It now lives inside step 2, so there is
                 // nothing to hoist.
                 ...scanStep,
-                ...senderBlock,
                 ...progressBlock,
-                ...errorBlock,
               ]),
             ),
           );
