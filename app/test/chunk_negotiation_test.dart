@@ -25,9 +25,11 @@ void main() {
       final onDesktop =
           largestDisplayableChunk(displaySize: _desktop, ecLevel: 'M');
       expect(onPhone, lessThan(onDesktop!));
-      // The measured case: 512 produced 3.29 px/module and did not
-      // transfer; 256 produced 4.26 and did.
-      expect(onPhone, 256);
+      // Measured on 2026-11-05 at EC-M: 512 B gives this phone 3.29
+      // px/module and 1024 B gives 2.45, so 512 is the largest that
+      // clears the floor. At EC-L, where the hardware was tested, the
+      // same phone transferred 1024 B in 28 seconds.
+      expect(onPhone, 512);
     });
 
     test('a stronger error correction lowers what fits', () {
@@ -35,19 +37,21 @@ void main() {
       // the same screen can show less. On this phone level H leaves
       // nothing showable at all — which is worth knowing, because the
       // receiver can ask for H.
-      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'L'), 256);
-      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'M'), 256);
-      // Q and H leave this phone nothing it can show at all, which
-      // matters because the receiver's hint can ask for either.
-      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'Q'),
-          isNull);
-      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'H'),
-          isNull);
+      // L 1024 -> 2.76, the configuration watched transferring in 28
+      // seconds. M 512 -> 3.29. Q 512 -> 2.76. H 256 -> 3.29, because
+      // H spends so many modules that 512 falls to 2.45.
+      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'L'), 1024);
+      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'M'), 512);
+      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'Q'), 512);
+      expect(largestDisplayableChunk(displaySize: _phone, ecLevel: 'H'), 256);
     });
 
     test('a desktop screen can show every level', () {
+      // 2048 B on this screen is 3.95 px/module, well clear of the
+      // floor — not to be confused with the phone's 1.95 at the same
+      // chunk size, which is where a transfer stopped reading.
       expect(largestDisplayableChunk(displaySize: _desktop, ecLevel: 'L'),
-          1024);
+          2048);
       expect(largestDisplayableChunk(displaySize: _desktop, ecLevel: 'Q'),
           1024);
       // Even H, which costs this screen a step down rather than
@@ -63,15 +67,16 @@ void main() {
 
   group('negotiateChunkSize', () {
     test('caps the receiver request at what this screen can draw', () {
-      // The reported hazard: the receiver asks for 1024 and the sender
-      // can only show 256.
+      // The reported hazard: the receiver asks for more than the
+      // sender's screen can draw. At EC-M this phone tops out at 512
+      // (3.29 px/module); 1024 would be 2.45.
       expect(
         negotiateChunkSize(
           requested: 1024,
           displaySize: _phone,
           ecLevel: 'M',
         ),
-        256,
+        512,
       );
     });
 
@@ -112,16 +117,35 @@ void main() {
   group('negotiateSettings', () {
     test('weakens the error correction when no chunk fits at the one '
         'asked for', () {
-      // The reported case exactly: the handshake asked for Q, and this
-      // phone cannot legibly show any chunk size at Q. Capping only the
-      // chunk size would have left it at Q and still unreadable.
-      final r = negotiateSettings(
-        requestedChunkSize: 512,
-        requestedEcLevel: 'Q',
+      // The level gives only when the screen can show nothing at all at
+      // it. Since the floor was recalibrated this phone can show
+      // something at every level — 256 B even at H — so an impossible
+      // request is now met by capping the chunk size and keeping the
+      // correction strength the receiver asked for, which is the
+      // better trade of the two.
+      final kept = negotiateSettings(
+        requestedChunkSize: 1024,
+        requestedEcLevel: 'H',
         displaySize: _phone,
       );
-      expect(r.ecLevel, 'M');
-      expect(r.chunkSize, 256);
+      expect(kept.ecLevel, 'H',
+          reason: 'H still shows 256 B at 3.29 px/module here, so there '
+              'is no reason to weaken it');
+      expect(kept.chunkSize, 256);
+
+      // A screen too small for anything at the requested level is what
+      // the weakening exists for, and it still works. At 260 px H
+      // shows nothing at all while Q shows 256 B.
+      const narrow = 260.0;
+      final weakened = negotiateSettings(
+        requestedChunkSize: 512,
+        requestedEcLevel: 'H',
+        displaySize: narrow,
+      );
+      expect(weakened.ecLevel, 'Q',
+          reason: 'nothing is showable at H on this screen, so the '
+              'level has to give rather than leave it unreadable');
+      expect(weakened.chunkSize, 256);
     });
 
     test('leaves a request this screen can meet alone', () {

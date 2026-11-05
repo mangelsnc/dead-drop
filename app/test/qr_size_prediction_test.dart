@@ -201,11 +201,17 @@ void main() {
     // the code really is too small -- but only if the handshake also
     // lowered the chunk size rather than accepting one it cannot draw
     // and leaving the warning to explain the failure afterwards.
-    // Swept rather than guessed: at 512 bytes and EC-L the code is 93
-    // modules across, so it needs about 372 pixels to reach the 4.0
-    // pixels-per-module floor. A 900x650 window predicts 470 and
-    // legitimately accepts 512; 900x520 predicts 340 and must not.
-    const smallWindow = Size(900, 520);
+    // Swept against the floor recalibrated on hardware. A 900x420
+    // window predicts 240 px for the code: 2048 bytes is 1.37 pixels
+    // per module there and 1024 is 1.92, both under the floor, while
+    // 512 is 2.58 and clears it. So a receiver asking for the densest
+    // option has to be cut down, and has somewhere to be cut down to.
+    //
+    // The window is smaller than the desktop runners' 960x640 minimum
+    // on purpose: since the floor came down, no window a user can
+    // actually make refuses 512 bytes. What is under test is the
+    // negotiation, not the window.
+    const smallWindow = Size(900, 420);
     final container = await _pumpSendPage(tester, sodium, smallWindow);
     final notifier = container.read(sendProvider.notifier);
 
@@ -220,25 +226,29 @@ void main() {
     // carried: the densest option.
     notifier.setReceiverPk(
       _receiverKey(),
-      hint: const HandshakeHint(fps: 10, chunkSize: 512, ecLevel: 'L'),
+      hint: const HandshakeHint(fps: 10, chunkSize: 2048, ecLevel: 'L'),
     );
 
     final agreed = container.read(sendProvider).chunkSize;
-    expect(agreed, lessThan(512),
-        reason: 'a 900x650 window cannot draw 512-byte chunks, so the '
-            'handshake must cut them down. Accepting 512 and relying on '
-            'the warning to explain the stall is the bug this whole '
-            'negotiation exists to prevent.');
+    expect(agreed, lessThan(2048),
+        reason: 'this window cannot draw 2048-byte chunks, so the '
+            'handshake must cut them down. Accepting the request and '
+            'relying on the warning to explain the stall afterwards is '
+            'the bug this whole negotiation exists to prevent.');
+    // And not cut down further than it had to be: a negotiation that
+    // always fell to the smallest size would pass the assertion above
+    // while making every transfer as slow as possible.
+    expect(agreed, 512,
+        reason: '512 is the largest this window can draw at EC-L');
   });
 
   testWidgets('a phone is not told to enlarge a window it cannot enlarge',
       (tester) async {
     // A Redmi Note 14 emitting at 345 pixels was advised that "a larger
     // window would fit chunks of 2048 bytes". At 345 pixels a
-    // 2048-byte code is 1.95 pixels per module, less than half the 4.0
-    // floor -- and a phone has no window to enlarge. The advice
-    // compared against the desktop ceiling, which a phone screen never
-    // reaches.
+    // 2048-byte code is 1.95 pixels per module, below the floor -- and
+    // a phone has no window to enlarge. The advice compared against the
+    // desktop ceiling, which a phone screen never reaches.
     final container = await _pumpSendPage(tester, sodium, _redmiPortrait);
     final notifier = container.read(sendProvider.notifier);
     notifier.loadBytes('payload.bin', _file());
@@ -250,25 +260,26 @@ void main() {
     notifier.stopEmitting();
     await tester.pump();
 
-    // What the phone can actually draw: 256 clears the floor, and
-    // nothing larger does.
+    // What the phone can actually draw: 1024 clears the floor, which is
+    // the configuration measured transferring in 28 seconds, and 2048
+    // does not.
     expect(
       pixelsPerModuleOnScreen(
-          displaySize: drawn, chunkSize: 256, ecLevel: 'L'),
+          displaySize: drawn, chunkSize: 1024, ecLevel: 'L'),
       greaterThanOrEqualTo(kMinUsablePixelsPerModule),
     );
     expect(
       pixelsPerModuleOnScreen(
-          displaySize: drawn, chunkSize: 512, ecLevel: 'L'),
+          displaySize: drawn, chunkSize: 2048, ecLevel: 'L'),
       lessThan(kMinUsablePixelsPerModule),
-      reason: 'if 512 now fits this phone the premise has changed',
+      reason: 'if 2048 now fits this phone the premise has changed',
     );
 
     // On a phone the window is already the screen, so nothing is
     // unlocked by enlarging it.
     final advice = qrSizeAdvice(
       displaySize: drawn,
-      chunkSize: 256,
+      chunkSize: 1024,
       ecLevel: 'L',
       reachableSize: drawn,
     );

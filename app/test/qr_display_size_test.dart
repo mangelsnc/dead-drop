@@ -57,31 +57,35 @@ void main() {
       expect(qrDisplaySize(double.infinity, 500).isFinite, isTrue);
     });
 
-    test('a Redmi Note 14 cannot show 512-byte chunks readably', () {
-      // The case reported: phone sending, Mac receiving, 512 B at
-      // level M, nothing decoded in three minutes. The sending screen
-      // simply has not got the pixels — and the camera then takes its
-      // own share of what is left.
+    test('a Redmi Note 14 cannot show 2048-byte chunks readably', () {
+      // Measured on 2026-11-05 at EC-L: this phone transferred a file
+      // at 1024 B in 28 seconds and read nothing at 2048.
+      //
+      // This test used to say 512 B was the unreadable one, from a
+      // measurement taken the day before — when the emitted code had
+      // no quiet zone, so the figure described that defect rather than
+      // the screen.
       //
       // 345 x 633 is that phone's logical screen less the page margins
       // and the furniture in the sending column.
       final size = qrDisplaySize(345, 633);
       final density = pixelsPerModuleOnScreen(
         displaySize: size,
-        chunkSize: 512,
-        ecLevel: 'M',
+        chunkSize: 2048,
+        ecLevel: 'L',
       );
       expect(density, lessThan(kMinUsablePixelsPerModule));
     });
 
-    test('the same phone can show 256-byte chunks', () {
-      // The control. Without it the test above would be satisfied by a
-      // warning that fires for everything, which would be useless.
+    test('the same phone can show 1024-byte chunks', () {
+      // The control, and the measured outcome: without it the test
+      // above would be satisfied by a floor that refuses everything,
+      // which is what the previous one did.
       final size = qrDisplaySize(345, 633);
       final density = pixelsPerModuleOnScreen(
         displaySize: size,
-        chunkSize: 256,
-        ecLevel: 'M',
+        chunkSize: 1024,
+        ecLevel: 'L',
       );
       expect(density, greaterThanOrEqualTo(kMinUsablePixelsPerModule));
     });
@@ -128,12 +132,22 @@ void main() {
       }
     });
 
-    test('a 1024-byte chunk cannot reach that bar on a phone at all', () {
-      // Not a gap in the sizing: 1024 bytes is a 141-module code, and a
-      // phone-width screen has no room to draw it at three pixels per
-      // module however the layout is arranged. Recorded here so that a
-      // later change claiming to fix scanning at 1024 on a phone has to
-      // confront the arithmetic rather than pass by accident.
+    test('1024 bytes at EC-M cannot reach three pixels per module on a '
+        'phone', () {
+      // Not a gap in the sizing: at level M, 1024 bytes is a
+      // 141-module code, and a phone-width screen has no room to draw
+      // it at three pixels per module however the layout is arranged.
+      //
+      // Three per module is the decoder's own appetite, not
+      // kMinUsablePixelsPerModule, and this is level M. At L the same
+      // payload is 125 modules, which a Redmi Note 14 was measured
+      // transferring in 28 seconds on 2026-11-05 — the two are not in
+      // conflict, and conflating them is why the title now says which
+      // level it means.
+      //
+      // Recorded so that a later change claiming to fix scanning at
+      // 1024 on a phone has to confront the arithmetic rather than
+      // pass by accident.
       const phoneWidth = 392.0;
       final modules = _moduleCountFor(1024, QrErrorCorrectLevel.M);
       expect(qrDisplaySize(phoneWidth, 2000) / modules, lessThan(3.0));

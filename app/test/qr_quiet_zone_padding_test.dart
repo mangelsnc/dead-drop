@@ -99,30 +99,48 @@ void main() {
       expect(density, closeTo(box / modules, 0.001));
     });
 
-    test('the calibration the floor was fitted to still holds', () {
-      // The two measured outcomes, as numbers rather than prose. If a
-      // change moves either across kMinUsablePixelsPerModule, the floor
-      // needs re-measuring on hardware, not recomputing.
+    test('the floor matches what the hardware did', () {
+      // Measured on 2026-11-05, Redmi Note 14 emitting to a MacBook and
+      // a Slimbook, all at EC-L, after the quiet-zone fix. These are
+      // outcomes, not predictions: every row was watched.
+      //
+      //   256 B  4.73 px/module  transfers
+      //   512 B  3.71            1 min 11 s
+      //  1024 B  2.76            28 s -- the project's best result
+      //  2048 B  1.95            does not read
+      //
+      // So the floor lies between 1.95 and 2.76, which agrees with the
+      // decoder theory already written on pixelsPerModuleOnScreen: about
+      // three samples per module wanted, two the hard limit.
+      //
+      // The previous floor of 4.0 was fitted before the emitted code had
+      // a quiet zone, so it was calibrated against a different defect:
+      // it refused 1024 B, the fastest configuration there is.
       const redmi = 345.0;
-      final at512 = pixelsPerModuleOnScreen(
-        displaySize: redmi,
-        chunkSize: 512,
-        ecLevel: 'M',
-      );
-      final at256 = pixelsPerModuleOnScreen(
-        displaySize: redmi,
-        chunkSize: 256,
-        ecLevel: 'M',
-      );
+      double at(int chunk) => pixelsPerModuleOnScreen(
+            displaySize: redmi,
+            chunkSize: chunk,
+            ecLevel: 'L',
+          );
 
-      expect(at512, closeTo(3.29, 0.01),
-          reason: 'the chunk size measured as unreadable on a Redmi Note '
-              '14 no longer reads as 3.29 px per module');
-      expect(at256, closeTo(4.26, 0.01),
-          reason: 'the chunk size measured as working on a Redmi Note 14 '
-              'no longer reads as 4.26 px per module');
-      expect(at512, lessThan(kMinUsablePixelsPerModule));
-      expect(at256, greaterThanOrEqualTo(kMinUsablePixelsPerModule));
+      expect(at(1024), closeTo(2.76, 0.01),
+          reason: 'the fastest configuration measured on hardware no '
+              'longer reads as 2.76 px per module');
+      expect(at(2048), closeTo(1.95, 0.01),
+          reason: 'the configuration that would not read no longer reads '
+              'as 1.95 px per module');
+
+      // The floor has to admit what worked and refuse what did not.
+      expect(at(1024), greaterThanOrEqualTo(kMinUsablePixelsPerModule),
+          reason: '1024 B transferred a file in 28 seconds; the floor '
+              'must not refuse it');
+      expect(at(2048), lessThan(kMinUsablePixelsPerModule),
+          reason: '2048 B did not read; the floor must still refuse it');
+
+      // And it must stay above the decoder's hard limit, whatever else
+      // is measured later.
+      expect(kMinUsablePixelsPerModule, greaterThan(2.0),
+          reason: 'below two samples per module no decoder can work');
     });
 
     test('an unencodable chunk has no density', () {
