@@ -153,7 +153,7 @@ void main() {
 
       // Deleted with the DECOY passphrase.
       expect(
-        await controller.deleteVault('seven eight nine ten eleven twelve'),
+        await controller.deleteVault(),
         isTrue,
       );
 
@@ -182,7 +182,7 @@ void main() {
       await store.put(tryUnlockFor(sodium, 'seven eight nine ten eleven twelve',
               slots), 1, 'decoy.txt', _bytes([4, 5, 6]));
 
-      expect(await controller.deleteVault('correct horse battery staple six'),
+      expect(await controller.deleteVault(),
           isTrue);
 
       final survivors = tempDir.existsSync()
@@ -191,20 +191,31 @@ void main() {
       expect(survivors, isEmpty, reason: 'survivors: $survivors');
     });
 
-    test('a wrong passphrase deletes nothing', () async {
+    test('deletes without a passphrase, even locked', () async {
+      // The passphrase used to be required. It protected nothing — the
+      // vault is in the app's data directory, so anyone with the
+      // unlocked phone could already erase it from system settings or
+      // by uninstalling — while stranding the one person who needed
+      // this: the owner who had forgotten it.
       final controller = buildController();
       addTearDown(controller.dispose);
 
       await controller.createVault('correct horse battery staple six');
       controller.lock();
 
-      expect(await controller.deleteVault('not the passphrase at all'),
-          isFalse);
-      expect(controller.state.error, 'Incorrect passphrase');
+      expect(await controller.deleteVault(), isTrue);
 
-      // The vault is untouched: the real passphrase still opens it.
+      // It is really gone, not merely reported gone.
       expect(await controller.unlock('correct horse battery staple six'),
-          isTrue);
+          isFalse);
+    });
+
+    test('deleting a vault that was never set up is not an error', () async {
+      // The caller asked for there to be no vault, and there is none.
+      final controller = buildController();
+      addTearDown(controller.dispose);
+
+      expect(await controller.deleteVault(), isTrue);
     });
 
     test('an erased vault leaves no vault for the next launch to find',
@@ -219,7 +230,7 @@ void main() {
       await controller.createVault('correct horse battery staple six');
       expect(await VaultStore(tempDir, sodium).hasBeenSetUp(), isTrue);
 
-      await controller.deleteVault('correct horse battery staple six');
+      await controller.deleteVault();
 
       expect(await VaultStore(tempDir, sodium).hasBeenSetUp(), isFalse);
       expect(controller.state.exists, isFalse);
@@ -237,7 +248,7 @@ void main() {
           isTrue);
       expect(controller.debugHasDataKey, isTrue);
 
-      await controller.deleteVault('correct horse battery staple six');
+      await controller.deleteVault();
 
       expect(controller.debugHasDataKey, isFalse);
     });
@@ -252,30 +263,35 @@ void main() {
       addTearDown(controller.dispose);
 
       await controller.createVault('correct horse battery staple six');
-      await controller.deleteVault('correct horse battery staple six');
+      await controller.deleteVault();
 
       expect(keychain.data[kSelfDestructStorageKey], isNot('true'));
     });
 
-    test('a failed delete counts as a failed attempt', () async {
-      // Otherwise the delete dialog is a rate-limit-free oracle for
-      // guessing a passphrase: unlimited guesses, and each one reports
-      // whether it was right.
+    test('deleting clears the failed-attempt counter', () async {
+      // The counter belongs to the vault that was deleted. Leaving it
+      // set would hand a freshly created vault someone else's failures,
+      // including a head start towards self-destruct.
       final guard = AttemptGuard(
         storage: const FlutterSecureStorage(),
         penaltyStep: Duration.zero,
       );
-      final controller =
-          VaultController(sodium, VaultStore(tempDir, sodium),
-              attemptGuard: guard);
+      final controller = VaultController(
+        sodium,
+        VaultStore(tempDir, sodium),
+        attemptGuard: guard,
+      );
       addTearDown(controller.dispose);
 
       await controller.createVault('correct horse battery staple six');
-      final before = await guard.failureCount();
+      controller.lock();
+      await controller.unlock('definitely not it');
+      expect(await guard.failureCount(), greaterThan(0),
+          reason: 'the failure must register, or this proves nothing');
 
-      await controller.deleteVault('wrong');
+      await controller.deleteVault();
 
-      expect(await guard.failureCount(), greaterThan(before));
+      expect(await guard.failureCount(), 0);
     });
   });
 

@@ -6,8 +6,11 @@
 /// pick one or the other without knowing how either works.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../src/camera_permission.dart';
 import '../src/capability_hint.dart';
 import '../src/desktop_camera.dart';
 import 'theme.dart';
@@ -24,6 +27,7 @@ class DesktopScannerView extends StatefulWidget {
     required this.onDetect,
     this.onMeasured,
     this.scanner,
+    this.platformOverride,
   });
 
   /// Called for each payload read. May fire many times for the same code:
@@ -42,6 +46,10 @@ class DesktopScannerView extends StatefulWidget {
   /// Injectable for tests; production creates its own.
   final DesktopCameraScanner? scanner;
 
+  /// Which platform's settings advice to show. Tests set it; production
+  /// leaves it null and the real operating system answers.
+  final String? platformOverride;
+
   @override
   State<DesktopScannerView> createState() => _DesktopScannerViewState();
 }
@@ -50,6 +58,32 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
   late final DesktopCameraScanner _scanner;
   String? _error;
   bool _ready = false;
+
+  /// Set when the failure was the user declining the camera, which needs
+  /// different words and a way out — see camera_permission.dart.
+  bool _permissionDenied = false;
+
+  /// Named so a test can drive this without a real desktop.
+  String get _platform => widget.platformOverride ?? Platform.operatingSystem;
+
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _error = message;
+      _permissionDenied = isPermissionDenied(message);
+    });
+  }
+
+  Future<void> _openCameraSettings() async {
+    final command = cameraSettingsCommand(_platform);
+    if (command == null) return;
+    try {
+      await Process.run(command.executable, command.arguments);
+    } on ProcessException {
+      // Nothing useful to say: the hint already names the panel, so a
+      // person who cannot be taken there can still walk there.
+    }
+  }
 
   @override
   void initState() {
@@ -63,9 +97,7 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       await _scanner.start();
       _scanner.payloads.listen(
         widget.onDetect,
-        onError: (Object e) {
-          if (mounted) setState(() => _error = e.toString());
-        },
+        onError: (Object e) => _fail(e.toString()),
       );
       // Frame counts and the aspect ratio both arrive after start().
       _scanner.activity.listen((_) {
@@ -75,9 +107,9 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       });
       if (mounted) setState(() => _ready = true);
     } on DesktopCameraException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      _fail(e.message);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not start the camera: $e');
+      _fail('Could not start the camera: $e');
     }
   }
 
@@ -102,23 +134,48 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
+      // A declined camera is not a broken one. It gets the heading that
+      // names what happened, the panel it is fixed in, and — where the
+      // platform has one page to open — a button that goes there. macOS
+      // never asks a second time, so "try again" would be a lie.
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.videocam_off,
-                  color: DeadDropColors.error, size: 48),
+              Icon(
+                _permissionDenied ? Icons.no_photography : Icons.videocam_off,
+                color: DeadDropColors.error,
+                size: 48,
+              ),
               const SizedBox(height: 12),
               Text(
-                _error!,
+                _permissionDenied
+                    ? 'DeadDrop cannot use the camera'
+                    : _error!,
                 textAlign: TextAlign.center,
                 style: Theme.of(context)
                     .textTheme
                     .bodyMedium
                     ?.copyWith(color: DeadDropColors.error),
               ),
+              if (_permissionDenied) ...[
+                const SizedBox(height: 12),
+                Text(
+                  cameraSettingsHint(_platform),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (canOpenCameraSettings(_platform)) ...[
+                  const SizedBox(height: 16),
+                  FilledButton.tonalIcon(
+                    onPressed: _openCameraSettings,
+                    icon: const Icon(Icons.settings),
+                    label: const Text('Open camera settings'),
+                  ),
+                ],
+              ],
             ],
           ),
         ),
@@ -129,18 +186,57 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    // The preview is drawn at the camera's own ratio. Stretching it to
-    // fill a box of some other shape distorts the image — ugly, and
-    // worse, a squashed QR is harder to aim at.
-    final ratio = _scanner.aspectRatio;
-    final preview = ratio == null
-        ? _scanner.preview()
-        : AspectRatio(aspectRatio: ratio, child: _scanner.preview());
+    // The preview keeps the camera's own ratio and fills the box,
+    // cropping whatever does not fit rather than letterboxing.
+    //
+    // Fitting instead left black bands above and below on a phone, whose
+    // sensor is far taller than the wide box this sits in, and shrank the
+    // image to the height of the band — so the QR the user is aiming at
+    // got smaller the more space was wasted. Cropping costs the edges of
+    // the frame, which hold nothing: the code is in the middle, which is
+    // where the user points it.
+    //
+    // Stretching is still not an option. A squashed QR is harder to aim
+    // at, and the decoder works on the frame rather than this widget, so
+    // distortion here would mislead without helping.
+    final ratio = _scanner.displayAspectRatio;
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        Center(child: preview),
+        // Sized against the box this actually occupies rather than
+        // wrapped in a FittedBox. A FittedBox needs its child to have
+        // real dimensions to scale from, and a camera preview reports
+        // none — handing it a 1px-tall SizedBox made the preview vanish
+        // entirely on Android.
+        // The preview keeps whatever shape it has and is scaled to cover
+        // the box, with the overflow clipped.
+        //
+        // FittedBox is doing the work rather than arithmetic on a
+        // reported ratio, because that ratio cannot be trusted: on
+        // Android the plugin has already rotated the image, so the
+        // sensor's numbers describe something other than what is on
+        // screen. Three attempts at computing the right size from them
+        // produced, in order, black bands, a one-pixel preview, and a
+        // horizontally stretched one. Letting the widget keep its own
+        // aspect and only scaling it needs none of that to be right.
+        ClipRect(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              // The box must carry the ratio of the image AS DISPLAYED.
+              // A camera preview is a Texture with no intrinsic size, so
+              // it does not keep any shape of its own — it fills whatever
+              // box it is given, and a wrong one stretches it. Sizing
+              // this from the sensor's ratio put a portrait image into a
+              // landscape box, which is the widening that was reported.
+              width: 1000,
+              height: ratio == null ? 1000 : 1000 / ratio,
+              child: _scanner.preview(),
+            ),
+          ),
+        ),
         // How well the camera is placed, as a bar rather than a number.
         //
         // Aim, distance and focus all show up in one figure: the share of
@@ -168,6 +264,12 @@ class _DesktopScannerViewState extends State<DesktopScannerView> {
                 Text(
                   _statusLine(),
                   style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+                // What the camera reported, so a stretched preview can be
+                // diagnosed from a screenshot instead of guessed at.
+                Text(
+                  _scanner.debugGeometry,
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
                 ),
               ],
             ),

@@ -44,20 +44,25 @@ You need:
 
 You need **two devices** — one to send, one to receive. Both must have DeadDrop installed.
 
-**On the sending device:**
-1. Open DeadDrop
-2. Tap **"Send"**
-3. Choose a file (any type — photo, document, etc.)
-4. Set a PIN (this encrypts the file)
-5. Animated QR codes will appear on screen
+There is no shared PIN or password: the receiver shows a QR holding its
+public key, the sender scans it, and the transfer is encrypted to that
+receiver alone.
 
 **On the receiving device:**
 1. Open DeadDrop
-2. Tap **"Receive"**
-3. Point the camera at the sending device's screen
-4. Wait for all QR frames to be scanned (progress bar shows completion)
-5. Enter the same PIN
-6. The file is decrypted and saved
+2. Tap **"Receive a file"** — it shows a QR with its public key
+3. Point the camera at the sending device once the codes start
+
+**On the sending device:**
+1. Open DeadDrop
+2. Tap **"Send a file"**
+3. Choose a file (any type — photo, document, etc.)
+4. Scan the receiver's QR (step 2 on the send screen)
+5. Tap **"Start sending"**; animated QR codes appear
+
+**Back on the receiver:** a progress bar fills as the codes are read.
+When it reaches 100% the file is verified and you choose where to save
+it — the device, or the vault if you have set one up.
 
 ### Things to try
 
@@ -65,9 +70,14 @@ You need **two devices** — one to send, one to receive. Both must have DeadDro
 - [ ] Send a larger file (5-10 MB) — notice the QR animation speed
 - [ ] Try in different lighting conditions (bright, dim, outdoor)
 - [ ] Try with devices at different distances (15-30 cm works best)
-- [ ] Enter a wrong PIN on the receiver — should fail gracefully
 - [ ] Cancel a transfer mid-way — should not crash
-- [ ] Try the duress PIN (if implemented) — should open the decoy mode
+- [ ] Cover the camera for a few seconds, then point it back — the
+      transfer should carry on from where it was, not restart
+- [ ] Start the sender, wait a minute, *then* open the receiver — it
+      should still join (the session header repeats)
+- [ ] Set up a vault and a decoy, and check each passphrase opens its
+      own space
+- [ ] Save a received file into the vault, then lock and reopen it
 
 ### What to report
 

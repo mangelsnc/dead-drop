@@ -44,8 +44,10 @@ The exact Flutter version is pinned in the CI workflow. Using the same version i
 ### Steps
 
 ```bash
-# 1. Clone the exact release tag
-git clone --depth 1 --branch v0.1.0 https://github.com/mangelsnc/dead-drop.git
+# 1. Clone the exact release tag you are verifying.
+#    Replace v0.9.7 with the tag printed on the release page -- a hash
+#    only means anything against the tag it was built from.
+git clone --depth 1 --branch v0.9.7 https://github.com/mangelsnc/dead-drop.git
 cd dead-drop/app
 
 # 2. Install dependencies (uses pubspec.lock for exact versions)

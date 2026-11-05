@@ -1,4 +1,25 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Reading the other device's screen. The only permission this app
+         asks for, and the only one it needs. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Permissions the camera plugin brings that DeadDrop must not ship.
+         camera_android_camerax supports video recording, so it declares
+         RECORD_AUDIO, and it pulls androidx.media3, which declares
+         ACCESS_NETWORK_STATE. This app records no audio and makes no
+         network calls: shipping either would contradict the one claim
+         the whole project rests on, and a reviewer unzipping the APK
+         would find it. Removed at merge time rather than trusted not to
+         be used. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"
+        tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"
+        tools:node="remove" />
+    <uses-permission android:name="android.permission.INTERNET"
+        tools:node="remove" />
+
     <application
         android:label="DeadDrop"
         android:name="${applicationName}"

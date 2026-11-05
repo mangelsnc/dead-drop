@@ -19,6 +19,7 @@ import 'package:sodium/sodium_sumo.dart';
 import 'package:dead_drop/ui/home_page.dart';
 import 'package:dead_drop/ui/theme.dart';
 import 'package:dead_drop/ui/vault/vault_controller.dart';
+import 'package:dead_drop/ui/vault/vault_page.dart';
 import 'package:dead_drop/ui/vault/vault_setup_page.dart';
 import 'package:dead_drop/ui/settings/settings_page.dart';
 
@@ -143,6 +144,50 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Security'), findsOneWidget);
+  });
+
+  testWidgets('deleting the vault is in Settings, not the vault app bar',
+      (tester) async {
+    // It used to sit one icon away from Settings in the vault's app
+    // bar: an irreversible action in the position people press without
+    // looking. Reported as precarious and failure-prone.
+    final container = ProviderContainer(overrides: [
+      sodiumSumoProvider.overrideWithValue(sodium),
+      vaultDirectoryProvider.overrideWithValue(tempDir),
+    ]);
+    addTearDown(container.dispose);
+
+    final controller = container.read(vaultControllerProvider.notifier);
+    await tester
+        .runAsync(() => controller.createVault('correct horse battery staple'));
+
+    // The vault page offers Settings and nothing destructive beside it.
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: deadDropTheme(), home: const VaultPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Settings'), findsOneWidget);
+    expect(find.byTooltip('Delete vault'), findsNothing,
+        reason: 'an irreversible action must not sit in the app bar '
+            'beside the one people reach for without looking');
+    expect(find.byIcon(Icons.delete_outline), findsNothing);
+
+    // It is reachable, under Security, where the other destructive
+    // controls are.
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: deadDropTheme(), home: const SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete vault'), findsOneWidget);
     expect(find.text('Security'), findsOneWidget);
   });
 

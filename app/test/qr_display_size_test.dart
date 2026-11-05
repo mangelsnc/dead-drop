@@ -1,0 +1,165 @@
+import 'package:dead_drop/ui/send/send_page.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:qr/qr.dart';
+
+/// The module count of the code a chunk of [bytes] produces, at the error
+/// correction level that chunk size is usable at.
+int _moduleCountFor(int bytes, int ecLevel) {
+  // A frame is the payload base64-encoded behind a short header, which is
+  // what the emitter puts on screen.
+  final payload = 'DD1:${'A' * ((bytes * 4 / 3).ceil() + 24)}';
+  return QrImage(QrCode.fromData(data: payload, errorCorrectLevel: ecLevel))
+      .moduleCount;
+}
+
+void main() {
+  group('qrDisplaySize', () {
+    test('fills the space it is given', () {
+      expect(qrDisplaySize(500, 2000), 500);
+      expect(qrDisplaySize(2000, 500), 500);
+    });
+
+    test('is limited by height as well as width', () {
+      // A wide, short window. Sizing on width alone drew a code taller
+      // than its box, and the frame counter and buttons below it were
+      // painted over the modules -- corrupting the code the camera
+      // reads. Reported from macOS.
+      expect(qrDisplaySize(1400, 420), 420);
+      expect(qrDisplaySize(1400, 420), lessThan(qrDisplaySize(1400, 2000)));
+    });
+
+    test('never asks for more room than it was given', () {
+      // The overflow property itself, over the whole range rather than
+      // at the sizes that happened to be reported.
+      for (final w in [120.0, 320.0, 411.0, 800.0, 1400.0, 4000.0]) {
+        for (final h in [60.0, 200.0, 420.0, 900.0, 2000.0]) {
+          final size = qrDisplaySize(w, h);
+          expect(size, lessThanOrEqualTo(w), reason: '${w}x$h');
+          expect(size, lessThanOrEqualTo(h), reason: '${w}x$h');
+        }
+      }
+    });
+
+    test('stops growing past what fits in a camera frame', () {
+      expect(qrDisplaySize(4000, 4000), kQrMaxDisplaySize);
+    });
+
+    test('never returns a negative size', () {
+      for (final h in [0.0, 10.0, 32.0]) {
+        expect(qrDisplaySize(1400, h), greaterThanOrEqualTo(0));
+      }
+    });
+
+    test('unbounded constraints produce nothing rather than infinity', () {
+      // An unbounded box cannot say how much room there is, and a code
+      // sized to infinity would crash the layout.
+      expect(qrDisplaySize(double.infinity, double.infinity), 0);
+      expect(qrDisplaySize(double.infinity, 500).isFinite, isTrue);
+    });
+
+    test('a Redmi Note 14 cannot show 2048-byte chunks readably', () {
+      // Measured on 2026-11-05 at EC-L: this phone transferred a file
+      // at 1024 B in 28 seconds and read nothing at 2048.
+      //
+      // This test used to say 512 B was the unreadable one, from a
+      // measurement taken the day before — when the emitted code had
+      // no quiet zone, so the figure described that defect rather than
+      // the screen.
+      //
+      // 345 x 633 is that phone's logical screen less the page margins
+      // and the furniture in the sending column.
+      final size = qrDisplaySize(345, 633);
+      final density = pixelsPerModuleOnScreen(
+        displaySize: size,
+        chunkSize: 2048,
+        ecLevel: 'L',
+      );
+      expect(density, lessThan(kMinUsablePixelsPerModule));
+    });
+
+    test('the same phone can show 1024-byte chunks', () {
+      // The control, and the measured outcome: without it the test
+      // above would be satisfied by a floor that refuses everything,
+      // which is what the previous one did.
+      final size = qrDisplaySize(345, 633);
+      final density = pixelsPerModuleOnScreen(
+        displaySize: size,
+        chunkSize: 1024,
+        ecLevel: 'L',
+      );
+      expect(density, greaterThanOrEqualTo(kMinUsablePixelsPerModule));
+    });
+
+    test('a desktop window can show every size it offers', () {
+      // All three clear the bar comfortably from a Mac, which matches
+      // the one direction that did transfer.
+      for (final chunk in [256, 512, 1024]) {
+        final size = qrDisplaySize(900, 700);
+        expect(
+          pixelsPerModuleOnScreen(
+            displaySize: size,
+            chunkSize: chunk,
+            ecLevel: 'M',
+          ),
+          greaterThanOrEqualTo(kMinUsablePixelsPerModule),
+          reason: '$chunk bytes on a desktop',
+        );
+      }
+    });
+
+    test('256 and 512 byte chunks clear three pixels per module on a '
+        'phone-width screen', () {
+      // Three samples per module is what a decoder needs; below two it
+      // cannot work at all. This is the sender's own rasterisation, and
+      // the camera reduces the code again on top of it, so the bar here
+      // is the full three rather than the bare floor.
+      //
+      // 392 is a 411-pixel-wide phone (the Redmi Note 14 this was
+      // reported from) less the page's own horizontal padding.
+      const phoneWidth = 392.0;
+      final size = qrDisplaySize(phoneWidth, 2000);
+
+      for (final chunk in [256, 512]) {
+        final modules = _moduleCountFor(chunk, QrErrorCorrectLevel.M);
+        final perModule = size / modules;
+        expect(
+          perModule,
+          greaterThanOrEqualTo(3.0),
+          reason: 'a $chunk-byte chunk is $modules modules, drawn at '
+              '${size.toStringAsFixed(0)} px: '
+              '${perModule.toStringAsFixed(2)} px per module',
+        );
+      }
+    });
+
+    test('1024 bytes at EC-M cannot reach three pixels per module on a '
+        'phone', () {
+      // Not a gap in the sizing: at level M, 1024 bytes is a
+      // 141-module code, and a phone-width screen has no room to draw
+      // it at three pixels per module however the layout is arranged.
+      //
+      // Three per module is the decoder's own appetite, not
+      // kMinUsablePixelsPerModule, and this is level M. At L the same
+      // payload is 125 modules, which a Redmi Note 14 was measured
+      // transferring in 28 seconds on 2026-11-05 — the two are not in
+      // conflict, and conflating them is why the title now says which
+      // level it means.
+      //
+      // Recorded so that a later change claiming to fix scanning at
+      // 1024 on a phone has to confront the arithmetic rather than
+      // pass by accident.
+      const phoneWidth = 392.0;
+      final modules = _moduleCountFor(1024, QrErrorCorrectLevel.M);
+      expect(qrDisplaySize(phoneWidth, 2000) / modules, lessThan(3.0));
+      expect(modules * 3, greaterThan(phoneWidth));
+    });
+
+    test('the old fixed 300 px would have failed that bar', () {
+      // Without this the test above passes for the wrong reason: it would
+      // hold at any size, and prove nothing about the change. 300 is what
+      // the renderer was fixed at before.
+      final modules = _moduleCountFor(1024, QrErrorCorrectLevel.M);
+      expect(300 / modules, lessThan(3.0));
+    });
+  });
+}

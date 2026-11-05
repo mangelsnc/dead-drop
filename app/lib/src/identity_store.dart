@@ -12,10 +12,10 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sodium/sodium.dart';
 
 import 'crypto.dart';
+import 'secure_storage.dart';
 
 /// The identity could not be stored, so it would not survive a restart.
 ///
@@ -40,18 +40,7 @@ class IdentityNotPersistedException implements Exception {
 /// Loads, stores, and provides the device's persistent Ed25519 identity.
 class IdentityStore {
   static const _unscopedStorageKey = 'deaddrop_identity_ed25519';
-  static const _storage = FlutterSecureStorage(
-    // On Linux, use libsecret (available on all desktop distros).
-    lOptions: LinuxOptions(),
-    // On macOS, use the system Keychain.
-    //
-    // usesDataProtectionKeychain is off because it requires entitlements
-    // that only a build signed with a real Apple Developer identity can
-    // carry. DeadDrop ships an ad-hoc-signed .app, so with the default
-    // (true) every keychain call fails and the device identity never
-    // loads — which is exactly how it failed on macOS 0.5.4.
-    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-  );
+  static const _storage = kSecureStorage;
 
   final Sodium _sodium;
   final String _storageKey;
@@ -78,6 +67,19 @@ class IdentityStore {
   /// first run.
   ///
   /// Subsequent calls return the cached instance.
+  ///
+  /// On first run this touches the keychain three times: the read below,
+  /// then the write and its read-back in [_persist]. That cost nothing in
+  /// prompts once the service was named: under the plugin's default service
+  /// macOS asked twice, and under [kKeychainService] — with the old items
+  /// deleted — it asks not at all. Three calls, zero dialogs, measured on
+  /// macOS on 2026-11-03.
+  ///
+  /// So the prompts were never about how many calls this makes. The best
+  /// available reading is that they were about ownership: a generic service
+  /// name holds an item any Flutter app on the machine may have created, and
+  /// a binary reaching into an item it does not own is what macOS asks about.
+  /// That is inference from one measurement, not an established mechanism.
   Future<Identity> loadOrGenerate() async {
     if (_cached != null) return _cached!;
 

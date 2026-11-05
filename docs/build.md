@@ -127,7 +127,7 @@ for instructions on verifying that a downloaded binary matches the source code.
 | Problem | Solution |
 |---------|----------|
 | `sodium_libs` fails to load | Run `flutter pub get` and ensure platform runners exist (`flutter create .`) |
-| Camera not working on desktop | `mobile_scanner` requires a camera; on Linux ensure `v4l2` is available |
+| Camera not working on desktop | Scanning uses `camera_desktop`; on Linux ensure `v4l2` is available |
 | QR codes not scanning | Ensure good lighting, hold the camera steady, and try lowering the frame rate (fps) on the sender |
 | Transfer stalls mid-way | Keep both devices still; the fountain code recovers from lost frames automatically — just keep scanning |
 | Build fails on Linux | Install `libgtk-3-dev` and `pkg-config` |

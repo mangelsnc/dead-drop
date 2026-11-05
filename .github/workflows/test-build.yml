@@ -30,6 +30,21 @@ on:
         default: all
         type: choice
         options: [all, android, macos, linux]
+      profile_emission:
+        description: 'Show where a sent frame spends its time (diagnostic overlay)'
+        required: false
+        default: false
+        type: boolean
+      profile_without_qr:
+        description: 'Diagnostic: draw everything EXCEPT the QR, to measure its share. Cannot transfer.'
+        required: false
+        default: false
+        type: boolean
+      dump_frames:
+        description: 'Diagnostic: SAVES CAMERA FRAMES TO DISK. Never for a release.'
+        required: false
+        default: false
+        type: boolean
 
 env:
   # Must match .fvmrc, as in build.yml.
@@ -109,6 +124,10 @@ jobs:
         id: version
         working-directory: app
         shell: bash
+        env:
+          PROFILE_EMISSION: ${{ inputs.profile_emission }}
+          PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
+          DUMP_FRAMES: ${{ inputs.dump_frames }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -122,6 +141,18 @@ jobs:
           [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
           commit=$(git rev-parse --short HEAD 2>/dev/null || true)
           [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          # Opt-in diagnostic overlay. Read from the environment rather
+          # than interpolated into this script: a workflow input must not
+          # reach a shell as code, whatever its declared type.
+          if [ "$PROFILE_EMISSION" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
+          if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
+          fi
+          if [ "$DUMP_FRAMES" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_DUMP_FRAMES=true"
+          fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
 
@@ -219,6 +250,10 @@ jobs:
         id: version
         working-directory: app
         shell: bash
+        env:
+          PROFILE_EMISSION: ${{ inputs.profile_emission }}
+          PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
+          DUMP_FRAMES: ${{ inputs.dump_frames }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -232,6 +267,18 @@ jobs:
           [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
           commit=$(git rev-parse --short HEAD 2>/dev/null || true)
           [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          # Opt-in diagnostic overlay. Read from the environment rather
+          # than interpolated into this script: a workflow input must not
+          # reach a shell as code, whatever its declared type.
+          if [ "$PROFILE_EMISSION" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
+          if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
+          fi
+          if [ "$DUMP_FRAMES" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_DUMP_FRAMES=true"
+          fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
 
@@ -310,6 +357,10 @@ jobs:
         id: version
         working-directory: app
         shell: bash
+        env:
+          PROFILE_EMISSION: ${{ inputs.profile_emission }}
+          PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
+          DUMP_FRAMES: ${{ inputs.dump_frames }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -323,6 +374,18 @@ jobs:
           [ -n "$build" ] && args="${args} --dart-define=DEADDROP_BUILD_NUMBER=${build}"
           commit=$(git rev-parse --short HEAD 2>/dev/null || true)
           [ -n "$commit" ] && args="${args} --dart-define=DEADDROP_COMMIT=${commit}"
+          # Opt-in diagnostic overlay. Read from the environment rather
+          # than interpolated into this script: a workflow input must not
+          # reach a shell as code, whatever its declared type.
+          if [ "$PROFILE_EMISSION" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_EMISSION=true"
+          fi
+          if [ "$PROFILE_WITHOUT_QR" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_PROFILE_WITHOUT_QR=true"
+          fi
+          if [ "$DUMP_FRAMES" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_DUMP_FRAMES=true"
+          fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
 
       - name: Build release

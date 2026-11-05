@@ -11,6 +11,12 @@ dependencies:
     sdk: flutter
   # QR rendering
   qr_flutter: ^4.1.0
+  # Used directly by lib/src/qrframe.dart, to ask the encoder how many
+  # modules a frame becomes — the figure that decides whether a screen
+  # can show it readably — and by the tests to render real codes. It
+  # arrives transitively via qr_flutter, but a direct import needs a
+  # direct dependency.
+  qr: ^3.0.2
   # Camera / QR scanning.
   #
   # mobile_scanner covers android, ios and macos. It has no Linux or Windows
@@ -25,7 +31,6 @@ dependencies:
   # code. Measured on this project's own frames (704-char DD1 payload,
   # 640x480): zxing2 decodes in 5.3 ms median against an 83 ms budget at
   # 12 fps, so the pure-Dart path is not a compromise on speed.
-  mobile_scanner: ^7.4.2
   camera_desktop: ^2.0.0
   # Declared explicitly because desktop_scanner.dart names CameraImageData
   # directly. It arrives via camera_desktop either way; relying on that
@@ -50,11 +55,9 @@ dependencies:
   flutter_riverpod: ^2.5.1
   # Secure storage for identity keypair and TOFU store
   flutter_secure_storage: ^11.2.0
+  camera: ^0.12.2
 
 dev_dependencies:
-  # Used by the scanner tests to render real QR codes to decode. It arrives
-  # transitively via qr_flutter, but tests name it directly.
-  qr: ^3.0.2
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
@@ -64,4 +67,8 @@ dev_dependencies:
   flutter_secure_storage_platform_interface: ^2.1.1
 
 flutter:
+  assets:
+    # The app's own icon, so the home screen shows the logo rather than
+    # a stock Material glyph. Same file the platform launchers use.
+    - assets/branding/app_icon.png
   uses-material-design: true

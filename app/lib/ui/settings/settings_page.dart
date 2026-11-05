@@ -19,19 +19,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
+import '../../src/secure_storage.dart';
 import '../theme.dart';
 import '../technical_text.dart';
 import '../senders/known_senders_page.dart';
+import '../../src/app_version.dart';
 import '../../src/vault/attempt_guard.dart';
 import '../vault/vault_controller.dart';
+import '../vault/delete_vault_dialog.dart';
 import '../vault/vault_setup_page.dart';
 
-const _secureStorage = FlutterSecureStorage(
-  lOptions: LinuxOptions(),
-  mOptions: MacOsOptions(),
-);
+const _secureStorage = kSecureStorage;
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -47,10 +45,15 @@ class SettingsPage extends ConsumerWidget {
         child: ListView(
           children: [
             const _SectionHeader('General'),
-            const ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('About DeadDrop'),
-              subtitle: Text('Air-gapped file transfer'),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('About DeadDrop'),
+              // The version is here, not behind a tap: someone reporting
+              // a problem has to be able to read it off the screen, and
+              // a build they cannot identify is a report we cannot act
+              // on.
+              subtitle: Text('Air-gapped file transfer\n$appVersionLabel'),
+              isThreeLine: true,
             ),
             // In General rather than Security for the same reason as the
             // text-size control: the Security section is absent in the
@@ -113,6 +116,26 @@ class SettingsPage extends ConsumerWidget {
                 ),
               ),
               const _SelfDestructTile(),
+              // Moved here from the vault's app bar, where it sat one
+              // icon away from Settings: an irreversible action in the
+              // position people press without looking.
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: DeadDropColors.error,
+                ),
+                title: const Text('Delete vault'),
+                subtitle: const Text(
+                  'Erases every environment and everything stored in '
+                  'them. Asks for your passphrase first.',
+                ),
+                onTap: () async {
+                  final erased = await showDeleteVaultDialog(context);
+                  // Settings sits on top of the vault, which no longer
+                  // has anything to show.
+                  if (erased && context.mounted) Navigator.of(context).pop();
+                },
+              ),
             ],
           ],
         ),
@@ -133,9 +156,9 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: DeadDropColors.accent,
-              fontWeight: FontWeight.bold,
-            ),
+          color: DeadDropColors.accent,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
