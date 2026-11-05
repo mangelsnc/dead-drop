@@ -107,6 +107,25 @@ The most common fixes, in order:
 
 The transfer is not lost: the codes repeat in a loop and the app resumes from where it was.
 
+### macOS keeps asking for permission to use my keychain. Is that normal?
+
+With an unsigned build, yes, and it is nothing to worry about.
+
+DeadDrop stores this device's identity in the macOS keychain rather than
+in a file of its own, because that is the part of the system designed to
+hold secrets. macOS grants access to a keychain item to the exact
+application that created it, identified by its signature. An unsigned
+build has no stable identity, so every new build looks like a different
+application reaching for another one's item, and macOS asks you to
+confirm. Allow it and it stops asking for that item.
+
+A build signed with an Apple Developer certificate does not ask at all.
+Signing needs a paid Apple certificate, the same obstacle that keeps
+iPhone builds out of the App Store, so builds published here are
+unsigned for now. The prompts are a consequence of that, not of anything
+DeadDrop does with your data: nothing is sent anywhere, on macOS or
+elsewhere.
+
 ### Can I pause a transfer and continue later?
 
 Yes. If the transfer is interrupted (you move, the camera locks up, you answer a call), when you resume, the receiver continues from where it left off. You don't start from scratch.
