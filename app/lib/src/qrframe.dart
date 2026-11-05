@@ -1,6 +1,7 @@
 /// qrframe.dart — QR frame packing, rendering and parsing for DeadDrop.
 ///
-/// Ported 1:1 from spike/src/qrframe.py.
+/// Ported from spike/src/qrframe.py; the chunk id list has since been
+/// removed from the wire (see the layout below).
 ///
 /// Frame layout (binary, big-endian):
 ///     MAGIC(2)      "DD"
@@ -8,13 +9,15 @@
 ///     file_id(8)    random transfer id (lets receiver ignore other sessions)
 ///     frame_seq(4)  monotonically increasing frame number
 ///     seed(4)       PRNG seed for this frame's chunk selection
-///     degree(2)     number of chunk ids
-///     chunk_ids     degree × 2 bytes each
+///     degree(2)     how many chunks this frame XORs together; 0 marks
+///                   the metadata frame
 ///     nonce(24)     XSalsa20-Poly1305 nonce for the payload
 ///     payload(N)    encrypted+tagged XOR chunk (chunk_size + 16 bytes)
 library;
 
 import 'dart:typed_data';
+
+import 'package:qr/qr.dart';
 
 import 'crypto.dart';
 
@@ -36,7 +39,20 @@ class Frame {
   final Uint8List fileId;
   final int seq;
   final int seed;
-  final List<int> chunkIds;
+
+  /// How many chunks this frame XORs together.
+  ///
+  /// The ids themselves are not transmitted: the receiver recomputes
+  /// them from (seq, seed, k) with [chunkIdsFor]. See
+  /// docs/decisions/0001-derive-chunk-ids-from-the-seed.md.
+  ///
+  /// The count still travels, so that a receiver can tell the metadata
+  /// frame (degree 0, no chunks) from a data frame without recomputing
+  /// anything, and so that a recomputed degree disagreeing with this one
+  /// identifies a desynchronised emitter instead of decoding silently
+  /// against the wrong chunks.
+  final int degree;
+
   final Uint8List nonce;
   final Uint8List payload;
 
@@ -44,14 +60,16 @@ class Frame {
     required this.fileId,
     required this.seq,
     required this.seed,
-    required this.chunkIds,
+    required this.degree,
     required this.nonce,
     required this.payload,
   });
 
+  /// Whether this frame carries file metadata rather than file data.
+  bool get isMetadata => degree == 0;
+
   Uint8List pack() {
-    final degree = chunkIds.length;
-    final totalSize = frameHeaderSize + degree * 2 + nonceSize + payload.length;
+    final totalSize = frameHeaderSize + nonceSize + payload.length;
     final out = ByteData(totalSize);
     var offset = 0;
 
@@ -72,11 +90,6 @@ class Frame {
     // degree(2)
     out.setUint16(offset, degree, Endian.big);
     offset += 2;
-    // chunk_ids (degree × 2 bytes)
-    for (final cid in chunkIds) {
-      out.setUint16(offset, cid, Endian.big);
-      offset += 2;
-    }
     // nonce(24)
     out.buffer.asUint8List().setRange(offset, offset + nonceSize, nonce);
     offset += nonceSize;
@@ -115,12 +128,6 @@ class Frame {
     // degree(2)
     final degree = input.getUint16(offset, Endian.big);
     offset += 2;
-    // chunk_ids
-    final chunkIds = <int>[];
-    for (var i = 0; i < degree; i++) {
-      chunkIds.add(input.getUint16(offset, Endian.big));
-      offset += 2;
-    }
     // nonce(24)
     final nonce = data.sublist(offset, offset + nonceSize);
     offset += nonceSize;
@@ -131,12 +138,141 @@ class Frame {
       fileId: fileId,
       seq: seq,
       seed: seed,
-      chunkIds: chunkIds,
+      degree: degree,
       nonce: nonce,
       payload: payload,
     );
   }
 }
+
+/// The largest QR a version-40 code can carry at [ec], in characters.
+const _maxQrChars = {'L': 2953, 'M': 2331, 'Q': 1663, 'H': 1273};
+
+/// How many characters a data frame of [chunkSize] becomes once packed,
+/// encrypted and base64url-encoded for a QR.
+///
+/// Every data frame is the same size: the chunk ids are derived from the
+/// seed rather than transmitted, so degree no longer affects the length
+/// (docs/decisions/0001-derive-chunk-ids-from-the-seed.md). This used to
+/// carry an allowance for them.
+int encodedFrameChars(int chunkSize) {
+  final raw = frameHeaderSize + nonceSize + chunkSize + 16;
+  // base64 is 4 characters per 3 bytes, plus the "DD1." prefix.
+  return ((raw + 2) ~/ 3) * 4 + 4;
+}
+
+/// How many modules across the QR for a [chunkSize] frame at [ec] is,
+/// or null when no QR can hold it.
+///
+/// The module count is what decides whether a code can be read: a
+/// decoder needs roughly three screen or sensor pixels per module, so
+/// this is the denominator in every density calculation on both sides.
+///
+/// Asked of the encoder rather than derived from [qrCapacityAt], whose
+/// table lists every fifth version and so rounds down to one that is
+/// too small. Predicting from it was wrong by up to 16 modules, which
+/// is the difference between warning a user and not.
+///
+/// Cached, because asking the encoder means building a whole code — a
+/// version search and a Reed-Solomon matrix — and the sending screen asks
+/// eleven times per frame. `qrSizeAdvice` calls [pixelsPerModuleOnScreen]
+/// once and `chunkUnlockedByABiggerWindow` twice, and each of those loops
+/// over every chunk size. Measured on an M3 on 2026-11-04: 125.7 ms per
+/// frame on the UI thread against 2.3 ms rasterising, while the one code
+/// actually shown costs about 17 ms. The throwaway codes were the frame.
+///
+/// Safe to cache: the answer is a pure function of [chunkSize] and [ec],
+/// both drawn from small fixed sets, and a QR's geometry does not change
+/// between runs. Nulls are cached too — a combination no version can hold
+/// costs a full failed search to discover.
+int? qrModuleCount(int chunkSize, String ec) {
+  final key = '$chunkSize/$ec';
+  if (_moduleCountCache.containsKey(key)) return _moduleCountCache[key];
+  final count = _computeModuleCount(chunkSize, ec);
+  _moduleCountCache[key] = count;
+  return count;
+}
+
+/// Keyed on both arguments: the same chunk needs a denser code at a
+/// stronger error-correction level, so caching on the size alone would
+/// hand one level's answer to another.
+final Map<String, int?> _moduleCountCache = {};
+
+/// How many modules across the code for [payload] at [ec] is.
+///
+/// [qrModuleCount] answers for the chunk size a transfer is configured
+/// with, which is what the negotiation needs. This answers for a string
+/// actually about to be drawn, which is not always the same code: the
+/// bootstrap frame carries the session header rather than a chunk, so it
+/// is far shorter and makes a sparser code. Sizing that frame's quiet
+/// zone from the chunk size describes a code that is not on the screen,
+/// and the bootstrap is the one frame a receiver cannot start without.
+///
+/// Cached on the payload's length and [ec], not the payload itself: the
+/// module count depends only on how much data there is, every frame of a
+/// transfer is the same length, and keying on the text would grow a new
+/// entry for every frame.
+int? qrModuleCountForPayload(String payload, String ec) {
+  final key = '${payload.length}c/$ec';
+  if (_moduleCountCache.containsKey(key)) return _moduleCountCache[key];
+  final count = _computeModuleCountForChars(payload.length, ec);
+  _moduleCountCache[key] = count;
+  return count;
+}
+
+int? _computeModuleCountForChars(int chars, String ec) {
+  const levels = {
+    'L': QrErrorCorrectLevel.L,
+    'M': QrErrorCorrectLevel.M,
+    'Q': QrErrorCorrectLevel.Q,
+    'H': QrErrorCorrectLevel.H,
+  };
+  final level = levels[ec];
+  if (level == null) return null;
+  try {
+    return QrImage(
+      QrCode.fromData(data: 'A' * chars, errorCorrectLevel: level),
+    ).moduleCount;
+  } catch (_) {
+    return null;
+  }
+}
+
+int? _computeModuleCount(int chunkSize, String ec) {
+  const levels = {
+    'L': QrErrorCorrectLevel.L,
+    'M': QrErrorCorrectLevel.M,
+    'Q': QrErrorCorrectLevel.Q,
+    'H': QrErrorCorrectLevel.H,
+  };
+  final level = levels[ec];
+  if (level == null) return null;
+  try {
+    return QrImage(
+      QrCode.fromData(
+        data: 'A' * encodedFrameChars(chunkSize),
+        errorCorrectLevel: level,
+      ),
+    ).moduleCount;
+  } catch (_) {
+    // No version can hold it.
+    return null;
+  }
+}
+
+/// Whether [chunkSize] can be rendered as a QR at [ec].
+///
+/// A chunk that does not fit has no fallback: the renderer is asked for
+/// a code larger than version 40 and fails outright, which is what
+/// "the screen breaks when showing QRs" meant when 2048-byte chunks
+/// were selected at the default error correction.
+bool chunkFitsQr(int chunkSize, String ec) =>
+    encodedFrameChars(chunkSize) <= (_maxQrChars[ec] ?? _maxQrChars['M']!);
+
+/// The error-correction levels that can carry [chunkSize], strongest
+/// first. Empty when no level can.
+List<String> ecLevelsFor(int chunkSize) =>
+    ['H', 'Q', 'M', 'L'].where((ec) => chunkFitsQr(chunkSize, ec)).toList();
 
 int qrCapacityAt(int version, String ec) {
   final versions = qrCapacity.keys.toList()..sort();

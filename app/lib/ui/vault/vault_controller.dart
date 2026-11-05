@@ -294,16 +294,32 @@ class VaultController extends StateNotifier<VaultState>
   /// everything, which is the honest outcome — not a decoy wiped while
   /// the real environment waits to be found.
   ///
-  /// Erasing requires a passphrase for the same reason unlocking does: an
-  /// unlocked phone in someone else's hands must not be enough to destroy
-  /// the owner's data. The attempt runs through [AttemptGuard] like any
-  /// other, so this cannot be used as a free oracle for guessing — and a
-  /// wrong guess that trips self-destruct destroys what the user was
-  /// asking to destroy anyway.
-  Future<bool> deleteVault(String passphrase) async {
-    final sodium = _sodium;
+  /// **No passphrase is required**, and that is deliberate.
+  ///
+  /// It used to ask for one, on the reasoning that an unlocked phone in
+  /// someone else's hands must not be enough to destroy the owner's
+  /// data. That reasoning does not survive contact with the platform:
+  /// the vault lives in the app's data directory, so anyone holding an
+  /// unlocked phone can already erase it from the system's own settings
+  /// or by uninstalling. The passphrase never stood between an attacker
+  /// and destruction — it only stood between the owner and the one way
+  /// out of a forgotten passphrase, and a wrong guess there counted as
+  /// a failed attempt, so trying to delete your own vault could trip
+  /// self-destruct.
+  ///
+  /// Deleting also discloses nothing. It does not unlock, does not show
+  /// an entry, and does not say whether a decoy exists. What it destroys
+  /// was encrypted and stays encrypted; the threat this vault defends
+  /// against is being made to *read* it, not having it erased. Better
+  /// deleted than read.
+  ///
+  /// The caller is responsible for confirming intent — see
+  /// `delete_vault_dialog.dart`, which requires the word to be typed.
+  /// That guards against the accident, which is the risk that is
+  /// actually left.
+  Future<bool> deleteVault() async {
     final store = _store;
-    if (sodium == null || store == null) {
+    if (store == null) {
       state = state.copyWith(error: 'Vault unavailable on this device');
       return false;
     }
@@ -311,31 +327,9 @@ class VaultController extends StateNotifier<VaultState>
     final wipe = _wipe;
     if (wipe != null) await wipe;
 
-    final penalty = await _attemptGuard.penaltyBeforeNextAttempt();
-    if (penalty > Duration.zero) {
-      await Future<void>.delayed(penalty);
-    }
-
-    final List<WrappedKey?> slots;
-    try {
-      slots = await store.readSlots();
-    } on VaultNotSetUpException {
-      // Already gone. Report success: the caller asked for there to be no
-      // vault, and there is none.
-      state = const VaultState();
-      return true;
-    }
-    if (!tryUnlock(sodium, passphrase, slots).ok) {
-      final shouldSelfDestruct = await _attemptGuard.recordFailure();
-      if (shouldSelfDestruct) {
-        _wipe = _destroyEverySlot(store);
-      }
-      state = state.copyWith(error: 'Incorrect passphrase');
-      return false;
-    }
-
-    await _attemptGuard.recordSuccess();
     await store.deleteEverything();
+    // The counter belongs to a vault that no longer exists; leaving it
+    // set would hand a fresh vault someone else's failed attempts.
     await _attemptGuard.reset();
 
     _dataKey = null;

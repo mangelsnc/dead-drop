@@ -119,6 +119,27 @@ CameraImageData _frame(String payload) {
   );
 }
 
+/// A blank white frame, holding no code.
+///
+/// The ordinary case while a camera is being aimed, and the one the decode
+/// timing must include: a frame that decodes to nothing still costs a
+/// decode.
+CameraImageData _blankFrame() {
+  const side = 64;
+  const stride = side * 4;
+  return CameraImageData(
+    format: const CameraImageFormat(ImageFormatGroup.bgra8888, raw: null),
+    planes: [
+      CameraImagePlane(
+        bytes: Uint8List(stride * side)..fillRange(0, stride * side, 0xFF),
+        bytesPerRow: stride,
+      )
+    ],
+    width: side,
+    height: side,
+  );
+}
+
 /// A platform that does not publish camera dimensions, as the base class
 /// does by default.
 class _NoInitEventPlatform extends _FakeCameraPlatform {
@@ -260,9 +281,12 @@ void main() {
       expect(seen, ['DD1.after-blank']);
     });
 
-    test('does not filter repeated payloads', () async {
-      // The sender repeats frames by design; deciding what is new is the
-      // receiver's job. Filtering here would drop a legitimate repeat.
+    test('drops a code read twice in a row', () async {
+      // The camera runs far faster than the sender's display, so it
+      // captures each code several times over. Reported from a phone:
+      // 3,332 frames fed to the decoder for 49 chunks, where the code
+      // needs about 1.15 — most of that work was the same frame again,
+      // and it starved the camera of capacity for new ones.
       final platform = _FakeCameraPlatform();
       final scanner = DesktopCameraScanner(platform: platform);
       addTearDown(scanner.dispose);
@@ -276,7 +300,28 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 150));
       }
 
-      expect(seen, ['DD1.repeat', 'DD1.repeat']);
+      expect(seen, ['DD1.repeat']);
+    });
+
+    test('passes a repeat on once a different code came between', () async {
+      // Only the immediately previous payload is suppressed. The sender
+      // re-emits earlier frames by design — that is how a receiver which
+      // missed one ever gets it — so a longer memory would drop frames
+      // the transfer actually needs.
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      final seen = <String>[];
+      scanner.payloads.listen(seen.add);
+
+      for (final payload in ['DD1.a', 'DD1.b', 'DD1.a']) {
+        platform.frames.add(_frame(payload));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      }
+
+      expect(seen, ['DD1.a', 'DD1.b', 'DD1.a']);
     });
 
     test('surfaces a camera that dies mid-scan', () async {
@@ -290,6 +335,89 @@ void main() {
       platform.frames.addError('unplugged');
 
       expect(await error, isA<DesktopCameraException>());
+    });
+  });
+
+  group('measuring what the decoder costs', () {
+    // This replaced a counter of "frames that arrived while a decode was
+    // already running", which was structurally unable to report anything
+    // but zero: the decode path holds no await, so the frame handler runs
+    // to completion in a single turn of the event loop and the guard is
+    // always clear again by the time the next frame is delivered. It read
+    // 0% on a device that was plainly struggling, and that zero was taken
+    // as evidence the decoder was keeping up.
+    //
+    // The tests below hold the replacement to the bar the old one failed:
+    // the figure must move when the thing it claims to measure moves.
+
+    test('reports nothing until there are enough decodes to be worth it',
+        () async {
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      expect(scanner.medianDecodeMillis, isNull);
+      expect(scanner.debugGeometry, contains('measuring'));
+    });
+
+    test('times every frame it decodes, including the ones with no code',
+        () async {
+      // Most frames hold no code. Timing only the frames that decoded to
+      // something would measure the easy ones and miss the cost of the
+      // rest.
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      for (var i = 0; i < 8; i++) {
+        platform.frames.add(_blankFrame());
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      expect(scanner.medianDecodeMillis, isNotNull);
+      expect(scanner.medianDecodeMillis, greaterThan(0));
+    });
+
+    test('the decode time reaches the diagnostic line', () async {
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      for (var i = 0; i < 8; i++) {
+        platform.frames.add(_blankFrame());
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      expect(scanner.debugGeometry, contains('ms median'));
+      expect(scanner.debugGeometry, isNot(contains('busy-dropped')),
+          reason: 'the counter that could only read zero is gone');
+    });
+
+    test('the load is the decode time against the frame interval', () async {
+      final platform = _FakeCameraPlatform();
+      final scanner = DesktopCameraScanner(platform: platform);
+      addTearDown(scanner.dispose);
+      await scanner.start();
+
+      // Enough frames to measure both the rate and the decode time.
+      for (var i = 0; i < 12; i++) {
+        platform.frames.add(_blankFrame());
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      final median = scanner.medianDecodeMillis;
+      final fps = scanner.measuredFps;
+      final load = scanner.decodeLoad;
+      expect(median, isNotNull);
+      expect(fps, isNotNull);
+      expect(load, isNotNull);
+      // The relationship that makes the number mean something: at a load
+      // of 1.0 a decode fills the whole gap between frames, so the
+      // decoder is capping the camera rather than the camera being slow.
+      expect(load, closeTo(median! / (1000 / fps!), 0.01));
     });
   });
 
@@ -341,6 +469,96 @@ void main() {
       await scanner.start();
 
       expect(scanner.preview().key, const Key('preview'));
+    });
+  });
+
+  group('aspect ratio and sensor rotation', () {
+    test('an upright sensor reports its own ratio', () async {
+      final scanner = DesktopCameraScanner(platform: _FakeCameraPlatform());
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.aspectRatio, closeTo(640 / 480, 0.001));
+    });
+
+    test('the displayed ratio is the inverse on a sideways sensor', () async {
+      // The exact case reported from a phone, whose own diagnostics read
+      // "sensor 720x480 · rot 90°". The sensor is landscape; what the
+      // plugin paints is portrait, and laying the preview out with the
+      // sensor's 1.50 squashed the image into a landscape box.
+      final scanner = DesktopCameraScanner(
+        platform: _FakeCameraPlatform(cameras: const [
+          CameraDescription(
+            name: 'rear',
+            lensDirection: CameraLensDirection.front,
+            sensorOrientation: 90,
+          ),
+        ]),
+      );
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.aspectRatio, closeTo(640 / 480, 0.001),
+          reason: 'the sensor is what it is');
+      expect(scanner.displayAspectRatio, closeTo(480 / 640, 0.001),
+          reason: 'but the preview is turned, and layout follows that');
+    });
+
+    test('an upright sensor displays at its own ratio', () async {
+      final scanner = DesktopCameraScanner(platform: _FakeCameraPlatform());
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.displayAspectRatio, closeTo(640 / 480, 0.001),
+          reason: 'a webcam at 0 degrees is not rotated by anyone');
+    });
+
+    test('a sideways sensor still reports the sensor ratio', () async {
+      // Deliberately NOT rotated here. On Android buildPreview wraps the
+      // texture in CameraX's RotatedPreviewDelegate, so the plugin has
+      // already turned the image: rotating this figure too
+      // double-corrected it and the preview came out stretched. The view
+      // no longer computes a size from this value at all — it lets the
+      // preview keep its own shape and scales it to cover.
+      final scanner = DesktopCameraScanner(
+        platform: _FakeCameraPlatform(cameras: const [
+          CameraDescription(
+            name: 'rear',
+            lensDirection: CameraLensDirection.front,
+            sensorOrientation: 90,
+          ),
+        ]),
+      );
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.aspectRatio, closeTo(640 / 480, 0.001),
+          reason: 'the platform rotates the preview; this is the sensor');
+    });
+
+    test('rotation does not change the measured resolution', () async {
+      // suggestEmission reasons about how many pixels the camera
+      // captures, which is a property of the sensor and not of how the
+      // image is turned for display.
+      final scanner = DesktopCameraScanner(
+        platform: _FakeCameraPlatform(cameras: const [
+          CameraDescription(
+            name: 'rear',
+            lensDirection: CameraLensDirection.front,
+            sensorOrientation: 270,
+          ),
+        ]),
+      );
+      addTearDown(scanner.dispose);
+      await scanner.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(scanner.capability?.width ?? 640, 640,
+          reason: 'the sensor captured 640 wide however it is displayed');
     });
   });
 }

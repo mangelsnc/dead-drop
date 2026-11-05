@@ -68,9 +68,6 @@ class EmissionHint {
 /// would be useless.
 const List<double> _fpsOptions = [4, 6, 8, 10, 12, 15, 20];
 
-/// Error-correction levels, weakest to strongest. Stronger correction
-/// survives a blurrier image but fits less data per code.
-const List<String> _ecLevels = ['L', 'M', 'Q', 'H'];
 
 /// Picks the largest option that does not exceed [value].
 double _fpsAtMost(double value) {
@@ -95,21 +92,55 @@ double _fpsAtMost(double value) {
 /// 3. **Resolution.** A dense QR needs pixels. Below 640x480 the chunk
 ///    size comes down so each code carries fewer modules.
 EmissionHint suggestEmission(CameraCapability camera) {
-  // Two thirds of the measured rate. Sampling exactly at the emission
-  // rate catches each code at an arbitrary point in its display, often
-  // mid-change; leaving headroom means most frames land on a stable code.
-  var fps = _fpsAtMost(camera.framesPerSecond * 0.66);
+  // Just under the measured camera rate, and never above it.
+  //
+  // Measured on a device, twice. Two thirds of the rate was too timid:
+  // a camera delivering 12 fps was told to emit at 8, read about 62% of
+  // the codes, and projected 16.7 minutes for 1 MB — where 12 fps read
+  // 90% and projected 7.7. A dropped frame costs one frame; a frame
+  // never emitted costs one the camera could have read.
+  //
+  // Going past the camera is worse than either. At 16 fps against the
+  // same camera the read rate collapsed to about 14%, because a code is
+  // only readable while it is fully on screen and the camera no longer
+  // samples often enough to catch one. The cost is not gradual.
+  //
+  // So: match the camera, do not try to beat it. 0.9 leaves one frame
+  // in ten for the measurement being slightly optimistic, and
+  // [_fpsAtMost] rounds down to an offered value.
+  var fps = _fpsAtMost(camera.framesPerSecond * 0.9);
+  // Never above the camera, whatever the arithmetic above produced. A
+  // measurement that reads high — a burst of frames while the scene is
+  // simple, say — must not turn into a stream the camera cannot sample,
+  // because that failure is a cliff rather than a slope.
+  if (fps > camera.framesPerSecond) {
+    fps = _fpsAtMost(camera.framesPerSecond);
+  }
 
   var chunkSize = kDefaultChunkSize;
-  var ec = 'M';
+
+  // Start at the weakest correction and strengthen only on evidence.
+  //
+  // This started at M. Stronger correction spends modules on redundancy
+  // rather than data, so the same chunk becomes a denser code — and
+  // density is what a camera struggles with. Measured on a device:
+  // at the same 12 fps and chunk size, M read measurably slower than L.
+  //
+  // Correction earns its cost when frames are actually being lost, and
+  // the decode-rate rule below raises it when they are.
+  var ec = 'L';
   final reasons = <String>[];
 
   final pixels = camera.width * camera.height;
   if (pixels > 0 && pixels < 640 * 480) {
     // Not enough pixels to resolve a dense code: fewer bytes per QR means
     // fewer modules, which means each module covers more pixels.
+    //
+    // This also raised the correction to Q, which undid most of it:
+    // at 256 bytes, Q is 93 modules against L's 73. Fewer bytes and
+    // stronger correction pull in opposite directions, and the whole
+    // point here is to thin the code out.
     chunkSize = 256;
-    ec = 'Q';
     reasons.add('a low-resolution camera (${camera.width}x${camera.height})');
   }
 
@@ -117,9 +148,27 @@ EmissionHint suggestEmission(CameraCapability camera) {
   if (rate != null && rate < 0.5) {
     // Reading fewer than half the frames. Whatever the cause — focus,
     // lighting, a shaky hand — the stream is too demanding as it is.
+    //
+    // Slow down, and do NOT touch the chunk size or the correction.
+    //
+    // Halving the chunk doubles how many codes must be read, so a
+    // camera already missing half of them needs twice as many attempts
+    // at the same miss rate: the transfer gets longer, not more
+    // reliable. Reported from a phone as "I always have to read about
+    // 2.5x the chunk count", with a 653 KB file split into 2614 chunks.
+    //
+    // Raising the correction was worse, and this rule used to do it.
+    // Stronger correction spends modules on redundancy, so the code
+    // gets denser — which is the thing a struggling camera cannot
+    // cope with. Measured on a device at 256 bytes and 10 fps: level M
+    // reached 8% in a minute, level L reached 50%. Six times faster,
+    // for a code with 11% fewer modules. A camera at the edge is
+    // pushed over it by very little, and correcting harder is pushing.
+    //
+    // The redundancy would help against a blurred or partly obscured
+    // code. It does not help against a code the camera cannot resolve
+    // at all, and that is the failure being seen here.
     fps = _fpsAtMost(fps * 0.75);
-    chunkSize = chunkSize > 256 ? chunkSize ~/ 2 : 256;
-    ec = _ecLevels[(_ecLevels.indexOf(ec) + 1).clamp(0, _ecLevels.length - 1)];
     reasons.add('only ${(rate * 100).round()}% of frames readable so far');
   }
 

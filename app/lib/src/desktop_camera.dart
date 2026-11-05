@@ -14,14 +14,15 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:camera_platform_interface/camera_platform_interface.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'capability_hint.dart';
 import 'desktop_scanner.dart';
+import 'frame_dump.dart';
 
 /// What went wrong, in words a person can act on.
 ///
@@ -45,6 +46,20 @@ class DesktopCameraScanner {
   DesktopCameraScanner({CameraPlatform? platform})
       : _platform = platform ?? CameraPlatform.instance;
 
+  /// Whether this is a hand-held device, which changes which camera to
+  /// open and at what resolution.
+  static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+
+  /// The capture resolution, which decides the densest code that can be
+  /// read at all. See the note at the call site.
+  static ResolutionPreset get _resolutionPreset =>
+      resolutionPresetFor(Platform.operatingSystem);
+
+  /// The lens to prefer. A phone points its back camera at the other
+  /// screen; everything else has one camera and takes it.
+  static CameraLensDirection get _preferredLens =>
+      _isMobile ? CameraLensDirection.back : CameraLensDirection.front;
+
   final CameraPlatform _platform;
 
   int? _cameraId;
@@ -60,6 +75,24 @@ class DesktopCameraScanner {
   double? _aspectRatio;
   double? get aspectRatio => _aspectRatio;
 
+  /// The ratio of the image as it appears on screen.
+  ///
+  /// Distinct from [aspectRatio], which describes the sensor. On Android
+  /// the sensor is mounted sideways — a phone's rear camera reports 90 or
+  /// 270 degrees — and `buildPreview` turns the image to match the
+  /// screen, so what the user sees is the sensor's ratio inverted.
+  ///
+  /// This is the one to lay the preview out with. Using the sensor's
+  /// ratio instead put a portrait image into a landscape box and
+  /// stretched it: reported from a phone as `sensor 720x480 · rot 90° ·
+  /// ratio 1.50`, where the displayed image is really 0.67.
+  double? get displayAspectRatio {
+    final r = _aspectRatio;
+    if (r == null) return null;
+    final rotated = (_sensorOrientation ?? 0) % 180 != 0;
+    return rotated ? 1 / r : r;
+  }
+
   /// Capture resolution, once the backend has published it.
   ///
   /// Kept alongside [aspectRatio] because the two answer different
@@ -68,6 +101,58 @@ class DesktopCameraScanner {
   int? _previewWidth;
   int? _previewHeight;
 
+  /// What the platform said about this camera, for on-screen diagnosis.
+  ///
+  /// The preview was stretched on a phone through three attempts at
+  /// fixing it, each from a different guess about which of these numbers
+  /// was wrong. Showing them is cheaper than guessing a fourth time.
+  String get debugGeometry {
+    final w = _previewWidth, h = _previewHeight;
+    if (w == null || h == null) return 'geometry: unknown';
+    final fps = measuredFps;
+    // How long a decode takes, and what share of the gap between frames
+    // it eats. This replaced a "frames dropped because a decode was
+    // already running" counter that could only ever read zero: the
+    // decode path holds no await, so an async frame handler runs to
+    // completion in one turn of the event loop and the guard is always
+    // clear again before the next frame arrives. The cost is real but it
+    // does not surface as a drop — a decode that overruns the frame
+    // interval blocks the camera callback, so it surfaces as a lower
+    // delivered rate. This is the number that says whether moving the
+    // decode off this isolate would buy anything.
+    final median = medianDecodeMillis;
+    final load = decodeLoad;
+    final decode = median == null
+        ? 'decode: measuring…'
+        : 'decode ${median.toStringAsFixed(1)} ms median'
+              '${load == null ? '' : ' · ${(load * 100).round()}% of the frame'}';
+    // The pixel format, and how many frames the converter could not
+    // read. Without these, a frame whose format is unsupported is
+    // indistinguishable from a frame that simply held no code: both
+    // leave `read` at zero while `decoded` climbs, which is what macOS
+    // reported on 2026-11-04 — 1705 decoded, 0 read, with the decoder
+    // using 23% of its budget.
+    // Said out loud, because a build that writes camera images to disk
+    // must never do it silently — see frame_dump.dart.
+    final dump = _dumper == null
+        ? ''
+        : '\nDUMPING FRAMES → ${_dumper!.directory} '
+            '(${_dumper!.written}/$kMaxDumpedFrames)';
+    final format = _lastFormat == null ? '' : ' · $_lastFormat';
+    final unreadable = _framesUnreadable == 0
+        ? ''
+        : ' · unreadable $_framesUnreadable';
+    return 'sensor ${w}x$h · rot ${_sensorOrientation ?? '?'}°'
+        ' · shown ${(displayAspectRatio ?? 0).toStringAsFixed(2)}'
+        '$format\n'
+        'cam ${fps == null ? '?' : fps.toStringAsFixed(1)} fps'
+        ' · got $_framesDelivered · decoded $_framesSeen'
+        ' · read $_framesDecoded$unreadable\n'
+        '$decode$dump';
+  }
+
+  int? _sensorOrientation;
+
   /// How many frames have been looked at, and how many held a code.
   ///
   /// Without this the user cannot tell a camera that is working but
@@ -75,6 +160,26 @@ class DesktopCameraScanner {
   /// that prompted it.
   int _framesSeen = 0;
   int _framesDecoded = 0;
+
+  /// Frames whose pixel format [frameToArgb] does not understand.
+  ///
+  /// Separate from "no code in this frame", which is the normal case.
+  /// This one means the image was never looked at.
+  int _framesUnreadable = 0;
+
+  /// The pixel format the camera is actually delivering, as its own name.
+  String? _lastFormat;
+
+  /// Writes frames to disk, in a build that asked for it. Null otherwise,
+  /// and the field itself is dead code the tree shaker removes.
+  FrameDumper? _dumper;
+
+  /// Where frames are being written, for the on-screen notice. Null in
+  /// any ordinary build.
+  String? get dumpDirectory => _dumper?.directory;
+
+  /// How many frames have been written so far.
+  int get dumpedFrames => _dumper?.written ?? 0;
   int get framesSeen => _framesSeen;
   int get framesDecoded => _framesDecoded;
 
@@ -107,12 +212,20 @@ class DesktopCameraScanner {
   ///
   /// Measured rather than taken from the camera's own claim, which is a
   /// maximum under good light and not what a dim room produces.
+  /// How many frames a second the camera actually delivers.
+  ///
+  /// Counts every delivered frame, including those dropped because a
+  /// decode was already running. It used to count only decoded frames,
+  /// which measured this app's throughput instead: on a phone that read
+  /// far below the camera's real rate, and since the emission hint asks
+  /// for most of this figure, it fed back into a slower and slower
+  /// suggestion.
   double? get measuredFps {
     final start = _firstFrameAt;
-    if (start == null || _framesSeen < 10) return null;
+    if (start == null || _framesDelivered < 10) return null;
     final seconds = DateTime.now().difference(start).inMilliseconds / 1000;
     if (seconds <= 0) return null;
-    return _framesSeen / seconds;
+    return _framesDelivered / seconds;
   }
 
   /// Everything measured about this camera, or null when there is not yet
@@ -135,10 +248,45 @@ class DesktopCameraScanner {
     );
   }
 
-  /// Fires whenever [framesSeen] or [framesDecoded] changes, so a widget
-  /// can rebuild without polling.
+  /// Fires while the camera is reading, so a widget can rebuild without
+  /// polling.
+  ///
+  /// Rate-limited to [_activityPeriod], which is the whole point of it.
+  /// It used to fire once per frame, and the only listener rebuilds the
+  /// receive screen — a rebuild that costs 132 ms on an M3 and 542 ms on
+  /// a Slimbook running Kali, measured on 2026-11-03. Thirty of those a
+  /// second is four seconds of work per second of clock, and what starves
+  /// is everything else on the isolate, including the `initializeCamera`
+  /// await inside [start]. The camera then fails with an initialisation
+  /// timeout, which is what macOS reported the moment a transfer began.
+  ///
+  /// Nothing downstream needs every frame: the listener reads counters
+  /// and a decode rate, both of which are summaries. Two or three
+  /// refreshes a second keep the status line alive to a person's eye.
   final _activity = StreamController<void>.broadcast();
   Stream<void> get activity => _activity.stream;
+
+  /// The shortest gap between two activity events.
+  ///
+  /// 250 ms leaves a 542 ms rebuild — the worst measured — well inside
+  /// its budget while still reading as live.
+  static const Duration _activityPeriod = Duration(milliseconds: 250);
+
+  DateTime? _lastActivityAt;
+
+  /// Emits on [activity] unless one was emitted within [_activityPeriod].
+  ///
+  /// Every emitter goes through here. A raw `_activity.add` anywhere else
+  /// reintroduces the stall this exists to prevent, and
+  /// `desktop_scanner_view_rebuild_test.dart` fails if one appears.
+  void _signalActivity({DateTime? at}) {
+    if (_activity.isClosed) return;
+    final now = at ?? DateTime.now();
+    final last = _lastActivityAt;
+    if (last != null && now.difference(last) < _activityPeriod) return;
+    _lastActivityAt = now;
+    _activity.add(null);
+  }
 
   /// Whether a frame is being decoded right now.
   ///
@@ -147,6 +295,12 @@ class DesktopCameraScanner {
   /// capture, and a stale frame is worth nothing here — the sender is
   /// already showing the next code.
   bool _decoding = false;
+
+  /// The last payload handed to [payloads], for suppressing the repeats
+  /// a fast camera makes of one slow-changing code. Only the immediately
+  /// previous one: the sender re-emits earlier frames by design, and a
+  /// longer memory would drop those legitimately.
+  String? _lastPayload;
 
   /// Payloads read from the camera, in the order they were decoded.
   ///
@@ -187,15 +341,47 @@ class DesktopCameraScanner {
       );
     }
 
+    // On a phone the back camera is the one pointed at the other screen;
+    // a laptop or an external webcam has no "back" and takes whatever is
+    // there. Picking the first camera unconditionally gave a phone its
+    // selfie camera.
+    final preferred = cameras.firstWhere(
+      (c) => c.lensDirection == _preferredLens,
+      orElse: () => cameras.first,
+    );
+
     try {
-      // Low resolution on purpose. A QR fills the frame, the decoder does
-      // not need detail, and fewer pixels is less work per frame. It also
-      // sidesteps a camera_desktop limitation: on Linux, initialising
-      // above low can fail outright.
+      // Resolution is a trade, and it falls differently per platform.
+      //
+      // Desktop uses low: a webcam fills the frame with the code, fewer
+      // pixels is less work, and camera_desktop on Linux can fail to
+      // initialise above low outright.
+      //
+      // A phone is held further back and its sensor is much larger, so
+      // low there resolves a dense code poorly. Medium is the smallest
+      // setting that reads one reliably at arm's length.
       final id = await _platform.createCameraWithSettings(
-        cameras.first,
-        const MediaSettings(
-          resolutionPreset: ResolutionPreset.low,
+        preferred,
+        MediaSettings(
+          // What limits a scan is pixels per module, not frame rate.
+          //
+          // A 512-byte chunk is a 105-module code. For a decoder to get
+          // the ~3 samples per module it needs, that code has to land on
+          // some 315 pixels of sensor -- so the capture width sets a
+          // floor on how dense a code can be read, and it is the first
+          // thing to check when frames arrive and nothing decodes.
+          //
+          // low is 320x240, where even a code filling the frame gets
+          // about 1.5 pixels per module. That was the desktop default
+          // and it could not read a phone held in front of the webcam at
+          // any distance: backing off to fit the code in frame only made
+          // each module smaller. Reported from macOS as "sensor 320x240
+          // ... seen 305 · read 0".
+          //
+          // Linux is the exception: camera_linux can fail to initialise
+          // above medium, and a scanner that will not start is worse
+          // than one that needs a steadier hand.
+          resolutionPreset: _resolutionPreset,
           enableAudio: false,
         ),
       );
@@ -206,10 +392,26 @@ class DesktopCameraScanner {
       try {
         _initialised = _platform.onCameraInitialized(id).listen((event) {
           if (event.previewHeight > 0) {
+            // The sensor's own ratio, unrotated on purpose.
+            //
+            // On Android, buildPreview wraps the texture in CameraX's
+            // RotatedPreviewDelegate: the plugin has already turned the
+            // image to match the screen. Rotating this figure as well
+            // double-corrected it, which is why the preview kept coming
+            // out stretched horizontally after the previous attempt.
+            //
+            // This value is therefore only a hint for laying the preview
+            // out on platforms that do not rotate for us; the widget is
+            // free to keep its own shape. See desktop_scanner_view.dart.
+            _sensorOrientation = preferred.sensorOrientation;
             _aspectRatio = event.previewWidth / event.previewHeight;
+            // The measurement keeps the sensor's own numbers: how many
+            // pixels the camera captures is what decides whether it can
+            // resolve a dense code, and that does not change with how
+            // the image is turned for display.
             _previewWidth = event.previewWidth.round();
             _previewHeight = event.previewHeight.round();
-            if (!_activity.isClosed) _activity.add(null);
+            _signalActivity();
           }
         });
       } catch (_) {
@@ -224,6 +426,14 @@ class DesktopCameraScanner {
       );
     }
 
+    if (dumpFrames) {
+      // Under the system temp directory, not the user's documents: these
+      // are diagnostic artefacts, and a diagnostic build should not leave
+      // camera images somewhere a person keeps their own files.
+      final directory = await Directory.systemTemp.createTemp('deaddrop-frames-');
+      _dumper = FrameDumper(directory.path);
+    }
+
     _frames = _platform.onStreamedFrameAvailable(_cameraId!).listen(
           _onFrame,
           onError: (Object e) => _payloads.addError(
@@ -232,25 +442,127 @@ class DesktopCameraScanner {
         );
   }
 
+  /// How long the last [_decodeWindow] decodes took, in microseconds.
+  ///
+  /// A rolling window, for the same reason [recentDecodeRate] is one: what
+  /// matters is what the decoder is doing against the code on screen now,
+  /// not an average dragged down by the frames before the user aimed.
+  ///
+  /// This exists because the counter it replaced could not move. That one
+  /// counted frames arriving while a decode was in flight, to decide
+  /// whether a native decoder on its own thread would be worth the
+  /// dependency — but [_onFrame] awaits nothing around the decode, so it
+  /// never yields mid-decode and the count was always zero. Timing the
+  /// decode measures the same thing honestly: compared against the frame
+  /// interval it says how much of the camera's budget the decoder spends.
+  final List<int> _decodeMicros = [];
+  static const int _decodeWindow = 30;
+
+  /// Median decode time in milliseconds, or null before there is enough.
+  ///
+  /// Median, not mean: a single slow frame (a garbage-collection pause, a
+  /// window being dragged) would drag a mean away from the typical cost,
+  /// and the typical cost is what decides whether this approach holds.
+  double? get medianDecodeMillis {
+    if (_decodeMicros.length < 5) return null;
+    final sorted = [..._decodeMicros]..sort();
+    final mid = sorted.length ~/ 2;
+    final micros = sorted.length.isOdd
+        ? sorted[mid].toDouble()
+        : (sorted[mid - 1] + sorted[mid]) / 2;
+    return micros / 1000;
+  }
+
+  /// Share of the interval between camera frames that a decode occupies,
+  /// or null before both it and the frame rate can be measured.
+  ///
+  /// At or above 1.0 the decoder cannot finish one frame before the next
+  /// arrives, so it is holding the camera callback and capping the rate.
+  double? get decodeLoad {
+    final median = medianDecodeMillis;
+    final fps = measuredFps;
+    if (median == null || fps == null || fps <= 0) return null;
+    return median / (1000 / fps);
+  }
+
+  /// Every frame the camera has delivered, decoded or not.
+  ///
+  /// Distinct from [_framesSeen], which counts only the frames that
+  /// reached the decoder. The difference is not small — a frame
+  /// arriving while a decode is in flight is dropped — and measuring
+  /// the camera with [_framesSeen] measures how fast this app can
+  /// process, not how fast the camera samples. The emission hint is
+  /// derived from this rate, so getting it wrong tells the sender to
+  /// emit faster than the camera can see.
+  int _framesDelivered = 0;
+
   Future<void> _onFrame(CameraImageData frame) async {
-    if (_decoding || _payloads.isClosed) return;
+    // Counted before anything can drop the frame: this is the camera's
+    // own rate, which is what the emission hint must be derived from.
+    _framesDelivered++;
+    _firstFrameAt ??= DateTime.now();
+
+    if (_decoding) return;
+    if (_payloads.isClosed) return;
     _decoding = true;
     _framesSeen++;
-    _firstFrameAt ??= DateTime.now();
-    if (!_activity.isClosed) _activity.add(null);
+    _signalActivity();
+    final startedAt = Stopwatch()..start();
     try {
-      final payload = await compute(decodeFrame, frame);
+      // Decoded here, not on a spawned isolate.
+      //
+      // compute() starts a fresh isolate for every frame. On the desktop
+      // this was affordable; on a phone the spawn costs far more than
+      // the decode it wraps — and while it runs, the _decoding guard
+      // above drops every frame the camera delivers. The scanner spent
+      // its time creating isolates instead of reading codes, which is
+      // why frames arrived but chunks did not.
+      //
+      // The decode itself is 5.3 ms median on this project's own frames.
+      // That fits inside a frame interval at any usable rate, so the
+      // preview does not stutter for it.
+      _lastFormat ??= frame.format.group.toString().split('.').last;
+      final pixels = frameToArgb(frame);
+      if (pixels == null) _framesUnreadable++;
+      if (dumpFrames && pixels != null) {
+        // Every tenth frame: enough to see a pattern across a few
+        // seconds without writing 30 files a second.
+        if (_framesSeen % 10 == 0) {
+          await _dumper?.write(pixels, frame.width, frame.height);
+        }
+      }
+      final payload = decodeFrame(frame);
       _recent.add(payload != null);
       if (_recent.length > _windowSize) _recent.removeAt(0);
       if (payload != null && !_payloads.isClosed) {
         _framesDecoded++;
-        _activity.add(null);
-        _payloads.add(payload);
+        _signalActivity();
+        // Consecutive reads of the same code are dropped.
+        //
+        // The camera runs far faster than the sender's display — 30 fps
+        // against 8 — so each QR is captured several times over. Passing
+        // every copy on is harmless to the decoder, which ignores
+        // duplicates, but it is not free upstream: the receive screen
+        // counted 3,332 frames for 49 chunks, where the code needs about
+        // 1.15, because most of that work was the same frame again.
+        //
+        // mobile_scanner did this with DetectionSpeed.noDuplicates; the
+        // replacement had no equivalent, and this is it.
+        if (payload != _lastPayload) {
+          _lastPayload = payload;
+          _payloads.add(payload);
+        }
       }
     } catch (_) {
       // A frame that cannot be decoded is the normal case, and an isolate
       // that fails on one frame should not end the scan.
     } finally {
+      // Recorded in the finally, so a frame the decoder threw on still
+      // counts. Those are not rare — a frame holding no code is the
+      // normal case — and leaving them out would time only the frames
+      // that happened to be easy.
+      _decodeMicros.add(startedAt.elapsedMicroseconds);
+      if (_decodeMicros.length > _decodeWindow) _decodeMicros.removeAt(0);
       _decoding = false;
     }
   }
@@ -292,3 +604,44 @@ class DesktopCameraScanner {
     await _activity.close();
   }
 }
+
+/// The capture resolution to use on [operatingSystem].
+///
+/// Separated from the camera so the choice can be tested without one, and
+/// taking the platform as a value rather than reading it, so every branch
+/// is reachable from a test on any machine.
+///
+/// Linux is held at medium because camera_linux can fail to initialise
+/// above it, and a scanner that will not start is worse than one that
+/// needs a steadier hand. Everywhere else takes high: low is 320x240,
+/// which cannot resolve any code this app emits.
+ResolutionPreset resolutionPresetFor(String operatingSystem) =>
+    operatingSystem == 'linux'
+        ? ResolutionPreset.medium
+        : ResolutionPreset.high;
+
+/// The capture width, in pixels, of each [ResolutionPreset] this app uses.
+///
+/// The `camera` package defines presets as target resolutions; a backend
+/// may hand back something near them. These are the nominal figures, and
+/// they are what the pixels-per-module arithmetic is done against.
+const Map<ResolutionPreset, int> kPresetCaptureWidth = {
+  ResolutionPreset.low: 320,
+  ResolutionPreset.medium: 720,
+  ResolutionPreset.high: 1280,
+  ResolutionPreset.veryHigh: 1920,
+};
+
+/// How many camera pixels fall on one QR module, for a code of
+/// [moduleCount] modules captured at [captureWidth], assuming the code
+/// occupies [frameFraction] of the frame's width.
+///
+/// A decoder needs roughly three; below two it cannot work at all. This
+/// is the figure that decides whether a scan is possible before frame
+/// rate, decoder or lighting are worth considering.
+double pixelsPerModule({
+  required int captureWidth,
+  required int moduleCount,
+  double frameFraction = 0.6,
+}) =>
+    captureWidth * frameFraction / moduleCount;

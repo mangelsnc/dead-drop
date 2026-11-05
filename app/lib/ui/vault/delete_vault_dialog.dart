@@ -11,18 +11,41 @@
 /// The copy is identical for a vault with one environment and a vault with
 /// two, so it says "everything in it", which is true in both cases.
 ///
-/// **It asks for a passphrase.** Erasing is destructive and irreversible,
-/// and an unlocked phone in someone else's hands must not be enough to
-/// destroy the owner's files. Any environment's passphrase works, and any
-/// of them erases the whole vault — see [VaultController.deleteVault].
+/// **It asks for a typed confirmation, not a passphrase.** It used to ask
+/// for the passphrase, which protected nothing: the vault is in the app's
+/// data directory, so anyone with the unlocked phone can already erase it
+/// from the system's settings or by uninstalling. What it did do was
+/// strand the owner who had forgotten it — and, because a wrong guess
+/// counted as a failed attempt, let them trip self-destruct while trying
+/// to delete their own vault.
+///
+/// What is left to guard against is the accident, and a word typed on
+/// purpose does that. Deleting discloses nothing: it does not unlock,
+/// does not show an entry, and does not reveal whether a decoy exists.
+/// The data was encrypted and stays encrypted — better deleted than read.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../passphrase_field.dart';
 import '../theme.dart';
 import 'vault_controller.dart';
+
+/// The word the user types to confirm.
+///
+/// Deliberately the plain English imperative rather than the vault's name
+/// or a phrase: it has to be readable and typable by someone who is not
+/// a native speaker and is already having a bad day.
+const String kDeleteConfirmationWord = 'DELETE';
+
+/// Whether [input] confirms the deletion.
+///
+/// Case and surrounding spaces are forgiven — a phone keyboard
+/// capitalises and trails spaces on its own, and refusing "delete " would
+/// be pedantry, not safety. What is not forgiven is a different word:
+/// the point is that something was typed on purpose.
+bool confirmsDeletion(String input) =>
+    input.trim().toUpperCase() == kDeleteConfirmationWord;
 
 /// Shows the delete-vault dialog. Returns true when the vault was erased.
 Future<bool> showDeleteVaultDialog(BuildContext context) async {
@@ -44,7 +67,14 @@ class _DeleteVaultDialog extends ConsumerStatefulWidget {
 class _DeleteVaultDialogState extends ConsumerState<_DeleteVaultDialog> {
   final _controller = TextEditingController();
   bool _working = false;
-  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    // The Delete button enables as soon as the word is right, so the
+    // field has to be watched rather than read on submit.
+    _controller.addListener(() => setState(() {}));
+  }
 
   @override
   void dispose() {
@@ -53,28 +83,19 @@ class _DeleteVaultDialogState extends ConsumerState<_DeleteVaultDialog> {
   }
 
   Future<void> _delete() async {
-    setState(() {
-      _working = true;
-      _error = null;
-    });
+    if (!confirmsDeletion(_controller.text)) return;
+    setState(() => _working = true);
 
-    final ok = await ref
-        .read(vaultControllerProvider.notifier)
-        .deleteVault(_controller.text);
+    await ref.read(vaultControllerProvider.notifier).deleteVault();
 
     if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop(true);
-      return;
-    }
-    setState(() {
-      _working = false;
-      _error = 'Incorrect passphrase';
-    });
+    Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
+    final confirmed = confirmsDeletion(_controller.text);
+
     return AlertDialog(
       title: const Text('Delete vault?'),
       content: Column(
@@ -86,23 +107,17 @@ class _DeleteVaultDialogState extends ConsumerState<_DeleteVaultDialog> {
             'undone, and there is no copy anywhere else.',
           ),
           const SizedBox(height: 16),
-          PassphraseField(
+          TextField(
             controller: _controller,
             autofocus: true,
-            labelText: 'Passphrase',
-            helperText: 'Required, so a phone left unlocked cannot be '
-                'wiped by someone else.',
-            onSubmitted: _working ? null : _delete,
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _error!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: DeadDropColors.error,
-                  ),
+            autocorrect: false,
+            enableSuggestions: false,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'Type $kDeleteConfirmationWord to confirm',
             ),
-          ],
+            onSubmitted: _working ? null : (_) => _delete(),
+          ),
         ],
       ),
       actions: [
@@ -114,7 +129,7 @@ class _DeleteVaultDialogState extends ConsumerState<_DeleteVaultDialog> {
           style: FilledButton.styleFrom(
             backgroundColor: DeadDropColors.error,
           ),
-          onPressed: _working ? null : _delete,
+          onPressed: (_working || !confirmed) ? null : _delete,
           child: _working
               ? const SizedBox(
                   width: 16,

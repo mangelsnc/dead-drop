@@ -38,11 +38,21 @@ bool get canScanQr =>
     Platform.isLinux ||
     Platform.isWindows;
 
-/// Whether this platform scans through the desktop camera path.
+/// Whether this platform scans through the camera-plus-zxing2 path.
 ///
-/// Decides which widget the receive and send pages build: `MobileScanner`
-/// where the plugin exists, [DesktopCameraScanner] where it does not.
-bool get usesDesktopScanner => Platform.isLinux || Platform.isWindows;
+/// Every platform now does. It used to be Linux and Windows only, with
+/// `mobile_scanner` elsewhere — but that package decodes with Google's
+/// ML Kit, which drags Play Services and the datatransport telemetry
+/// stack into the APK and with them `android.permission.INTERNET`. An app
+/// whose central claim is that it makes no network calls cannot ship a
+/// binary that asks for network permission; a reviewer who unzips the APK
+/// finds the opposite of what the submission says.
+///
+/// The replacement was already here: the `camera` plugin family provides
+/// frames on every platform through one interface, and this library
+/// decodes them in pure Dart. Kept as a getter rather than inlined so the
+/// routing stays in one place if a platform ever needs its own path again.
+bool get usesDesktopScanner => true;
 
 /// Converts one camera frame to the ARGB pixel array `zxing2` expects.
 ///

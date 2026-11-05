@@ -93,13 +93,19 @@ class Emitter {
     if (seq == 0 || seq % metadataInterval == 0) {
       final (nonce, ct) = session.encryptPayload(
         sodium,
-        buildFileMetadataPayload(fileName: session.fileName),
+        // Padded to a chunk, so this frame renders at the same QR
+        // version as the data frames around it and does not flash.
+        buildFileMetadataPayload(
+          fileName: session.fileName,
+          padTo: session.chunkSize,
+        ),
       );
       return Frame(
         fileId: session.fileId,
         seq: seq,
         seed: transferSeed,
-        chunkIds: const [],
+        // Degree 0 is what marks this as the metadata frame.
+        degree: 0,
         nonce: nonce,
         payload: ct,
       );
@@ -114,7 +120,9 @@ class Emitter {
       fileId: session.fileId,
       seq: seq,
       seed: transferSeed,
-      chunkIds: chunkIds,
+      // Only the count travels; the receiver recomputes the ids from
+      // (seq, seed, k).
+      degree: chunkIds.length,
       nonce: nonce,
       payload: ct,
     );

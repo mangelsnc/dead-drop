@@ -1,23 +1,25 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium/sodium.dart';
 
 import '../../src/chunking.dart';
+import '../../src/qrframe.dart';
 import '../../src/crypto.dart';
 import '../../src/screen_wake.dart';
+import '../../src/emission_profile.dart';
 import '../../src/emitter.dart';
 import '../../src/file_metadata.dart';
 import '../../src/handshake.dart';
 import '../../src/identity_store.dart';
 import '../../src/transport.dart';
 import '../../main.dart';
+import '../info_point.dart';
 import '../theme.dart';
 import '../technical_text.dart';
 import '../desktop_scanner_view.dart';
@@ -44,6 +46,10 @@ class SendState {
     this.showingBootstrap = false,
     this.sendError,
     this.appliedHint,
+    this.measuredFps,
+    this.qrDisplaySizePx = 0,
+    this.qrDisplaySizeMeasured = false,
+    this.brightness = kDefaultTransferBrightness,
   });
 
   final String? fileName;
@@ -62,6 +68,37 @@ class SendState {
   /// applied. Held so the screen can say where these settings came from:
   /// numbers that changed by themselves are indistinguishable from a bug.
   final HandshakeHint? appliedHint;
+
+  /// How many logical pixels the layout gives the QR.
+  ///
+  /// The notifier needs it to negotiate settings a receiver asked for
+  /// against what this screen can actually draw, and only the layout
+  /// knows it. Zero only before the send screen has laid out at all.
+  /// Codes per second the screen is really managing, or null before
+  /// there is enough to measure. The configured [fps] is a request; this
+  /// is what happened.
+  final double? measuredFps;
+
+  final double qrDisplaySizePx;
+
+  /// How bright this screen runs while emitting, 0 dimmest to 1 full.
+  ///
+  /// Full by default, which is right against a phone camera. It is a
+  /// setting because it is not right against every camera: a webcam with
+  /// auto-exposure meters the whole bright screen, stops down, and the
+  /// code's dark modules lose their contrast. Measured on a Logitech
+  /// StreamCam, which could not complete a transfer a phone camera
+  /// completed easily.
+  final double brightness;
+
+  /// Whether [qrDisplaySizePx] came from a drawn code rather than from a
+  /// prediction made before one existed.
+  ///
+  /// The handshake happens before any QR is on screen, so the
+  /// negotiation it performs has to work from a prediction. Once the
+  /// sending view reports a real measurement it is authoritative and no
+  /// prediction may replace it.
+  final bool qrDisplaySizeMeasured;
 
   final Emitter? emitter;
   final Identity? identity;
@@ -120,6 +157,10 @@ class SendState {
     bool? showingBootstrap,
     String? sendError,
     HandshakeHint? appliedHint,
+    double? measuredFps,
+    double? qrDisplaySizePx,
+    bool? qrDisplaySizeMeasured,
+    double? brightness,
     bool clearSendError = false,
     bool clearReceiverPk = false,
     bool clearHint = false,
@@ -142,6 +183,11 @@ class SendState {
       showingBootstrap: showingBootstrap ?? this.showingBootstrap,
       sendError: clearSendError ? null : (sendError ?? this.sendError),
       appliedHint: clearHint ? null : (appliedHint ?? this.appliedHint),
+      measuredFps: measuredFps ?? this.measuredFps,
+      qrDisplaySizePx: qrDisplaySizePx ?? this.qrDisplaySizePx,
+      qrDisplaySizeMeasured:
+          qrDisplaySizeMeasured ?? this.qrDisplaySizeMeasured,
+      brightness: brightness ?? this.brightness,
     );
   }
 }
@@ -152,6 +198,51 @@ class SendNotifier extends StateNotifier<SendState> {
   final Sodium _sodium;
   final IdentityStore _identityStore;
   Timer? _timer;
+
+  /// Data codes shown since the session header was last displayed.
+  int _sinceBootstrap = 0;
+
+  /// What the screen is really managing, as opposed to what was asked
+  /// for. Drawing a QR is not free, and a slow compositor cannot do it
+  /// ten times a second however short the timer's interval is.
+  final EmissionRate _rate = EmissionRate();
+
+  /// Where a frame's time goes, split into preparing and drawing.
+  ///
+  /// Only filled when the binary was built with
+  /// `DEADDROP_PROFILE_EMISSION`; see `emission_profile.dart` for what
+  /// [EmissionRate] alone cannot answer.
+  final EmissionProfile profile = EmissionProfile();
+
+  /// Registered only in a profiling build, and removed in [dispose].
+  ///
+  /// The engine reports every frame the app produces, including ones this
+  /// screen did not cause. That is acceptable here because the sending view
+  /// is the only thing on screen while it runs, and a median over a window
+  /// absorbs the few frames around entering and leaving it.
+  TimingsCallback? _timingsCallback;
+
+  void _startEngineTimings() {
+    if (!profileEmission || _timingsCallback != null) return;
+    void onTimings(List<FrameTiming> timings) {
+      for (final timing in timings) {
+        profile.recordEngineFrame(
+          buildDuration: timing.buildDuration,
+          rasterDuration: timing.rasterDuration,
+        );
+      }
+    }
+
+    _timingsCallback = onTimings;
+    SchedulerBinding.instance.addTimingsCallback(onTimings);
+  }
+
+  void _stopEngineTimings() {
+    final callback = _timingsCallback;
+    if (callback == null) return;
+    SchedulerBinding.instance.removeTimingsCallback(callback);
+    _timingsCallback = null;
+  }
 
   Future<void> pickFile() async {
     // file_picker 13 made these static and returns the files directly;
@@ -170,7 +261,8 @@ class SendNotifier extends StateNotifier<SendState> {
     // afterwards; if even the largest option cannot fit the file, surface a
     // clear error instead of letting the transfer fail silently later.
     final chunkSize = recommendedChunkSize(bytes.length);
-    final error = fileSizeError(bytes.length, chunkSize) ??
+    final error =
+        fileSizeError(bytes.length, chunkSize) ??
         (bytes.length > maxFileSizeForChunkSize(chunkSize)
             ? fileTooLargeError(bytes.length)
             : null);
@@ -201,7 +293,8 @@ class SendNotifier extends StateNotifier<SendState> {
   void loadBytes(String name, Uint8List bytes) {
     _stopTimer();
     final chunkSize = recommendedChunkSize(bytes.length);
-    final error = fileSizeError(bytes.length, chunkSize) ??
+    final error =
+        fileSizeError(bytes.length, chunkSize) ??
         (bytes.length > maxFileSizeForChunkSize(chunkSize)
             ? fileTooLargeError(bytes.length)
             : null);
@@ -210,8 +303,7 @@ class SendNotifier extends StateNotifier<SendState> {
     state = SendState(
       fileName: name,
       fileBytes: bytes,
-      fileExtension:
-          dot > 0 ? name.substring(dot + 1).toLowerCase() : null,
+      fileExtension: dot > 0 ? name.substring(dot + 1).toLowerCase() : null,
       receiverPk: state.receiverPk,
       chunkSize: chunkSize,
       ecLevel: state.ecLevel,
@@ -248,11 +340,46 @@ class SendNotifier extends StateNotifier<SendState> {
       chunkSize = state.chunkSize;
     }
 
+    // The pair has to be renderable. A hint arrives from another device
+    // and knows nothing about the file being sent, so it can name a
+    // combination that produces a QR larger than version 40 — which
+    // displays nothing at all.
+    var ec = chunkFitsQr(chunkSize, hint.ecLevel)
+        ? hint.ecLevel
+        : (ecLevelsFor(chunkSize).isEmpty
+              ? state.ecLevel
+              : ecLevelsFor(chunkSize).first);
+
+    // Renderable is not the same as readable. The hint says what the
+    // receiver's camera can manage; it knows nothing about this screen,
+    // and a code too dense to draw here cannot be read however good
+    // that camera is. The UI already stops a user choosing such a pair
+    // by hand — this is the path that bypassed it. Reported after a
+    // phone accepted 512 bytes at level Q and transferred nothing.
+    //
+    // The size here is a prediction until the sending view has drawn a
+    // code, because the handshake happens before it exists. This used
+    // to be guarded with `> 0` and so skipped the negotiation entirely
+    // at exactly the moment it was needed: a phone accepted 512 bytes
+    // from a Mac Studio, then warned that it could not draw them once
+    // the code appeared. An unnegotiated setting is the failure this
+    // whole function exists to prevent, so a prediction is used rather
+    // than nothing.
+    if (state.qrDisplaySizePx > 0) {
+      final agreed = negotiateSettings(
+        requestedChunkSize: chunkSize,
+        requestedEcLevel: ec,
+        displaySize: state.qrDisplaySizePx,
+      );
+      chunkSize = agreed.chunkSize;
+      ec = agreed.ecLevel;
+    }
+
     state = state.copyWith(
       receiverPk: pk,
       fps: hint.fps,
       chunkSize: chunkSize,
-      ecLevel: hint.ecLevel,
+      ecLevel: ec,
       appliedHint: hint,
     );
   }
@@ -267,6 +394,53 @@ class SendNotifier extends StateNotifier<SendState> {
     state = state.copyWith(clearReceiverPk: true);
   }
 
+  /// Records how much room the layout gives the QR.
+  ///
+  /// Called from the display widget's LayoutBuilder, which is the only
+  /// place that knows. Ignored when unchanged, so it does not loop: a
+  /// state change rebuilds the layout, which reports again.
+  void reportQrDisplaySize(double px) {
+    if (state.qrDisplaySizeMeasured &&
+        (state.qrDisplaySizePx - px).abs() < 0.5) {
+      return;
+    }
+    state = state.copyWith(qrDisplaySizePx: px, qrDisplaySizeMeasured: true);
+  }
+
+  /// Records what the QR's size *will be*, before one has been drawn.
+  ///
+  /// [reportQrDisplaySize] is the real measurement and is always
+  /// preferred, but it only exists once the sending view is on screen —
+  /// which is after the handshake. The handshake is where a receiver's
+  /// hint has to be judged against what this screen can draw, so
+  /// without this the negotiation ran with a size of zero, skipped
+  /// itself entirely, accepted a chunk size the screen could not show,
+  /// and then warned about it once the code appeared. Reported from a
+  /// phone that accepted 512 bytes from a Mac Studio and could not draw
+  /// them.
+  ///
+  /// Never overwrites a real measurement: a prediction is only better
+  /// than nothing.
+  void predictQrDisplaySize(double px) {
+    if (state.qrDisplaySizeMeasured) return;
+    if ((state.qrDisplaySizePx - px).abs() < 0.5) return;
+    state = state.copyWith(qrDisplaySizePx: px);
+  }
+
+  /// Sets how bright this screen runs while emitting.
+  ///
+  /// Takes effect when the transfer starts. It used to re-apply itself
+  /// mid-transfer too, on the theory that someone would hunt for the
+  /// level the other camera can read without stopping -- but the
+  /// sending view replaces the whole screen, controls included, so that
+  /// path could never be reached. A phone's own brightness control is
+  /// there for an adjustment mid-transfer, and it is better at it.
+  void setBrightness(double value) {
+    final level = value.clamp(0.0, 1.0);
+    if ((state.brightness - level).abs() < 0.001) return;
+    state = state.copyWith(brightness: level);
+  }
+
   void setChunkSize(int size) {
     // Changing the chunk size mid-transfer cannot be applied to a running
     // emission — the receiver's decoder is built around the chunk count in
@@ -278,14 +452,28 @@ class SendNotifier extends StateNotifier<SendState> {
     // appears / clears immediately as the user moves the slider.
     final bytes = state.fileBytes;
     final error = bytes == null ? null : fileSizeError(bytes.length, size);
+
+    // Weaken the correction if the new chunk will not fit a QR at the
+    // current level. The alternative is a combination that renders
+    // nothing, and the user asked for the chunk size — so that is the
+    // choice to honour, with the level following it.
+    final ec = chunkFitsQr(size, state.ecLevel)
+        ? state.ecLevel
+        : (ecLevelsFor(size).isEmpty ? state.ecLevel : ecLevelsFor(size).first);
+
     state = state.copyWith(
       chunkSize: size,
+      ecLevel: ec,
       sendError: error,
       clearSendError: error == null,
     );
   }
 
   void setEcLevel(String level) {
+    // Ignored when the current chunk could not be rendered at it. The UI
+    // disables those, so this is the guard for anything reaching here
+    // another way — the receiver's hint, most of all.
+    if (!chunkFitsQr(state.chunkSize, level)) return;
     state = state.copyWith(ecLevel: level);
   }
 
@@ -321,7 +509,8 @@ class SendNotifier extends StateNotifier<SendState> {
       );
     } on DeadDropCryptoError catch (e) {
       state = state.copyWith(
-        sendError: fileSizeError(state.fileBytes!.length, state.chunkSize) ??
+        sendError:
+            fileSizeError(state.fileBytes!.length, state.chunkSize) ??
             e.message,
       );
       return;
@@ -336,8 +525,11 @@ class SendNotifier extends StateNotifier<SendState> {
       currentQrData: encodeQrPayload(emitter.bootstrapQrPayload()),
       clearSendError: true,
     );
-    // The screen must not dim while it is the transmission medium.
-    unawaited(keepScreenAwake());
+    // The screen must not dim while it is the transmission medium, and
+    // how bright it is changes how the receiving camera exposes.
+    unawaited(keepScreenAwake(brightness: state.brightness));
+    _sinceBootstrap = 0;
+    _rate.reset();
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
     _timer = Timer(const Duration(seconds: 4), _startDataPhase);
@@ -396,6 +588,9 @@ class SendNotifier extends StateNotifier<SendState> {
 
   void _startDataTimer() {
     _stopTimer();
+    _startEngineTimings();
+    _rate.reset();
+    profile.reset();
     final interval = Duration(milliseconds: (1000 / state.fps).round());
     _timer = Timer.periodic(interval, (_) => _emitNextFrame());
   }
@@ -408,16 +603,85 @@ class SendNotifier extends StateNotifier<SendState> {
   void _emitNextFrame() {
     final emitter = state.emitter;
     if (emitter == null || !state.isEmitting) return;
+
+    // Slip the session header back into the stream every so often.
+    //
+    // A receiver cannot decode anything without it, and it used to be
+    // shown once, for four seconds at the start, and never again. A
+    // receiver that was still focusing, aimed slightly wrong, or
+    // simply arrived a moment late would read hundreds of data codes
+    // and never begin -- with nothing on either screen to say why.
+    // Reported from a desktop receiver sitting at "read 55" with no
+    // progress while the sender was already at code 234.
+    //
+    // It also contradicts what the loop is for: the codes repeat so a
+    // transfer can be joined at any point, and the header has to
+    // repeat with them. The cost is one code in
+    // kBootstrapRepeatEvery, which a fountain code absorbs -- any
+    // other code carries the same payload round again.
+    _sinceBootstrap++;
+    if (_sinceBootstrap >= kBootstrapRepeatEvery) {
+      _sinceBootstrap = 0;
+      _rate.recordFrame();
+      final stopwatch = profileEmission ? (Stopwatch()..start()) : null;
+      final payload = encodeQrPayload(emitter.bootstrapQrPayload());
+      _recordPrepared(stopwatch);
+      state = state.copyWith(
+        framesEmitted: state.framesEmitted + 1,
+        showingBootstrap: true,
+        currentQrData: payload,
+        measuredFps: _rate.measuredFps,
+      );
+      _markPublished();
+      return;
+    }
+
+    _rate.recordFrame();
+    final stopwatch = profileEmission ? (Stopwatch()..start()) : null;
     final frame = emitter.nextFrame();
+    final payload = encodeQrPayload(frame.pack());
+    _recordPrepared(stopwatch);
     state = state.copyWith(
       framesEmitted: state.framesEmitted + 1,
-      currentQrData: encodeQrPayload(frame.pack()),
+      showingBootstrap: false,
+      currentQrData: payload,
+      measuredFps: _rate.measuredFps,
     );
+    _markPublished();
+  }
+
+  /// Closes the prepare timer and opens the draw one.
+  ///
+  /// The two are adjacent on purpose: between them is the handover of the
+  /// new code to the widget, so together they account for a whole frame
+  /// without a gap either could be hiding in.
+  void _recordPrepared(Stopwatch? stopwatch) {
+    if (!profileEmission || stopwatch == null) return;
+    profile.recordPrepare(stopwatch.elapsed);
+  }
+
+  /// Opens the frame-period timer, after the payload has been published.
+  ///
+  /// Separate from [_recordPrepared] because it has to run on the far side
+  /// of the `state = ...` assignment. It used to run before it, while the
+  /// doc comment claimed the handover sat between the two.
+  void _markPublished() {
+    if (!profileEmission) return;
+    profile.markDrawStart();
+  }
+
+  /// Emits [count] frames without waiting for the timer. Tests only.
+  @visibleForTesting
+  void debugEmitFrames(int count) {
+    for (var i = 0; i < count; i++) {
+      _emitNextFrame();
+    }
   }
 
   @override
   void dispose() {
     _stopTimer();
+    _stopEngineTimings();
     // A wakelock outliving the notifier would keep the screen on for the
     // rest of the app's life, draining a device whose owner may have no way
     // to charge it.
@@ -496,6 +760,22 @@ class _SendPageState extends ConsumerState<SendPage> {
     if (state.isEmitting && state.currentQrData != null) {
       return _SendingScreen(state: state, notifier: notifier);
     }
+
+    // Predict the code's size before one has been drawn, so a handshake
+    // arriving now is negotiated against this screen rather than
+    // against zero. The sending view's own measurement replaces this
+    // the moment it exists and is never overwritten by it.
+    //
+    // Derived through predictedQrDisplaySize, which subtracts what the
+    // sending view spends on everything that is not the code. Taking
+    // the window's shorter side instead overclaimed -- 720 against a
+    // real 394 on a laptop -- and an overclaim agrees to a chunk size
+    // this screen cannot draw, which is the failure the prediction
+    // exists to prevent.
+    final window = MediaQuery.sizeOf(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifier.predictQrDisplaySize(predictedQrDisplaySize(window));
+    });
 
     return Scaffold(
       appBar: AppBar(title: const Text('Send a file')),
@@ -750,7 +1030,8 @@ class _FileInfoTileState extends State<_FileInfoTile> {
 
   @override
   Widget build(BuildContext context) {
-    final hasMetadata = widget.fileExtension != null ||
+    final hasMetadata =
+        widget.fileExtension != null ||
         widget.filePath != null ||
         widget.fileBytes != null;
 
@@ -791,8 +1072,11 @@ class _FileInfoTileState extends State<_FileInfoTile> {
                   ),
                   const SizedBox(width: 4),
                 ],
-                const Icon(Icons.check_circle,
-                    color: DeadDropColors.success, size: 20),
+                const Icon(
+                  Icons.check_circle,
+                  color: DeadDropColors.success,
+                  size: 20,
+                ),
               ],
             ),
           ),
@@ -841,8 +1125,8 @@ class _FileInfoTileState extends State<_FileInfoTile> {
       final value = mimeLabel.isNotEmpty && typeLabel.isNotEmpty
           ? '$typeLabel ($mimeLabel)'
           : typeLabel.isNotEmpty
-              ? typeLabel
-              : mimeLabel;
+          ? typeLabel
+          : mimeLabel;
       if (value.isNotEmpty) {
         rows.add(_MetadataRow(label: 'Type', value: value));
       }
@@ -852,10 +1136,12 @@ class _FileInfoTileState extends State<_FileInfoTile> {
     if (bytes != null && isPreviewableImageExtension(ext)) {
       final dims = parseImageDimensions(bytes);
       if (dims != null) {
-        rows.add(_MetadataRow(
-          label: 'Dimensions',
-          value: '${dims.width} \u00d7 ${dims.height}',
-        ));
+        rows.add(
+          _MetadataRow(
+            label: 'Dimensions',
+            value: '${dims.width} \u00d7 ${dims.height}',
+          ),
+        );
       }
     }
 
@@ -863,33 +1149,23 @@ class _FileInfoTileState extends State<_FileInfoTile> {
     if (bytes != null && ext == 'pdf') {
       final pages = countPdfPages(bytes);
       if (pages != null) {
-        rows.add(_MetadataRow(
-          label: 'Pages',
-          value: '~$pages',
-        ));
+        rows.add(_MetadataRow(label: 'Pages', value: '~$pages'));
       }
     }
 
     // Size: human-readable + exact bytes
-    rows.add(_MetadataRow(
-      label: 'Size',
-      value: formatSizeWithBytes(widget.fileSize),
-    ));
+    rows.add(
+      _MetadataRow(label: 'Size', value: formatSizeWithBytes(widget.fileSize)),
+    );
 
     // Magic bytes / signature
     if (bytes != null && bytes.isNotEmpty) {
-      rows.add(_MetadataRow(
-        label: 'Signature',
-        value: fileSignature(bytes),
-      ));
+      rows.add(_MetadataRow(label: 'Signature', value: fileSignature(bytes)));
     }
 
     // Path
     if (widget.filePath != null) {
-      rows.add(_MetadataRow(
-        label: 'Path',
-        value: widget.filePath!,
-      ));
+      rows.add(_MetadataRow(label: 'Path', value: widget.filePath!));
     }
 
     return Padding(
@@ -937,8 +1213,9 @@ class _InfoButton extends StatelessWidget {
           child: Icon(
             Icons.info_outline,
             size: 18,
-            color:
-                expanded ? DeadDropColors.accent : DeadDropColors.textSecondary,
+            color: expanded
+                ? DeadDropColors.accent
+                : DeadDropColors.textSecondary,
           ),
         ),
       ),
@@ -964,18 +1241,16 @@ class _MetadataRow extends StatelessWidget {
             width: 72,
             child: Text(
               label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: DeadDropColors.textSecondary,
-                  ),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: DeadDropColors.textSecondary),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               value,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: DeadDropColors.textPrimary,
-                  ),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: DeadDropColors.textPrimary),
               overflow: TextOverflow.ellipsis,
               maxLines: 2,
             ),
@@ -1002,10 +1277,7 @@ class _MetadataRow extends StatelessWidget {
 bool get _canScanQr => canScanQr;
 
 class _ReceiverKeySection extends StatelessWidget {
-  const _ReceiverKeySection({
-    required this.state,
-    required this.notifier,
-  });
+  const _ReceiverKeySection({required this.state, required this.notifier});
 
   final SendState state;
   final SendNotifier notifier;
@@ -1114,27 +1386,7 @@ class _KeyScanPage extends StatefulWidget {
 }
 
 class _KeyScanPageState extends State<_KeyScanPage> {
-  late final MobileScannerController _controller;
   bool _found = false;
-
-  @override
-  void initState() {
-    super.initState();
-    if (usesDesktopScanner) return;
-    // macOS has mobile_scanner but no "back" camera concept.
-    _controller = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: Platform.isMacOS ? CameraFacing.front : CameraFacing.back,
-    );
-  }
-
-  @override
-  void dispose() {
-    // Only created on the mobile_scanner path; disposing an uninitialised
-    // late field would throw.
-    if (!usesDesktopScanner) _controller.dispose();
-    super.dispose();
-  }
 
   /// Handles one decoded QR string, from either camera implementation.
   ///
@@ -1156,45 +1408,7 @@ class _KeyScanPageState extends State<_KeyScanPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (usesDesktopScanner)
-            DesktopScannerView(onDetect: _onRaw)
-          else
-            MobileScanner(
-            controller: _controller,
-            onDetect: (capture) {
-              if (_found) return;
-              for (final barcode in capture.barcodes) {
-                final raw = barcode.rawValue;
-                if (raw == null) continue;
-                _onRaw(raw);
-              }
-            },
-            errorBuilder: (context, error) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.videocam_off,
-                          color: DeadDropColors.error, size: 48),
-                      const SizedBox(height: 16),
-                      Text(
-                        _mapScannerError(error),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: DeadDropColors.error),
-                      ),
-                      const SizedBox(height: 16),
-                      OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Go back'),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
+          DesktopScannerView(onDetect: _onRaw),
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
@@ -1214,23 +1428,6 @@ class _KeyScanPageState extends State<_KeyScanPage> {
         ],
       ),
     );
-  }
-
-  static String _mapScannerError(MobileScannerException error) {
-    return switch (error.errorCode) {
-      MobileScannerErrorCode.controllerUninitialized =>
-        'Camera is not ready yet. Please wait.',
-      MobileScannerErrorCode.permissionDenied =>
-        'Camera permission denied. Check your system settings and allow '
-            'camera access for DeadDrop.',
-      MobileScannerErrorCode.unsupported =>
-        'No camera detected on this device.',
-      MobileScannerErrorCode.controllerAlreadyInitialized =>
-        'Camera is already in use by another application. '
-            'Close it and try again.',
-      _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
-          'Try closing other apps that use the camera.',
-    };
   }
 }
 
@@ -1359,10 +1556,7 @@ class _ConfigSection extends StatelessWidget {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          leading: const CircleAvatar(
-            radius: 14,
-            child: Text('3'),
-          ),
+          leading: const CircleAvatar(radius: 14, child: Text('3')),
           title: Text(
             'Options',
             style: Theme.of(context).textTheme.titleMedium,
@@ -1377,10 +1571,8 @@ class _ConfigSection extends StatelessWidget {
                 ? 'Transfer parameters'
                 : 'Set from the receiver\'s camera — tap to adjust',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: state.appliedHint == null
-                      ? null
-                      : DeadDropColors.success,
-                ),
+              color: state.appliedHint == null ? null : DeadDropColors.success,
+            ),
           ),
           initiallyExpanded: false,
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -1388,13 +1580,38 @@ class _ConfigSection extends StatelessWidget {
             if (state.appliedHint != null) ...[
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  'The receiver\'s QR carried these settings, measured from '
-                  'their camera. They are a suggestion — change anything '
-                  'here if the transfer is not reading well.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: DeadDropColors.textSecondary,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'The receiver\'s QR carried these settings, measured '
+                      'from their camera. They are a suggestion — change '
+                      'anything here if the transfer is not reading well.',
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: DeadDropColors.textSecondary),
+                    ),
+                    const SizedBox(height: 6),
+                    // What the receiver asked for, beside what is in
+                    // force. They differ when this screen cannot draw
+                    // what was asked, or when the file will not fit it,
+                    // and without seeing both there is no way to tell
+                    // a negotiated value from one that simply did not
+                    // apply.
+                    Text(
+                      'Asked for: ${state.appliedHint!.chunkSize} B · '
+                      '${state.appliedHint!.fps.round()} fps · '
+                      'EC-${state.appliedHint!.ecLevel}'
+                      '${_hintDiffers(state) ? '  →  using '
+                                '${state.chunkSize} B · ${state.fps.round()} fps · '
+                                'EC-${state.ecLevel}' : ''}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: _hintDiffers(state)
+                            ? DeadDropColors.warning
+                            : DeadDropColors.textSecondary,
+                        fontFamily: 'monospace',
                       ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1407,19 +1624,99 @@ class _ConfigSection extends StatelessWidget {
               divisions: 20,
               unit: ' fps',
               onChanged: notifier.setFps,
+              help: SettingHelp.frameRate,
             ),
+            // Only where the platform can act on it. On desktop the
+            // window has no brightness of its own, and a slider that
+            // does nothing is worse than no slider.
+            if (supportsTransferBrightness)
+              _ParamSlider(
+                label: 'Screen brightness',
+                value: state.brightness,
+                min: 0.2,
+                // Not 0: a screen dark enough to be unreadable is never
+                // the answer, and a slider that can reach it invites
+                // someone to blame the app for a black screen.
+                max: 1,
+                divisions: 8,
+                unit: '',
+                format: (v) => '${(v * 100).round()}%',
+                onChanged: notifier.setBrightness,
+                help: SettingHelp.brightness,
+              ),
             const SizedBox(height: 12),
-            const Text('Error correction'),
-            const SizedBox(height: 8),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'L', label: Text('L (7%)')),
-                ButtonSegment(value: 'M', label: Text('M (15%)')),
-                ButtonSegment(value: 'Q', label: Text('Q (25%)')),
-                ButtonSegment(value: 'H', label: Text('H (30%)')),
+            const Row(
+              children: [
+                Text('Error correction'),
+                InfoPoint(
+                  title: 'Error correction',
+                  body: SettingHelp.errorCorrection,
+                ),
               ],
-              selected: {state.ecLevel},
-              onSelectionChanged: (s) => notifier.setEcLevel(s.first),
+            ),
+            const SizedBox(height: 8),
+            // Stretched across the row. A SegmentedButton sizes itself
+            // to its content, so on a desktop window the four levels
+            // huddled into a small block at the left while the row sat
+            // empty beside them. Reported from macOS.
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<String>(
+                // No checkmark on the selected segment: Material reserves
+                // room for it inside the segment, which on a phone took
+                // enough width from the label that "M (15%)" wrapped onto
+                // three lines and the selected segment grew to twice the
+                // height of its neighbours. The fill already says which
+                // one is selected.
+                showSelectedIcon: false,
+                // A level is disabled when the current chunk would not fit
+                // in a QR with that much correction. Stronger correction
+                // leaves less room for data, so at 2048 bytes only L has
+                // the capacity — offering the others rendered nothing.
+                segments: [
+                  // Level and overhead on separate lines, centred. On one
+                  // line "M (15%)" does not fit a quarter of a phone's
+                  // width and wraps mid-label; stacked, each segment is
+                  // the same shape whatever it contains.
+                  for (final ec in const [
+                    ('L', '7%'),
+                    ('M', '15%'),
+                    ('Q', '25%'),
+                    ('H', '30%'),
+                  ])
+                    ButtonSegment(
+                      value: ec.$1,
+                      label: Padding(
+                        // Breathing room inside each segment. Without it
+                        // the control shrinks to the width of "15%" and
+                        // sits as a small cramped block in a desktop
+                        // window, which is how it was reported from
+                        // macOS. The padding also makes each segment a
+                        // comfortable tap target on a phone.
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(ec.$1),
+                            Text(
+                              '(${ec.$2})',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      enabled: chunkFitsQr(state.chunkSize, ec.$1),
+                    ),
+                ],
+                selected: {state.ecLevel},
+                onSelectionChanged: (s) => notifier.setEcLevel(s.first),
+                // Each segment takes an equal share of the row instead of
+                // sizing to its own text, so the four read as one scale
+                // rather than four buttons of different widths.
+                style: const ButtonStyle(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
             ),
           ],
         ),
@@ -1483,102 +1780,258 @@ class _SendingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Uses the size the QR was last given, which _QrDisplay reports as
+    // it lays out. Zero before the first frame, when there is nothing
+    // to advise about yet.
+    //
+    // The reachable size is what this device could draw if its window
+    // were made as large as it goes: the global ceiling on a desktop,
+    // and on a phone the screen it already fills. Advising a phone to
+    // enlarge a window it cannot enlarge recommended 2048-byte chunks
+    // to a Redmi Note 14 that would have drawn them at 1.95 pixels per
+    // module, less than half the floor.
+    final reachable = windowFillsTheScreen
+        ? predictedQrDisplaySize(MediaQuery.sizeOf(context))
+        : kQrMaxDisplaySize;
+    final advice = state.qrDisplaySizePx > 0
+        ? qrSizeAdvice(
+            displaySize: state.qrDisplaySizePx,
+            chunkSize: state.chunkSize,
+            ecLevel: state.ecLevel,
+            reachableSize: reachable,
+          )
+        : null;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sending'),
-        automaticallyImplyLeading: false,
-      ),
+      // No AppBar. It cost 56 logical pixels of height on every screen
+      // and said only "Sending", which the codes on screen already make
+      // obvious. Height is the scarce dimension here: it is what the QR
+      // is sized from, and a 1280x800 laptop was drawing a 394-pixel
+      // code -- barely larger than a phone's 345 -- because the
+      // furniture around the code ate the window.
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              // File info
-              Text(
-                state.fileName ?? 'file',
-                style: Theme.of(context).textTheme.titleMedium,
-                overflow: TextOverflow.ellipsis,
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+          // Everything lines up with the code.
+          //
+          // The column used to be the width of the window, so on a
+          // 24-inch monitor the file name sat in one far corner, its
+          // size in the other, and the controls floated under a code
+          // they had no relationship to. The code is what this screen
+          // is for; it sets the measure, and the rest is a caption to
+          // it.
+          //
+          // The width comes from what _QrDisplay reported last frame.
+          // Before the first frame there is nothing to align to, so the
+          // block is unconstrained for one frame and then settles.
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: state.qrDisplaySizePx > 0
+                    ? state.qrDisplaySizePx
+                    : double.infinity,
               ),
-              Text(
-                formatFileSize(state.fileBytes?.length ?? 0),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 24),
-
-              // QR display — takes remaining space
-              Expanded(
-                child: Center(
-                  child: _QrDisplay(state: state),
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // Progress info
-              Text(
-                state.showingBootstrap
-                    ? 'Session bootstrap'
-                    : state.totalFrames != null
-                        ? 'Frame ${state.framesEmitted}/${state.totalFrames}'
-                        : 'Frame ${state.framesEmitted}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${state.fps.round()} fps · ${state.chunkSize} B/chunk · '
-                'EC-${state.ecLevel}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: DeadDropColors.textSecondary,
-                    ),
-              ),
-              const SizedBox(height: 24),
-
-              // Restart and Stop. Restart exists because finding workable
-              // fps and chunk-size values is trial and error, and without
-              // it the only way to apply a new value was to close the app
-              // and re-pair with the receiver.
-              Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: notifier.restartEmitting,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Restart'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 56),
+                  // The file, on one line: name left, size right.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          state.fileName ?? 'file',
+                          style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
+                      const SizedBox(width: 12),
+                      Text(
+                        formatFileSize(state.fileBytes?.length ?? 0),
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: DeadDropColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // The code takes everything left over.
+                  Expanded(
+                    child: Center(
+                      child: _QrDisplay(state: state, notifier: notifier),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: notifier.stopEmitting,
-                      icon: const Icon(Icons.stop),
-                      label: const Text('Stop'),
-                      style: FilledButton.styleFrom(
+                  const SizedBox(height: 12),
+
+                  // Progress and settings, on one line.
+                  //
+                  // The counter read "Frame 599/195", which looks
+                  // broken: the denominator was the chunk count, but
+                  // the emitter loops for as long as it takes, so the
+                  // numerator passes it routinely and says nothing is
+                  // wrong. A fountain code has no total -- only a
+                  // floor.
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          state.showingBootstrap
+                              ? 'Session bootstrap — point the receiver '
+                                    'camera here'
+                              : state.totalFrames != null
+                              ? 'Code ${state.framesEmitted} · '
+                                    '${state.totalFrames} needed at least'
+                              : 'Code ${state.framesEmitted}',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        // The rate measured, when the screen cannot
+                        // keep up with the rate requested. A Linux
+                        // laptop asked for ten managed about four, and
+                        // said "10 fps" -- the number agreed with the
+                        // slider and disagreed with the screen in front
+                        // of the user.
+                        '${_emissionRateLabel(state)} · '
+                        '${state.chunkSize} B · EC-${state.ecLevel}',
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: DeadDropColors.textSecondary),
+                      ),
+                    ],
+                  ),
+
+                  // Where a frame's time goes. Absent from any build
+                  // without DEADDROP_PROFILE_EMISSION, which makes
+                  // profileEmission a compile-time false and takes this
+                  // and the recording with it.
+                  //
+                  // In this column rather than under the QR for the
+                  // reason the size advice is: the QR's widget is given
+                  // a box sized for the code, and anything stacked
+                  // inside it overflows.
+                  if (profileEmission) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '${profileWithoutQr ? 'NO QR · ' : ''}'
+                      '${notifier.profile.summary ?? 'no frames yet'}',
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: DeadDropColors.accent),
+                    ),
+                  ],
+
+                  // Advice about the code's size on screen, in the
+                  // column rather than inside the QR widget: that
+                  // widget is given a box sized for the code, so
+                  // anything stacked under it overflows that box.
+                  if (advice != null) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          advice.isProblem
+                              ? Icons.warning_amber_rounded
+                              : Icons.open_in_full,
+                          size: 18,
+                          color: advice.isProblem
+                              ? DeadDropColors.error
+                              : DeadDropColors.textSecondary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            advice.text,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: advice.isProblem
+                                      ? DeadDropColors.error
+                                      : DeadDropColors.textSecondary,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+
+                  // Restart and Stop share the measure; New transfer
+                  // takes all of it.
+                  //
+                  // Rank is carried by weight, not by size: Stop is
+                  // filled because it is the one being reached for,
+                  // Restart is outlined, and New transfer is a quiet
+                  // text button because it abandons the file and the
+                  // key that Stop deliberately keeps. Giving it
+                  // Restart's outline made two very different actions
+                  // look like a pair; giving it a narrower box would
+                  // make it look like a third of the same thing.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: notifier.restartEmitting,
+                          icon: const Icon(Icons.refresh, size: 20),
+                          label: const Text('Restart'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 56),
+                            textStyle: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: notifier.stopEmitting,
+                          icon: const Icon(Icons.stop, size: 20),
+                          label: const Text('Stop'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 56),
+                            backgroundColor: DeadDropColors.error,
+                            textStyle: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        notifier.resetTransfer();
+                        Navigator.of(context).popUntil((r) => r.isFirst);
+                      },
+                      icon: const Icon(Icons.add, size: 20),
+                      label: const Text('New transfer'),
+                      // Its own outline and its own colour. Sharing
+                      // Restart's made two very different actions read
+                      // as a pair -- one retunes and keeps the file and
+                      // the key, the other throws both away. The accent
+                      // separates them where shape alone did not.
+                      style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 56),
-                        backgroundColor: DeadDropColors.error,
+                        foregroundColor: DeadDropColors.accent,
+                        side: const BorderSide(
+                          color: DeadDropColors.accent,
+                          width: 1.5,
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              // Done with this file, on to the next. Stop keeps the file
-              // and the key so the user can retune and start again; this
-              // clears both. Without it the only way back to an empty
-              // form was to close the app.
-              SizedBox(
-                width: double.infinity,
-                child: TextButton.icon(
-                  onPressed: () {
-                    notifier.resetTransfer();
-                    Navigator.of(context).popUntil((r) => r.isFirst);
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('New transfer'),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -1599,15 +2052,25 @@ class _ParamSlider extends StatelessWidget {
     required this.divisions,
     required this.unit,
     required this.onChanged,
+    this.help,
+    this.format,
   });
 
   final String label;
+
+  /// What the (i) beside the label explains. No icon when null.
+  final String? help;
   final double value;
   final double min;
   final double max;
   final int divisions;
   final String unit;
   final ValueChanged<double> onChanged;
+
+  /// Renders the value shown beside the label. Defaults to a rounded
+  /// number with [unit] after it, which suits a frame rate but not a
+  /// fraction: brightness runs 0 to 1 and would read as "1 fps".
+  final String Function(double)? format;
 
   @override
   Widget build(BuildContext context) {
@@ -1617,8 +2080,14 @@ class _ParamSlider extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label),
-            Text('${value.round()}$unit'),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label),
+                if (help != null) InfoPoint(title: label, body: help!),
+              ],
+            ),
+            Text(format?.call(value) ?? '${value.round()}$unit'),
           ],
         ),
         Slider(
@@ -1659,7 +2128,13 @@ class _ChunkSizeSelector extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Chunk size'),
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Chunk size'),
+                InfoPoint(title: 'Chunk size', body: SettingHelp.chunkSize),
+              ],
+            ),
             Text('${state.chunkSize} bytes'),
           ],
         ),
@@ -1672,10 +2147,17 @@ class _ChunkSizeSelector extends StatelessWidget {
               ChoiceChip(
                 label: Text('$size'),
                 selected: state.chunkSize == size,
-                // Disable sizes that cannot fit the picked file.
-                onSelected: state.isEmitting ||
+                // Disabled when it cannot carry the picked file, and
+                // when the frame would not fit in a QR at the chosen
+                // error correction. The second case used to be
+                // selectable and simply broke the display: 2048 bytes
+                // encodes to about 2,860 characters, which only level L
+                // can hold.
+                onSelected:
+                    state.isEmitting ||
                         (fileSize != null &&
-                            fileSize > maxFileSizeForChunkSize(size))
+                            fileSize > maxFileSizeForChunkSize(size)) ||
+                        !chunkFitsQr(size, state.ecLevel)
                     ? null
                     : (_) => notifier.setChunkSize(size),
               ),
@@ -1686,49 +2168,583 @@ class _ChunkSizeSelector extends StatelessWidget {
           fileSize == null
               ? 'Larger chunks fit larger files but are harder to scan.'
               : 'Up to ${formatSizeForMessage(maxFileSizeForChunkSize(state.chunkSize))} '
-                  'per transfer at this size.',
-          style: textTheme.bodySmall
-              ?.copyWith(color: DeadDropColors.textSecondary),
+                    'per transfer at this size.',
+          style: textTheme.bodySmall?.copyWith(
+            color: DeadDropColors.textSecondary,
+          ),
         ),
       ],
     );
   }
 }
 
+/// How large to draw the emitted QR, given the space the layout offers.
+///
+/// A dense code has to survive two reductions before it is read: the
+/// sender's own rasterisation, and the receiver's camera. A 1024-byte
+/// chunk is a 141-module code, so at the 300 logical pixels this used to
+/// be fixed at, a module was about two pixels on the sender's screen --
+/// degraded before any camera saw it. Filling the space available gives
+/// those modules room on a phone and on a desktop window alike.
+///
+/// Both dimensions are needed, and the result never exceeds either.
+/// Sizing on width alone drew a code taller than the room the layout had
+/// for it on a short window, and the frame counter and buttons below
+/// were painted over the modules -- which corrupts the very thing the
+/// camera is trying to read. Reported from macOS.
+///
+/// There is deliberately no lower bound. One would have to be either
+/// ignored when the window is smaller than it, or honoured by drawing
+/// outside the box, and that overflow is the bug above. A small code is
+/// hard to scan; a code with a button drawn across it cannot be scanned
+/// at all.
+double qrDisplaySize(double availableWidth, double availableHeight) {
+  final width = availableWidth.isFinite ? availableWidth : 0.0;
+  final height = availableHeight.isFinite ? availableHeight : 0.0;
+  final usable = width < height ? width : height;
+  return usable.clamp(0.0, kQrMaxDisplaySize);
+}
+
+/// How big the emitted code will be in a window of [windowSize], before
+/// one has been drawn.
+///
+/// The handshake arrives while the configuration page is on screen, so
+/// the size the receiver's hint is judged against has to be predicted.
+/// Predicting it as the window's shorter side -- which is what this
+/// replaces -- ignores everything the sending view puts above and below
+/// the code, and so overclaims: 720 against a real 394 on a 1280x800
+/// laptop, 393 against 345 on a Redmi Note 14. An overclaim is the
+/// worst kind of error here, because it agrees to a chunk size the
+/// screen cannot draw and the user is told only after pressing Start.
+///
+/// [kSendingViewChromeHeight] is pinned against the real layout by
+/// qr_size_prediction_test.dart, which renders both screens and fails
+/// if this returns more than the sending view measures. That test is
+/// what keeps the number honest -- a constant guessed at this spot,
+/// wrong by 300 pixels, is the bug this function exists to fix.
+double predictedQrDisplaySize(Size windowSize) {
+  return qrDisplaySize(
+    windowSize.width - kSendingViewHorizontalPadding,
+    windowSize.height - kSendingViewChromeHeight,
+  );
+}
+
+/// The horizontal margin the sending view keeps around the code.
+///
+/// 24 logical pixels each side, so a code never touches the bezel.
+const double kSendingViewHorizontalPadding = 48;
+
+/// The vertical space the sending view spends on everything that is not
+/// the code: the file name row, the progress and settings row, the size
+/// advice when it is showing, the button row, and the gaps between
+/// them, plus the window's own safe area.
+///
+/// Deliberately generous. Under-reserving makes the prediction
+/// overclaim, which is the failure being fixed; over-reserving only
+/// costs a slightly conservative negotiation, and the real measurement
+/// replaces this the moment the code is drawn.
+const double kSendingViewChromeHeight = 180;
+
+/// The quiet zone ISO/IEC 18004 requires, in modules, on every side.
+const int kQuietZoneModules = 4;
+
+/// The margin to leave around a code of [modules] modules drawn into a
+/// box [displaySize] pixels across, in logical pixels per side.
+///
+/// `qr_flutter`'s own default is a flat 10 pixels, which is the wrong
+/// shape of answer: the margin has to be measured in modules, not
+/// pixels, so a constant is too mean exactly where the code is largest.
+/// At 1280x800 the code is drawn at 578 px with about 5 px per module,
+/// and 10 px of margin is 1.6 modules — under half the standard, and
+/// the finder patterns' outer rings then merge into whatever the code
+/// is sitting on.
+///
+/// Both terms matter. The box has to hold the code *and* two margins,
+/// so the module pitch is `displaySize / (modules + 2 * quiet)` and the
+/// margin is [kQuietZoneModules] of those. Solving it the other way --
+/// pitch from `displaySize / modules`, then margin from that -- asks
+/// for a box bigger than the one it was given.
+double qrQuietZonePadding({
+  required double displaySize,
+  required int modules,
+}) {
+  if (displaySize <= 0 || modules <= 0) return 0;
+  final pitch = displaySize / (modules + 2 * kQuietZoneModules);
+  return pitch * kQuietZoneModules;
+}
+
+/// How many screen pixels each QR module gets, drawing [chunkSize] bytes
+/// at [ecLevel] into a code [displaySize] pixels across.
+///
+/// A decoder needs about three and cannot work below two, and this is
+/// only the first of two reductions — the receiving camera takes its own
+/// share. Below [kMinUsablePixelsPerModule] a transfer will not read at
+/// any distance, which is worth saying before someone spends three
+/// minutes at 0%.
+///
+/// [displaySize] is the whole box, quiet zone included, so this is not
+/// the pitch the modules are actually drawn at — they get the box less
+/// two margins, which is about 10% less on a phone. Dividing by the
+/// module count alone therefore overstates the density.
+///
+/// Left that way on purpose. [kMinUsablePixelsPerModule] was fitted to
+/// this denominator against measurements from a Redmi Note 14: 512 B
+/// read as 3.29 and transferred nothing, 256 B read as 4.26 and
+/// finished in a minute. The floor and the denominator are one
+/// calibration, so correcting the arithmetic here without re-measuring
+/// the floor makes the app refuse 256 B on the very phone that was
+/// watched transferring at it. Changing both belongs in one task, with
+/// hardware, not in a tidy-up.
+double pixelsPerModuleOnScreen({
+  required double displaySize,
+  required int chunkSize,
+  required String ecLevel,
+}) {
+  final modules = qrModuleCount(chunkSize, ecLevel);
+  if (modules == null || modules == 0) return 0;
+  return displaySize / modules;
+}
+
+/// The largest chunk size this screen can display legibly at [ecLevel],
+/// out of [kChunkSizeOptions], or null when it cannot manage any.
+///
+/// The receiver's hint says what its camera can read. It knows nothing
+/// about the sender's screen, and a code too dense to draw here cannot
+/// be read however good that camera is: a Redmi Note 14 asked to show
+/// 512-byte chunks produced 3.29 pixels per module and transferred
+/// nothing in three minutes, where 256 bytes finished in one.
+///
+/// So the settings a transfer runs at are the smaller of what the
+/// receiver asks for and what this screen can offer.
+int? largestDisplayableChunk({
+  required double displaySize,
+  required String ecLevel,
+}) {
+  int? best;
+  for (final size in kChunkSizeOptions) {
+    final density = pixelsPerModuleOnScreen(
+      displaySize: displaySize,
+      chunkSize: size,
+      ecLevel: ecLevel,
+    );
+    if (density >= kMinUsablePixelsPerModule) {
+      best = size;
+    }
+  }
+  return best;
+}
+
+/// What a transfer should actually run at, given what the receiver asked
+/// for and what this screen can show.
+///
+/// Returns the chunk size to use. Never raises the receiver's request —
+/// it knows its own camera — and never exceeds what this screen can
+/// draw. When the screen cannot manage even the smallest option, the
+/// request stands: the warning on the send screen says so, and refusing
+/// to transfer at all would be worse than letting someone try.
+int negotiateChunkSize({
+  required int requested,
+  required double displaySize,
+  required String ecLevel,
+}) {
+  final offerable = largestDisplayableChunk(
+    displaySize: displaySize,
+    ecLevel: ecLevel,
+  );
+  if (offerable == null) return requested;
+  return requested < offerable ? requested : offerable;
+}
+
+/// The settings a transfer should run at, balancing what the receiver
+/// asked for against what this screen can show.
+///
+/// Both halves matter. Capping only the chunk size is not enough: a
+/// Redmi Note 14 asked for level Q cannot legibly draw *any* chunk
+/// size, so the error correction has to give way too. Weakening it is
+/// the right trade — a code with less redundancy that the camera can
+/// resolve beats a denser one it cannot see.
+///
+/// Levels are tried from the requested one downwards, stopping at the
+/// first this screen can work with. If none can, the request is
+/// returned unchanged: the send screen's warning says so, and refusing
+/// the transfer outright would be worse than letting the user try.
+({int chunkSize, String ecLevel}) negotiateSettings({
+  required int requestedChunkSize,
+  required String requestedEcLevel,
+  required double displaySize,
+}) {
+  // Strongest to weakest. Anything at or below the request is fair to
+  // fall back to; nothing above it, since the receiver asked for what
+  // its camera needs.
+  const weakening = ['H', 'Q', 'M', 'L'];
+  final from = weakening.indexOf(requestedEcLevel);
+  if (from < 0) {
+    return (chunkSize: requestedChunkSize, ecLevel: requestedEcLevel);
+  }
+
+  for (var i = from; i < weakening.length; i++) {
+    final ec = weakening[i];
+    final offerable = largestDisplayableChunk(
+      displaySize: displaySize,
+      ecLevel: ec,
+    );
+    if (offerable == null) continue;
+    final chunk = requestedChunkSize < offerable
+        ? requestedChunkSize
+        : offerable;
+    return (chunkSize: chunk, ecLevel: ec);
+  }
+
+  return (chunkSize: requestedChunkSize, ecLevel: requestedEcLevel);
+}
+
+/// A chunk size larger than [currentChunk] that a bigger window could
+/// show at [ecLevel] but [currentSize] cannot, or null when there is
+/// nothing to gain.
+///
+/// Window size silently decides how many codes a transfer takes, and
+/// nothing on screen says so. A 1 MB file is about 5,000 codes at 256
+/// bytes and 1,250 at 1024 — minutes of difference, settled by how wide
+/// the window happens to be.
+///
+/// [reachableSize] is the largest code this device could draw if the
+/// window were made as big as it goes. On a desktop that is the global
+/// ceiling; on a phone the window is already the whole screen, so it is
+/// what is on screen now and there is nothing to advise.
+///
+/// Measuring against the ceiling regardless was wrong on mobile: a
+/// Redmi Note 14 drawing at 345 pixels was told a larger window would
+/// fit 2048-byte chunks, which at that size would be 1.95 pixels per
+/// module -- less than half the floor. The advice recommended a setting
+/// that could never work on that phone, and no window could be made
+/// larger to reach it.
+int? chunkUnlockedByABiggerWindow({
+  required double currentSize,
+  required int currentChunk,
+  required String ecLevel,
+  required double reachableSize,
+}) {
+  if (currentSize >= reachableSize) return null;
+  final best = largestDisplayableChunk(
+    displaySize: reachableSize,
+    ecLevel: ecLevel,
+  );
+  if (best == null || best <= currentChunk) return null;
+  final nowFits = largestDisplayableChunk(
+    displaySize: currentSize,
+    ecLevel: ecLevel,
+  );
+  if (nowFits != null && nowFits >= best) return null;
+  return best;
+}
+
+/// One line about the size of the code on screen, or null when there is
+/// nothing worth saying.
+///
+/// One line, not two. The two advisories this replaces could both show
+/// at once and contradict each other — "a larger window would fit 2048
+/// bytes" above "this screen is too small for 512" — because one looked
+/// at what a maximised window could do and the other at what this one
+/// can. They are the same question and now have one answer.
+({String text, bool isProblem})? qrSizeAdvice({
+  required double displaySize,
+  required int chunkSize,
+  required String ecLevel,
+  double? reachableSize,
+}) {
+  final density = pixelsPerModuleOnScreen(
+    displaySize: displaySize,
+    chunkSize: chunkSize,
+    ecLevel: ecLevel,
+  );
+  if (density > 0 && density < kMinUsablePixelsPerModule) {
+    return (
+      text: (reachableSize != null && displaySize >= reachableSize)
+          ? 'This screen is too small to show $chunkSize-byte chunks '
+                'clearly. Choose a smaller chunk size in Options.'
+          : 'This window is too small to show $chunkSize-byte chunks '
+                'clearly. Make it larger, or choose a smaller chunk '
+                'size in Options.',
+      isProblem: true,
+    );
+  }
+  final bigger = chunkUnlockedByABiggerWindow(
+    currentSize: displaySize,
+    currentChunk: chunkSize,
+    ecLevel: ecLevel,
+    reachableSize: reachableSize ?? kQrMaxDisplaySize,
+  );
+  if (bigger != null) {
+    return (
+      text:
+          'A larger window would fit chunks of $bigger bytes: '
+          '${bigger ~/ chunkSize}× fewer codes to show.',
+      isProblem: false,
+    );
+  }
+  return null;
+}
+
+/// Whether the settings in force differ from what the receiver asked
+/// for.
+///
+/// They can, for good reasons — this screen may not be able to draw the
+/// chunk size requested, or the file may not fit it — but the screen
+/// said only that a hint had been applied, so a value that did not take
+/// looked identical to one that did.
+bool _hintDiffers(SendState state) {
+  final hint = state.appliedHint;
+  if (hint == null) return false;
+  return hint.chunkSize != state.chunkSize ||
+      hint.ecLevel != state.ecLevel ||
+      hint.fps.round() != state.fps.round();
+}
+
+/// The floor below which a sender's own screen cannot render a code
+/// another device will read.
+///
+/// Three pixels per module is what a decoder needs from the image it
+/// finally sees, and two is the hard limit. This is the sender's
+/// screen, only the first of two reductions, so some headroom belongs
+/// here — the camera takes its own share of what is left.
+///
+/// Calibrated against measured outcomes rather than derived. Redmi
+/// Note 14 emitting at EC-L on 2026-11-05, every row watched:
+///
+///  *  256 B at 4.73 px/module: transfers.
+///  *  512 B at 3.71: one minute eleven.
+///  * 1024 B at 2.76: twenty-eight seconds, the best result on record.
+///  * 2048 B at 1.95: does not read.
+///
+/// So the floor is between 1.95 and 2.76, and 2.5 sits between them
+/// with daylight on either side.
+///
+/// It was 4.0, fitted on 2026-11-04 to the same phone before the
+/// emitted code had its quiet zone — so it was calibrated against a
+/// different defect, and it refused every configuration above 256 B
+/// including the fastest one there is. A full-screen window warned
+/// that it was "too small to show 1024-byte chunks" while transferring
+/// them in under half a minute.
+///
+/// Still a warning rather than a prohibition: the user can choose
+/// whatever they like, and four points on one phone are not a curve.
+const double kMinUsablePixelsPerModule = 2.5;
+
+/// How the sending screen names its frame rate.
+///
+/// Just the setting while the screen is keeping up, and both figures
+/// when it is not: a transfer running at four codes a second while the
+/// slider says ten is a fact the user needs, and the first instinct
+/// otherwise is to blame the receiver.
+///
+/// The threshold is generous. A timer never fires exactly on its
+/// interval, and reporting "10 → 9.6" every time would be noise.
+String _emissionRateLabel(SendState state) {
+  final asked = state.fps;
+  final got = state.measuredFps;
+  if (got == null || got >= asked * 0.85) {
+    return '${asked.round()} fps';
+  }
+  return '${got.toStringAsFixed(1)} of ${asked.round()} fps';
+}
+
+/// Measures how fast codes actually reach the screen.
+///
+/// The sending screen printed the configured frame rate, which is a
+/// request, not a fact. On a Linux laptop the codes changed about four
+/// times a second with the setting at ten -- drawing a QR means
+/// recomputing its matrix and rasterising it, and a slow compositor
+/// cannot do that ten times a second. Nothing on screen said so, because
+/// the number came from the slider.
+///
+/// A median of the gaps between frames, for the same reason the
+/// receiver's decode cost is a median: one garbage-collection pause or
+/// one dragged window would pull a mean away from the rate the transfer
+/// is really running at.
+class EmissionRate {
+  final List<int> _gapMicros = [];
+  DateTime? _last;
+
+  /// Enough gaps that a figure means something. Below this the screen
+  /// says nothing rather than something it cannot support.
+  static const int _minSamples = 5;
+  static const int _window = 30;
+
+  /// Records that a code reached the screen.
+  void recordFrame({DateTime? at}) {
+    final now = at ?? DateTime.now();
+    final previous = _last;
+    _last = now;
+    if (previous == null) return;
+    _gapMicros.add(now.difference(previous).inMicroseconds);
+    if (_gapMicros.length > _window) _gapMicros.removeAt(0);
+  }
+
+  /// Codes per second as measured, or null before there is enough.
+  double? get measuredFps {
+    if (_gapMicros.length < _minSamples) return null;
+    final sorted = [..._gapMicros]..sort();
+    final mid = sorted.length ~/ 2;
+    final micros = sorted.length.isOdd
+        ? sorted[mid].toDouble()
+        : (sorted[mid - 1] + sorted[mid]) / 2;
+    if (micros <= 0) return null;
+    return 1000000 / micros;
+  }
+
+  /// Forgets everything. Called when the timer restarts, so a new frame
+  /// rate is not averaged with the old one.
+  void reset() {
+    _gapMicros.clear();
+    _last = null;
+  }
+}
+
+/// How wide the transfer controls are allowed to get.
+///
+/// Two buttons splitting a 24-inch monitor between them come out far
+/// wider than they are tall and stop reading as buttons. Past this the
+/// block stays put and centres instead.
+const double kTransferControlsMaxWidth = 460;
+
+/// How many data codes play between one showing of the session header
+/// and the next.
+///
+/// The header is what lets a receiver start at all, so it has to come
+/// round often enough that someone pointing a camera at a running
+/// transfer joins within a few seconds: at 10 fps this is about five.
+/// Every header shown is a data code not shown, which a fountain code
+/// absorbs -- there is no particular code it needs, only enough of
+/// them.
+const int kBootstrapRepeatEvery = 50;
+
+/// The ceiling for [qrDisplaySize].
+///
+/// Past this a code stops being easier to scan and starts being hard to
+/// hold entirely within the camera's view.
+const double kQrMaxDisplaySize = 720;
+
 /// Dumb QR renderer: displays exactly what the notifier produced. All frame
 /// generation logic lives in [SendNotifier], so there is a single source of
 /// truth for the emitted sequence.
 class _QrDisplay extends StatelessWidget {
-  const _QrDisplay({required this.state});
+  const _QrDisplay({required this.state, required this.notifier});
 
   final SendState state;
 
+  /// Told how much room the code was given, so a receiver's hint can be
+  /// negotiated against what this screen can really draw.
+  final SendNotifier notifier;
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = qrDisplaySize(constraints.maxWidth, constraints.maxHeight);
+        // The box holds the code and a quiet zone on each side, so the
+        // code itself gets what is left. Both come from the same module
+        // pitch, which is why they are computed together.
+        // From the payload on screen, not the configured chunk size.
+        // The bootstrap frame carries the session header instead of a
+        // chunk, so it is shorter and its code sparser; sizing its
+        // margin from the chunk size measures a code that is not there,
+        // and the bootstrap is the one frame a receiver cannot start
+        // without.
+        final payload = state.currentQrData;
+        final modules = payload == null
+            ? 0
+            : qrModuleCountForPayload(payload, state.ecLevel) ?? 0;
+        final quietZone =
+            qrQuietZonePadding(displaySize: size, modules: modules);
+        final codeSize = size - 2 * quietZone;
+        // Report the size the QR is actually given, from the one place
+        // that knows it.
+        //
+        // This used to be estimated on the configuration page by taking
+        // the window and subtracting a constant for the sending view's
+        // furniture. The constant was wrong — it left 275 px where the
+        // real code gets about 578 — so a window that could show
+        // 512-byte chunks negotiated itself down to 256, and the screen
+        // then warned about a size it had chosen itself. Measuring
+        // beats guessing at something the layout already knows.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifier.reportQrDisplaySize(size);
+          // The first moment the code is actually on screen. Building
+          // this widget does not draw it -- QrImageView's matrix and
+          // rasterisation land in Flutter's pipeline after build()
+          // returns -- so this is the only place the cost can be closed.
+          if (profileEmission) notifier.profile.markDrawEnd();
+        });
+        // Nothing but the code goes in here. This widget is given a box
+        // sized for the QR, so anything stacked under it overflows that
+        // box -- a caption below the code made the column 28 pixels
+        // taller than its constraint on a 1280x800 window. The same
+        // mistake was already fixed once for the size advice; the
+        // bootstrap caption now lives in the parent column too.
+        // The boundary is what qr_quiet_zone_test.dart reads the drawn
+        // pixels from. It is load-bearing for that test, not decoration.
+        return RepaintBoundary(
+          key: const ValueKey('qr-code-boundary'),
+          child: Container(
+            // This padding is the quiet zone. qr_flutter's own is a flat
+            // 10 px, which is not four modules at any useful size.
+            padding: EdgeInsets.all(quietZone),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            // With DEADDROP_PROFILE_WITHOUT_QR the code is replaced by a
+            // blank square of the same size, so the profiler's `draw`
+            // figure can be compared against a run that drew it. See
+            // emission_profile.dart: the first attempt at the frame cost
+            // blamed this widget without ever measuring its share.
+            child: profileWithoutQr
+                ? SizedBox(width: codeSize, height: codeSize)
+                : _scaledFromOnePixelPerModule(
+                    size: codeSize,
+                    modules: modules,
+                    child: QrImageView(
+                    data: state.currentQrData!,
+                    version: QrVersions.auto,
+                    errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
+                    size: modules > 0 ? modules.toDouble() : codeSize,
+                    backgroundColor: Colors.white,
+                    // Adjacent modules must touch. The package's default
+                    // leaves a quarter-pixel light gap between every
+                    // pair, which breaks up the solid runs a decoder
+                    // measures -- the 1:1:3:1:1 through each finder
+                    // above all -- and spends 18 px of a 73-module code
+                    // on gaps that help nobody.
+                    gapless: true,
+                    // The margin is the Container's, above.
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
           ),
-          child: QrImageView(
-            data: state.currentQrData!,
-            version: QrVersions.auto,
-            errorCorrectionLevel: _ecLevelToQr(state.ecLevel),
-            size: 300,
-            backgroundColor: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (state.showingBootstrap)
-          Text(
-            'Session bootstrap — point the receiver camera here',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-      ],
+        );
+      },
+    );
+  }
+
+  /// Draws [child] at one pixel per module and scales it to [size].
+  ///
+  /// `QrPainter` rounds its module pitch to the nearest half pixel and
+  /// centres the result in its box. When it rounds up, the code is drawn
+  /// wider than the box and spills into the quiet zone: 4.48 -> 4.5 on a
+  /// Redmi Note 14 and 7.36 -> 7.5 on a 1280x800 laptop took the margin
+  /// from four modules to 3.8 and 3.4. Given a box exactly `modules`
+  /// wide, the pitch rounds to 1 and the code fills it exactly; the
+  /// scale then lands it on the pitch [qrQuietZonePadding] assumed.
+  /// qr_quiet_zone_test.dart measures the result.
+  Widget _scaledFromOnePixelPerModule({
+    required double size,
+    required int modules,
+    required Widget child,
+  }) {
+    if (modules <= 0) return child;
+    return SizedBox.square(
+      dimension: size,
+      child: FittedBox(child: child),
     );
   }
 
@@ -1789,8 +2805,11 @@ class _IdentityFingerprintCard extends ConsumerWidget {
                     Center(
                       child: SelectableText(
                         snapshot.data!,
-                        style: technicalTextStyle(ref, relativeTo: 1.4,
-                            letterSpacing: 2),
+                        style: technicalTextStyle(
+                          ref,
+                          relativeTo: 1.4,
+                          letterSpacing: 2,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),

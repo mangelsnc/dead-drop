@@ -34,21 +34,51 @@ void main() {
       ));
 
       expect(hint.chunkSize, kDefaultChunkSize);
-      expect(hint.ecLevel, 'M');
+      // L, not M. Stronger correction spends modules on redundancy, so
+      // the same chunk becomes a denser code — and density is what a
+      // camera struggles with. Measured on a device, M read slower than
+      // L at the same frame rate and chunk size. Correction is raised
+      // by the decode-rate rule when frames are actually being lost.
+      expect(hint.ecLevel, 'L');
       expect(hint.fps, greaterThanOrEqualTo(12));
     });
 
-    test('emission stays below the camera, not level with it', () {
-      // Sampling exactly at the emission rate catches each code at an
-      // arbitrary point in its display, often mid-change. Headroom means
-      // most frames land on a stable code.
+    test('emission uses most of what the camera can sample', () {
+      // This used to assert the opposite — two thirds of the camera
+      // rate, so that frames caught mid-change would be rare. Measured
+      // on a device, that headroom cost far more than it bought: a
+      // camera reporting 12 fps was told to emit at 8 and read about
+      // 62% of the codes; at 12 it read 90%, and a 1 MB transfer went
+      // from 16.7 minutes to 7.7.
+      //
+      // A frame caught mid-change is dropped, and costs one frame. A
+      // frame never emitted costs one the camera could have read.
       final hint = suggestEmission(const CameraCapability(
         framesPerSecond: 12,
         width: 1280,
         height: 720,
       ));
 
-      expect(hint.fps, lessThan(12));
+      expect(hint.fps, greaterThanOrEqualTo(10));
+      expect(hint.fps, lessThanOrEqualTo(12),
+          reason: 'never faster than the camera can sample');
+    });
+
+    test('never suggests emitting faster than the camera samples', () {
+      // Measured on a device: against a camera that read 90% of the
+      // codes at 12 fps, 16 fps dropped it to about 14%. A code is only
+      // readable while it is fully on screen, so passing the camera's
+      // rate is a cliff, not a slope — and a measurement that reads
+      // high must not walk off it.
+      for (final rate in [4.0, 7.5, 8.0, 11.0, 12.0, 13.0, 20.0, 30.0]) {
+        final hint = suggestEmission(CameraCapability(
+          framesPerSecond: rate,
+          width: 1280,
+          height: 720,
+        ));
+        expect(hint.fps, lessThanOrEqualTo(rate),
+            reason: 'camera at $rate fps was told to emit at ${hint.fps}');
+      }
     });
 
     test('a slow camera gets a slower stream', () {
@@ -66,7 +96,7 @@ void main() {
       expect(slow.fps, lessThan(fast.fps));
     });
 
-    test('a low-resolution camera gets smaller codes and more correction',
+    test('a low-resolution camera gets smaller codes, and nothing else',
         () {
       // Below 640x480 there are not enough pixels to resolve a dense QR,
       // so each code should carry fewer modules.
@@ -77,11 +107,15 @@ void main() {
       ));
 
       expect(hint.chunkSize, lessThan(kDefaultChunkSize));
-      expect(hint.ecLevel, 'Q');
+      // This used to raise the correction to Q at the same time, which
+      // undid most of the benefit: at 256 bytes Q is 93 modules against
+      // L's 73. Fewer bytes and stronger correction pull in opposite
+      // directions, and thinning the code out is the entire point here.
+      expect(hint.ecLevel, 'L');
       expect(hint.reason, contains('320x240'));
     });
 
-    test('a poor decode rate backs off on every axis', () {
+    test('a poor decode rate slows down, without adding codes to read', () {
       // The most honest signal available: it reflects focus, lighting and
       // a shaky hand, none of which resolution or frame rate reveal.
       final measured = suggestEmission(const CameraCapability(
@@ -97,9 +131,28 @@ void main() {
       ));
 
       expect(measured.fps, lessThan(unmeasured.fps));
-      expect(measured.chunkSize, lessThan(unmeasured.chunkSize));
-      expect(measured.ecLevel, isNot(unmeasured.ecLevel));
       expect(measured.reason, contains('20%'));
+
+      // The correction is deliberately NOT raised either, and this rule
+      // used to raise it. Stronger correction spends modules on
+      // redundancy, so the code gets denser — which is what a
+      // struggling camera cannot cope with. Measured on a device at 256
+      // bytes and 10 fps: level M reached 8% in a minute where level L
+      // reached 50%. Six times faster, for a code with 11% fewer
+      // modules. The redundancy helps against a blurred code; it does
+      // not help against one the camera cannot resolve at all.
+      expect(measured.ecLevel, equals(unmeasured.ecLevel),
+          reason: 'correcting harder is what pushed a marginal camera '
+              'over the edge');
+
+      // The chunk is deliberately NOT shrunk. Halving it doubles how many
+      // codes must be read, so a camera already missing half of them
+      // needs twice as many attempts at the same miss rate — the transfer
+      // gets longer, not more reliable. Reported from a phone: a 653 KB
+      // file became 2,614 codes of 256 B and took about 2.5x that many
+      // frames to complete.
+      expect(measured.chunkSize, equals(unmeasured.chunkSize),
+          reason: 'slowing down helps; making more codes does not');
     });
 
     test('a healthy decode rate changes nothing', () {

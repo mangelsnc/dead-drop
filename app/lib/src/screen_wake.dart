@@ -39,24 +39,83 @@ bool? debugSupportedOverride;
 bool get _supported =>
     debugSupportedOverride ?? (Platform.isAndroid || Platform.isIOS);
 
+/// How many callers currently want the screen awake.
+///
+/// Counted rather than flagged because both screens take the lock and
+/// one process holds the state. A phone used as receiver and then as
+/// sender runs the send screen's acquire before the receive screen's
+/// dispose — Flutter builds the incoming route before disposing the
+/// outgoing one — so a plain boolean let the departing screen release
+/// the lock the arriving one had just taken, and the sender emitted
+/// with the screen free to sleep.
+int _holders = 0;
+
 /// Whether the wakelock is currently believed to be held. Tracked so a
 /// double release cannot leave the screen pinned on, and so [isHeld] can be
 /// asserted in tests.
-bool _held = false;
+bool get _held => _holders > 0;
+
+/// The level last sent to the platform, so an unchanged repeat is not
+/// re-sent while a genuinely new one still gets through.
+double? _level;
 
 /// Whether this process is currently asking the platform to keep the screen
 /// on. Exposed for tests and for the UI to reason about its own state.
 bool get isScreenAwakeHeld => _held;
 
-/// Asks the platform to keep the screen on for the duration of a transfer.
+/// Whether this platform can set the screen's brightness for a transfer.
 ///
-/// Safe to call when already held. Failures are swallowed: a screen that
-/// dims is an annoyance, and must never be the reason the app falls over.
-Future<void> keepScreenAwake() async {
-  if (!_supported || _held) return;
+/// The same platforms that can hold the screen awake: Android sets it on
+/// its own window, iOS on the device. A desktop window has no brightness
+/// of its own, so the send screen hides the control there rather than
+/// offering one that does nothing.
+bool get supportsTransferBrightness => _supported;
+
+/// Whether this platform's window is fixed to the whole screen.
+///
+/// Android and iOS, where "make the window larger" is not advice a user
+/// can act on. The send screen needs this to know whether the code
+/// could be drawn any bigger than it already is.
+bool get windowFillsTheScreen => _supported;
+
+/// The brightness a transfer runs at when nothing else is chosen.
+///
+/// Full. Against a phone camera this is right, and it is what the screen
+/// did before the level was adjustable.
+const double kDefaultTransferBrightness = 1.0;
+
+/// Asks the platform to keep the screen on for the duration of a transfer,
+/// at [brightness] (0 dimmest, 1 full).
+///
+/// Safe to call when already held: the wakelock is idempotent, but the
+/// level is not, so a call carrying a *different* level is passed on
+/// even while the lock is held. Dropping the whole call was a bug --
+/// the receive screen takes the lock with no level when it opens, so a
+/// transfer the user had configured at 60% emitted at full brightness
+/// on a device that had been receiving. Failures are swallowed: a
+/// screen that dims is an annoyance, and must never be the reason the
+/// app falls over.
+///
+/// [brightness] exists because full is not right against every camera. A
+/// transfer from a phone to a Logitech StreamCam failed with the screen at
+/// full: the webcam's auto-exposure stopped down and the code's dark
+/// modules washed out to grey. Lowering the screen is the only lever the
+/// sender has over the receiver's exposure.
+Future<void> keepScreenAwake({
+  double brightness = kDefaultTransferBrightness,
+}) async {
+  if (!_supported) return;
+  final level = brightness.clamp(0.0, 1.0);
+  final unchanged = _held && _level != null && (_level! - level).abs() < 0.001;
+  // Counted before the call, and kept whatever the platform answers.
+  // Every caller releases exactly once, including the ones whose request
+  // the platform refused, so a claim dropped on failure would let their
+  // release free a lock another screen is still holding.
+  _holders++;
+  if (unchanged) return;
   try {
-    await _channel.invokeMethod<void>('keepAwake');
-    _held = true;
+    await _channel.invokeMethod<void>('keepAwake', {'level': level});
+    _level = level;
   } on PlatformException {
     // Deliberately ignored — see the doc comment.
   } on MissingPluginException {
@@ -71,6 +130,11 @@ Future<void> keepScreenAwake() async {
 /// owner may have no way to charge it.
 Future<void> allowScreenSleep() async {
   if (!_supported || !_held) return;
+  // Another screen still wants it: give up this caller's claim only.
+  if (_holders > 1) {
+    _holders--;
+    return;
+  }
   try {
     await _channel.invokeMethod<void>('allowSleep');
   } on PlatformException {
@@ -79,13 +143,15 @@ Future<void> allowScreenSleep() async {
   } on MissingPluginException {
     // As above.
   } finally {
-    _held = false;
+    _holders = 0;
+    _level = null;
   }
 }
 
 /// Resets the tracked state. Tests only — the platform side is untouched.
 @visibleForTesting
 void debugResetScreenWake() {
-  _held = false;
+  _holders = 0;
+  _level = null;
   debugSupportedOverride = null;
 }

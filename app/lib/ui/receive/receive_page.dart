@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium/sodium.dart';
 
@@ -17,14 +15,13 @@ import '../../src/tofu_store.dart';
 import '../../src/transport.dart';
 import '../../src/utils.dart';
 import '../../main.dart';
+import '../elapsed_time.dart';
 import '../theme.dart';
 import '../technical_text.dart';
 import '../passphrase_field.dart';
 import '../desktop_scanner_view.dart';
 import '../../src/camera_measurement_store.dart';
 import '../../src/capability_hint.dart';
-import '../../src/mobile_camera_measure.dart';
-import '../../src/desktop_scanner.dart';
 import '../vault/vault_controller.dart';
 
 /// State for the receive flow.
@@ -34,8 +31,11 @@ class ReceiveState {
     this.receiver,
     this.isScanning = false,
     this.framesReceived = 0,
+    this.startedAt,
+    this.completedAt,
     this.chunksDecoded = 0,
     this.totalChunks = 0,
+    this.decodeProgress = 0.0,
     this.fileBytes,
     this.fileName,
     this.savedPath,
@@ -51,6 +51,17 @@ class ReceiveState {
   final Receiver? receiver;
   final bool isScanning;
   final int framesReceived;
+
+  /// When the first data frame arrived, for the elapsed-time readout.
+  ///
+  /// Not when scanning started: the gap before the sender begins is not
+  /// transfer time, and counting it makes every transfer look slower
+  /// than it was.
+  final DateTime? startedAt;
+
+  /// When the transfer finished, so the elapsed readout stops there.
+  final DateTime? completedAt;
+
   final int chunksDecoded;
   final int totalChunks;
   final Uint8List? fileBytes;
@@ -88,9 +99,37 @@ class ReceiveState {
   /// are ignored, and nothing has been written to the TOFU store.
   final PendingSender? pendingSender;
 
-  double get progress => totalChunks > 0 ? chunksDecoded / totalChunks : 0.0;
+  /// How full the bar is.
+  ///
+  /// Comes from the decoder, which counts captured-but-unrevealed
+  /// frames as the work they are. Chunks resolved over total reads near
+  /// zero for most of a large transfer and then jumps, which looked
+  /// like a stall on a device. See [LTDecoder.progress].
+  final double decodeProgress;
+
+  double get progress => decodeProgress;
 
   bool get sessionActive => receiver != null;
+
+  /// How long the finished transfer took, or null while one is running.
+  ///
+  /// Kept on the state rather than computed where it is shown, because
+  /// the live readout lives inside the progress block and that block is
+  /// gone by the time this matters: finishing clears the receiver,
+  /// [sessionActive] goes false, and the figure disappeared at the
+  /// moment it stopped changing and became worth reading.
+  ///
+  /// Null rather than zero for an unfinished transfer: a running one has
+  /// no final figure, and 0:00 is a lie shaped like a measurement. Null
+  /// too if the clock stepped backwards — an NTP correction mid-transfer
+  /// would otherwise report a negative duration.
+  Duration? get transferDuration {
+    final started = startedAt;
+    final finished = completedAt;
+    if (started == null || finished == null) return null;
+    final elapsed = finished.difference(started);
+    return elapsed.isNegative ? null : elapsed;
+  }
 
   /// True while an unrecognised sender is waiting for the user's decision.
   bool get awaitingSenderApproval => pendingSender != null;
@@ -100,8 +139,11 @@ class ReceiveState {
     Receiver? receiver,
     bool? isScanning,
     int? framesReceived,
+    DateTime? startedAt,
+    DateTime? completedAt,
     int? chunksDecoded,
     int? totalChunks,
+    double? decodeProgress,
     Uint8List? fileBytes,
     String? fileName,
     String? savedPath,
@@ -120,8 +162,11 @@ class ReceiveState {
       receiver: receiver ?? this.receiver,
       isScanning: isScanning ?? this.isScanning,
       framesReceived: framesReceived ?? this.framesReceived,
+      startedAt: startedAt ?? this.startedAt,
+      completedAt: completedAt ?? this.completedAt,
       chunksDecoded: chunksDecoded ?? this.chunksDecoded,
       totalChunks: totalChunks ?? this.totalChunks,
+      decodeProgress: decodeProgress ?? this.decodeProgress,
       fileBytes: fileBytes ?? this.fileBytes,
       fileName: fileName ?? this.fileName,
       savedPath: savedPath ?? this.savedPath,
@@ -130,8 +175,9 @@ class ReceiveState {
       senderFingerprint: senderFingerprint ?? this.senderFingerprint,
       senderName: senderName ?? this.senderName,
       isNewSender: isNewSender ?? this.isNewSender,
-      pendingSender:
-          clearPendingSender ? null : (pendingSender ?? this.pendingSender),
+      pendingSender: clearPendingSender
+          ? null
+          : (pendingSender ?? this.pendingSender),
     );
   }
 }
@@ -145,11 +191,44 @@ class PendingSender {
   final String fingerprint;
 }
 
+/// Turns a rejection from the crypto layer into something to act on.
+///
+/// The parser names the field it tripped over, which is the right thing
+/// for a log and the wrong thing for a screen: "Unsupported version"
+/// reached a user whose phone was running an older build, and said
+/// nothing about updating it. An unrecognised reason is passed through
+/// rather than swallowed — a technical message beats a blank one.
+@visibleForTesting
+String sessionRejectionMessage(String reason) {
+  if (reason.contains('Unsupported version')) {
+    return 'The sending device is running a different version of '
+        'DeadDrop. Update both devices to the same version and try '
+        'again.';
+  }
+  if (reason.contains('not addressed to this receiver')) {
+    return 'This transfer was addressed to a different device. Ask the '
+        'sender to scan the key QR above again.';
+  }
+  return 'Session rejected: $reason';
+}
+
 class ReceiveNotifier extends StateNotifier<ReceiveState> {
   ReceiveNotifier(this._sodium, this._tofuStore) : super(ReceiveState());
 
+  /// Resolved per use, never held.
+  ///
+  /// The store is scoped to the open vault environment, so it changes
+  /// whenever the vault locks or unlocks. Watching it from the provider
+  /// rebuilt this notifier on every such change and threw away whatever
+  /// transfer was running: saving a received file to the vault unlocks
+  /// it, the file picker backgrounds the app, backgrounding locks the
+  /// vault again, and the user came back to a reset screen with the
+  /// handshake QR gone and no way to also save to the device. Reported
+  /// from a phone, more than once.
+  TofuStore get _tofu => _tofuStore();
+
   final Sodium _sodium;
-  final TofuStore _tofuStore;
+  final TofuStore Function() _tofuStore;
 
   Future<void> initKeypair() async {
     if (state.receiverKeypair != null) return;
@@ -207,11 +286,12 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
       // Same derivation the sender shows in its own identity card — both
       // sides must render an identical string or the comparison the user is
       // asked to make is meaningless.
-      final fingerprint =
-          fingerprintOf(receiver.session!.header.senderVerifyKey);
+      final fingerprint = fingerprintOf(
+        receiver.session!.header.senderVerifyKey,
+      );
 
       // TOFU check: have we seen this sender before?
-      final known = await _tofuStore.isKnown(fingerprint);
+      final known = await _tofu.isKnown(fingerprint);
       if (!known) {
         // An unrecognised sender is held here, NOT armed. The fingerprint is
         // only written to the TOFU store once the user accepts it in
@@ -219,8 +299,10 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         // trusted automatically and every later transfer from an impostor
         // would show up as an already-known sender.
         state = state.copyWith(
-          pendingSender:
-              PendingSender(receiver: receiver, fingerprint: fingerprint),
+          pendingSender: PendingSender(
+            receiver: receiver,
+            fingerprint: fingerprint,
+          ),
           senderFingerprint: fingerprint,
           error: null,
         );
@@ -232,11 +314,11 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         totalChunks: receiver.session!.header.chunkCount,
         error: null,
         senderFingerprint: fingerprint,
-        senderName: await _tofuStore.nameFor(fingerprint),
+        senderName: await _tofu.nameFor(fingerprint),
         isNewSender: false,
       );
     } on DeadDropCryptoError catch (e) {
-      state = state.copyWith(error: 'Session rejected: ${e.message}');
+      state = state.copyWith(error: sessionRejectionMessage(e.message));
     }
   }
 
@@ -250,7 +332,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final pending = state.pendingSender;
     if (pending == null) return;
 
-    await _tofuStore.markKnown(pending.fingerprint, name: name);
+    await _tofu.markKnown(pending.fingerprint, name: name);
     state = state.copyWith(
       receiver: pending.receiver,
       totalChunks: pending.receiver.session!.header.chunkCount,
@@ -278,8 +360,10 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final decodedAfter = receiver.decoder?.decoded.length ?? 0;
 
     state = state.copyWith(
+      startedAt: state.startedAt ?? DateTime.now(),
       framesReceived: state.framesReceived + 1,
       chunksDecoded: decodedAfter,
+      decodeProgress: receiver.decoder?.progress ?? 0.0,
       fileName: receiver.fileName ?? state.fileName,
     );
 
@@ -295,6 +379,9 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
           fileBytes: fileBytes,
           fileName: receiver.fileName ?? state.fileName,
           isScanning: false,
+          // Stops the elapsed readout here rather than letting it
+          // count on past the thing it measures.
+          completedAt: DateTime.now(),
         );
       } catch (e) {
         state = state.copyWith(error: 'Integrity check failed: $e');
@@ -306,7 +393,8 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     final bytes = state.fileBytes;
     if (bytes == null) return;
 
-    final name = state.fileName ??
+    final name =
+        state.fileName ??
         'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
 
     try {
@@ -360,7 +448,8 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
   /// and the user has no way to know.
   Future<bool> saveToVault(VaultController vaultController) async {
     if (state.fileBytes == null) return false;
-    final name = state.fileName ??
+    final name =
+        state.fileName ??
         'deaddrop_received_${DateTime.now().millisecondsSinceEpoch}';
     final entry = await vaultController.saveFile(name, state.fileBytes!);
     if (entry == null) {
@@ -371,6 +460,17 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
     }
     state = state.copyWith(savedToVault: true, error: null);
     return true;
+  }
+
+  /// Puts the screen into an error state. Tests only.
+  ///
+  /// The errors worth laying out are thrown deep inside a real session —
+  /// a header addressed to another receiver, a failed decrypt — and
+  /// reaching them through the camera is not something a widget test
+  /// can do.
+  @visibleForTesting
+  void debugSetError(String message) {
+    state = state.copyWith(error: message);
   }
 
   /// Clears everything about the current transfer, keeping this device's
@@ -398,11 +498,17 @@ final cameraMeasurementStoreProvider = Provider<CameraMeasurementStore>(
   (ref) => CameraMeasurementStore(),
 );
 
-final receiveProvider =
-    StateNotifierProvider<ReceiveNotifier, ReceiveState>((ref) {
+final receiveProvider = StateNotifierProvider<ReceiveNotifier, ReceiveState>((
+  ref,
+) {
   final sodium = ref.watch(sodiumProvider);
-  final tofuStore = ref.watch(tofuStoreProvider);
-  return ReceiveNotifier(sodium, tofuStore);
+  // `read` through a callback, not `watch`. The TOFU store is scoped to
+  // the open vault environment; watching it here tied this notifier's
+  // lifetime to the vault's lock state and discarded a running transfer
+  // every time the vault locked. The callback still resolves the current
+  // environment's store at each use, so the decoy never sees the real
+  // address book — the property the scoping exists for is unchanged.
+  return ReceiveNotifier(sodium, () => ref.read(tofuStoreProvider));
 });
 
 class ReceivePage extends ConsumerStatefulWidget {
@@ -438,8 +544,6 @@ String displayPath(String raw) {
 }
 
 class _ReceivePageState extends ConsumerState<ReceivePage> {
-  MobileScannerController? _scannerController;
-
   /// Whether the receiver public key is shown as text instead of a QR code.
   /// The text view helps when the sender cannot scan (no camera, small or
   /// cracked screen, focus issues) and needs to type or paste the key.
@@ -457,13 +561,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
   /// The hint this device will put in its handshake QR, from the last
   /// reception. Null on a first run, which simply means no hint.
   EmissionHint? _hint;
-
-  /// Measures the camera on the `MobileScanner` path, where the scanner
-  /// hands this app detections rather than frames. The desktop view
-  /// measures itself and reports through [_rememberMeasurement]; this is
-  /// the same job for android, ios and macos, which otherwise sent a
-  /// handshake carrying no hint at all and left every sender on defaults.
-  final MobileCameraMeasure _mobileMeasure = MobileCameraMeasure();
 
   @override
   void initState() {
@@ -485,25 +582,6 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     final stored = await ref.read(cameraMeasurementStoreProvider).read();
     if (!mounted || stored == null) return;
     setState(() => _hint = suggestEmission(stored.capability));
-  }
-
-  /// What to show under the mobile camera while it is reading.
-  ///
-  /// Reads per second, not the desktop view's share-of-frames: on this
-  /// path a frame that failed to decode is never reported, so the
-  /// denominator does not exist. Saying "60% of frames" here would be a
-  /// number with nothing behind it.
-  String _mobileScanStatus() {
-    final perSecond = _mobileMeasure.decodesPerSecond;
-    if (perSecond == null) {
-      final seen = _mobileMeasure.detections;
-      return seen == 0
-          ? 'Point at the other screen'
-          : 'Reading… $seen codes so far';
-    }
-    if (perSecond >= 8) return 'Good — hold it there';
-    if (perSecond >= 4) return 'Reading — try holding a little steadier';
-    return 'Slow — move closer, or improve the lighting';
   }
 
   /// Remembers what the camera managed, for the next handshake.
@@ -577,410 +655,112 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
           final showKeyStep = !state.isScanning || wide;
 
           final keyStep = <Widget>[
-              // Step 1: show our public key so the sender can address the file
-              // to us (handshake).
-              _StepCard(
-                step: 1,
-                title: 'Your public key',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (state.receiverKeypair != null) ...[
-                      Center(
-                        child: SegmentedButton<bool>(
-                          segments: const [
-                            ButtonSegment(
-                              value: false,
-                              icon: Icon(Icons.qr_code_2),
-                              label: Text('QR'),
-                            ),
-                            ButtonSegment(
-                              value: true,
-                              icon: Icon(Icons.text_fields),
-                              label: Text('Text'),
-                            ),
-                          ],
-                          selected: {_showKeyAsText},
-                          onSelectionChanged: (selection) {
-                            setState(() => _showKeyAsText = selection.first);
-                          },
-                        ),
+            // Step 1: show our public key so the sender can address the file
+            // to us (handshake).
+            _StepCard(
+              step: 1,
+              title: 'Your public key',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (state.receiverKeypair != null) ...[
+                    Center(
+                      child: SegmentedButton<bool>(
+                        // These segments carry their own icons, which
+                        // the selection checkmark displaces.
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: false,
+                            icon: Icon(Icons.qr_code_2),
+                            label: Text('QR'),
+                          ),
+                          ButtonSegment(
+                            value: true,
+                            icon: Icon(Icons.text_fields),
+                            label: Text('Text'),
+                          ),
+                        ],
+                        selected: {_showKeyAsText},
+                        onSelectionChanged: (selection) {
+                          setState(() => _showKeyAsText = selection.first);
+                        },
                       ),
-                      const SizedBox(height: 16),
-                      if (_showKeyAsText)
-                        _PublicKeyTextView(
-                          publicKey: state.receiverKeypair!.publicKey,
-                        )
-                      else
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
+                    ),
+                    const SizedBox(height: 16),
+                    if (_showKeyAsText)
+                      _PublicKeyTextView(
+                        publicKey: state.receiverKeypair!.publicKey,
+                      )
+                    else
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                          ),
+                          child: QrImageView(
+                            data: encodeHandshakeQr(
+                              state.receiverKeypair!.publicKey,
+                              hint: _hint == null
+                                  ? null
+                                  : HandshakeHint(
+                                      fps: _hint!.fps,
+                                      chunkSize: _hint!.chunkSize,
+                                      ecLevel: _hint!.ecLevel,
+                                    ),
                             ),
-                            child: QrImageView(
-                              data: encodeHandshakeQr(
-                                state.receiverKeypair!.publicKey,
-                                hint: _hint == null
-                                    ? null
-                                    : HandshakeHint(
-                                        fps: _hint!.fps,
-                                        chunkSize: _hint!.chunkSize,
-                                        ecLevel: _hint!.ecLevel,
-                                      ),
-                              ),
-                              version: QrVersions.auto,
-                              size: 200,
-                              backgroundColor: Colors.white,
-                            ),
+                            version: QrVersions.auto,
+                            size: 200,
+                            backgroundColor: Colors.white,
                           ),
                         ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _showKeyAsText
-                            ? 'Share this public key with the sender — they can '
+                      ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _showKeyAsText
+                          ? 'Share this public key with the sender — they can '
                                 'copy it or type it in manually. It contains only '
                                 'your public key — the file itself is encrypted '
                                 'end-to-end.'
-                            : _hint == null
-                                ? 'Show this QR to the sender. It contains only '
-                                    'your public key — the file itself is '
-                                    'encrypted end-to-end.'
-                                : 'Show this QR to the sender. It contains your '
-                                    'public key and a suggestion for how fast to '
-                                    'send, based on what this camera managed last '
-                                    'time — the file itself is encrypted '
-                                    'end-to-end.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                        textAlign: TextAlign.center,
-                      ),
-                    ] else
-                      const Center(child: CircularProgressIndicator()),
-                  ],
-                ),
+                          : _hint == null
+                          ? 'Show this QR to the sender. It contains only '
+                                'your public key — the file itself is '
+                                'encrypted end-to-end.'
+                          : 'Show this QR to the sender. It contains your '
+                                'public key and a suggestion for how fast to '
+                                'send, based on what this camera managed last '
+                                'time — the file itself is encrypted '
+                                'end-to-end.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ] else
+                    const Center(child: CircularProgressIndicator()),
+                ],
               ),
+            ),
           ];
 
-          final scanStep = <Widget>[
-              // Step 2: scan the sender's bootstrap + data frames.
-              _StepCard(
-                step: 2,
-                title: 'Scan sender QR codes',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (!state.isScanning && state.fileBytes == null)
-                      FilledButton.icon(
-                        onPressed: () {
-                          notifier.startScanning();
-                          _startScanner();
-                        },
-                        icon: const Icon(Icons.camera_alt),
-                        label: Text(state.sessionActive
-                            ? 'Resume scanning'
-                            : 'Start scanning'),
-                      ),
-                    if (state.isScanning) ...[
-                      Container(
-                        height: 300,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: DeadDropColors.borderInput,
-                          ),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: usesDesktopScanner
-                              ? DesktopScannerView(
-                                  onDetect: notifier.processRawQr,
-                                  onMeasured: _rememberMeasurement,
-                                )
-                              : Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    MobileScanner(
-                            controller: _scannerController,
-                            onDetect: (capture) {
-                              final size = capture.size;
-                              if (size.width > 0 && size.height > 0) {
-                                _mobileMeasure.recordDetection(
-                                  width: size.width.round(),
-                                  height: size.height.round(),
-                                );
-                                final measured = _mobileMeasure.capability;
-                                if (measured != null) {
-                                  _rememberMeasurement(measured);
-                                }
-                              }
-                              for (final barcode in capture.barcodes) {
-                                final raw = barcode.rawValue;
-                                if (raw != null) {
-                                  notifier.processRawQr(raw);
-                                }
-                              }
-                            },
-                            errorBuilder: (context, error) {
-                              return Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.videocam_off,
-                                          color: DeadDropColors.error, size: 48),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        _mapScannerError(error),
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                            color: DeadDropColors.error),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                                    // Aim feedback, the mobile counterpart of
-                                    // the desktop quality bar. It reports reads
-                                    // per second rather than a share of frames
-                                    // read: MobileScanner hands this app only
-                                    // successful detections, so the frames that
-                                    // failed cannot be counted and a percentage
-                                    // here would be invented.
-                                    Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Container(
-                                        margin: const EdgeInsets.all(8),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 8),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.65),
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          _mobileScanStatus(),
-                                          style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          notifier.stopScanning();
-                          _stopScanner();
-                        },
-                        icon: const Icon(Icons.stop),
-                        label: const Text('Stop scanning'),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-          ];
-
+          // Both of these live inside step 2, under the camera, rather
+          // than in the reporting column beside it. While scanning, the
+          // camera has the user's attention, and the column next to it
+          // is not read: a rejected session was reported as "it looked
+          // broken" with the reason at the top of the window in red,
+          // and before that an unknown-sender prompt went unanswered
+          // with the transfer sitting at nothing. Both are things the
+          // user must act on to carry on scanning, so they belong where
+          // the scanning is.
           final senderBlock = <Widget>[
-              // ── Unknown sender: decision required before decoding ────
-              if (state.awaitingSenderApproval) ...[
-                _UnknownSenderPrompt(
-                  fingerprint: state.pendingSender!.fingerprint,
-                  onAccept: (name) =>
-                      notifier.acceptPendingSender(name: name),
-                  onReject: notifier.rejectPendingSender,
-                ),
-                const SizedBox(height: 16),
-              ]
-              // ── Sender identity (shown after bootstrap) ──────────
-              else if (state.senderFingerprint != null) ...[
-                _SenderIdentityCard(
-                  fingerprint: state.senderFingerprint!,
-                  isNewSender: state.isNewSender,
-                  name: state.senderName,
-                ),
-                const SizedBox(height: 16),
-              ],
-          ];
-
-          final progressBlock = <Widget>[
-              // Step 3: live progress / result.
-              if (state.sessionActive) ...[
-                _StepCard(
-                  step: 3,
-                  title: 'Progress',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (state.fileName != null) ...[
-                        Text(
-                          state.fileName!,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      LinearProgressIndicator(
-                        value: state.progress,
-                        minHeight: 8,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        '${state.chunksDecoded} / ${state.totalChunks} chunks '
-                        '(${state.framesReceived} frames scanned)',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      // Cancel is offered only while a transfer is still
-                      // running: a slow one usually means the sender needs to
-                      // change fps or chunk size, and without this the only
-                      // way out was to close the app and re-pair.
-                      if (state.fileBytes == null) ...[
-                        const SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            notifier.cancelTransfer();
-                            _stopScanner();
-                          },
-                          icon: const Icon(Icons.close),
-                          label: const Text('Cancel transfer'),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 48),
-                            foregroundColor: DeadDropColors.error,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Cancelling keeps your key, so the sender does not '
-                            'have to scan it again.',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: DeadDropColors.textSecondary,
-                                ),
-                          ),
-                        ),
-                      ],
-                      if (state.fileBytes != null) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green[900]!.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[700]!),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.check_circle,
-                                      color: Colors.green[400]),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Transfer complete!',
-                                      style: TextStyle(
-                                        color: Colors.green[400],
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB received'
-                                '${state.fileName != null ? ' · ${state.fileName}' : ''}',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                              if (state.savedPath != null) ...[
-                                const SizedBox(height: 4),
-                                // Selectable and wrapping rather than
-                                // truncated: this is the only record of where
-                                // a file the user may have taken real risks
-                                // for actually went, and they may need to
-                                // copy it.
-                                SelectableText(
-                                  'Saved to: ${displayPath(state.savedPath!)}',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                              if (state.savedToVault) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Saved to vault',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                              const SizedBox(height: 12),
-                              // Stacked, not side by side. Three labelled
-                              // buttons sharing a phone's width left each one
-                              // too narrow to read, and the labels had been
-                              // cut to single words ("Device", "New") to make
-                              // them fit at all. Full width each costs a
-                              // little vertical space on a screen that has it
-                              // — the file has arrived, nothing else is
-                              // competing for room — and buys labels that say
-                              // what they do.
-                              SizedBox(
-                                width: double.infinity,
-                                child: FilledButton.icon(
-                                  onPressed: state.savedPath == null
-                                      ? notifier.saveFile
-                                      : null,
-                                  icon: const Icon(Icons.save),
-                                  label: const Text('Save to this device'),
-                                ),
-                              ),
-                              // The vault destination is offered only once a
-                              // vault exists in this session — never shown
-                              // disabled. A greyed-out option would itself
-                              // tell an attacker the feature exists and the
-                              // user set it up, which is exactly the kind of
-                              // tell the vault's coercion-resistance is built
-                              // to avoid (see home_page.dart's identical
-                              // treatment of its Vault entry).
-                              if (vaultExists) ...[
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: state.savedToVault
-                                        ? null
-                                        : () => _saveToVault(context, ref),
-                                    icon: const Icon(Icons.lock_outline),
-                                    label: const Text('Save to the vault'),
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 8),
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    notifier.reset();
-                                    _stopScanner();
-                                  },
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('New transfer'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+            if (state.awaitingSenderApproval) ...[
+              _UnknownSenderPrompt(
+                fingerprint: state.pendingSender!.fingerprint,
+                onAccept: (name) => notifier.acceptPendingSender(name: name),
+                onReject: notifier.rejectPendingSender,
+              ),
+              const SizedBox(height: 16),
+            ],
           ];
 
           final errorBlock = <Widget>[
@@ -1007,14 +787,400 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               ),
           ];
 
+          final scanStep = <Widget>[
+            // Step 2: scan the sender's bootstrap + data frames.
+            _StepCard(
+              step: 2,
+              title: 'Scan sender QR codes',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Why scanning is not getting anywhere, and the
+                  // question that has to be answered before it can.
+                  // Above the camera and outside the isScanning branch:
+                  // an error that stops the scanner would otherwise
+                  // disappear along with it.
+                  ...errorBlock,
+                  if (state.error != null) const SizedBox(height: 12),
+                  ...senderBlock,
+                  if (!state.isScanning && state.fileBytes == null)
+                    FilledButton.icon(
+                      onPressed: () {
+                        notifier.startScanning();
+                        _startScanner();
+                      },
+                      icon: const Icon(Icons.camera_alt),
+                      label: Text(
+                        state.sessionActive
+                            ? 'Resume scanning'
+                            : 'Start scanning',
+                      ),
+                    ),
+                  if (state.isScanning) ...[
+                    // Capped so the preview keeps the camera's own shape
+                    // instead of being poured into a fixed box.
+                    //
+                    // A plain height of 300 stretched across a desktop
+                    // window gives a wide, short box, and BoxFit.cover
+                    // then crops a 4:3 image top and bottom: the preview
+                    // read as letterboxed and the QR had to be held far
+                    // enough away to fit the surviving strip, which
+                    // costs exactly the pixels per module a scan needs.
+                    // Reported from macOS as "the camera looks very
+                    // wide" against a square-looking one on Android.
+                    //
+                    // 4/3 is the fallback, which is what every backend
+                    // here reports; the real figure replaces it as soon
+                    // as the camera says what it is.
+                    Center(
+                      child: ConstrainedBox(
+                        // Tall enough to be useful, never wider than the
+                        // camera's own shape at that height, so nothing
+                        // is cropped away.
+                        constraints: const BoxConstraints(
+                          maxHeight: 360,
+                          maxWidth: 360 * 4 / 3,
+                        ),
+                        child: AspectRatio(
+                          aspectRatio: 4 / 3,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: DeadDropColors.borderInput,
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: DesktopScannerView(
+                                onDetect: notifier.processRawQr,
+                                onMeasured: _rememberMeasurement,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Who is sending, under the camera that is reading
+                    // them. Moved here from a card of its own: it
+                    // describes what step 2 is doing.
+                    if (!state.awaitingSenderApproval &&
+                        state.senderFingerprint != null) ...[
+                      _SenderIdentityCard(
+                        fingerprint: state.senderFingerprint!,
+                        isNewSender: state.isNewSender,
+                        name: state.senderName,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    // Progress lives here, under the camera, rather
+                    // than in a card of its own. It used to be step
+                    // 3; on a phone that card fell below the fold, and
+                    // moving it above the camera put a block numbered
+                    // 3 above the one numbered 2. While a transfer is
+                    // running the progress is part of scanning, not a
+                    // step after it.
+                    if (state.sessionActive) ...[
+                      if (state.fileName != null) ...[
+                        Text(
+                          state.fileName!,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      LinearProgressIndicator(
+                        value: state.progress,
+                        minHeight: 8,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      const SizedBox(height: 12),
+                      // A percentage, not a chunk count.
+                      //
+                      // "24 of 2137 chunks" is true and useless: belief
+                      // propagation reveals almost nothing until it
+                      // cascades, so a transfer that was nearly half
+                      // done read as 1% and looked stalled. The
+                      // percentage comes from the decoder, which counts
+                      // captured-but-unrevealed frames as the work they
+                      // are.
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            state.fileBytes != null
+                                ? 'Complete'
+                                : '${(state.progress * 100).round()}% '
+                                      'received',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          // How long this has been running. A transfer
+                          // takes minutes, and knowing how many is the
+                          // first thing anyone wants when deciding
+                          // whether to wait or change a setting.
+                          if (state.startedAt != null)
+                            ElapsedTime(
+                              since: state.startedAt!,
+                              frozenAt: state.completedAt,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: DeadDropColors.textSecondary,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                            ),
+                        ],
+                      ),
+                      Text(
+                        '${state.chunksDecoded} of ${state.totalChunks} '
+                        'chunks rebuilt · ${state.framesReceived} codes '
+                        'scanned',
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: DeadDropColors.textSecondary),
+                      ),
+                      // Said once, where it is needed: the chunk count
+                      // staying low while the bar moves is how this
+                      // works, not a fault.
+                      if (state.fileBytes == null &&
+                          state.chunksDecoded < state.totalChunks / 2)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'Most chunks are rebuilt near the end, so this '
+                            'count stays low until it suddenly finishes.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: DeadDropColors.textSecondary),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                    ],
+                    // Least destructive first: stopping the camera keeps
+                    // the transfer and can be undone by scanning again;
+                    // cancelling throws away what has been received.
+                    // They used to be the other way round, because one
+                    // sat inside the progress block and the other after
+                    // it.
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        notifier.stopScanning();
+                        _stopScanner();
+                      },
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop scanning'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                    ),
+                    // Cancel is offered only while a transfer is still
+                    // running: a slow one usually means the sender needs to
+                    // change fps or chunk size, and without this the only
+                    // way out was to close the app and re-pair.
+                    if (state.sessionActive && state.fileBytes == null) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          notifier.cancelTransfer();
+                          _stopScanner();
+                        },
+                        icon: const Icon(Icons.close),
+                        label: const Text('Cancel transfer'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 48),
+                          foregroundColor: DeadDropColors.error,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Cancelling keeps your key, so the sender does not '
+                          'have to scan it again.',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: DeadDropColors.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
+              ),
+            ),
+          ];
+
+          // Only the decision lives out here. Who the sender is now
+          // sits inside step 2, under the camera reading them — it
+          // describes what that step is doing. This block kept its own
+          // copy as well, so "From MacBook" appeared twice on the
+          // screen at once.
+
+          final progressBlock = <Widget>[
+            // Step 3: the received file.
+            //
+            // Live progress is no longer here — it sits under the
+            // camera in step 2, where it belongs while a transfer is
+            // running. This card appears only once there is a file,
+            // rather than standing empty throughout the scan.
+            if (state.fileBytes != null) ...[
+              _StepCard(
+                step: 3,
+                title: 'Received file',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.green[900]!.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green[700]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green[400],
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Transfer complete!',
+                                    style: TextStyle(
+                                      color: Colors.green[400],
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${(state.fileBytes!.length / 1024).toStringAsFixed(1)} KB received'
+                              '${state.transferDuration != null ? ' in ${formatElapsed(state.transferDuration!)}' : ''}'
+                              '${state.fileName != null ? ' · ${state.fileName}' : ''}',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            if (state.savedPath != null) ...[
+                              const SizedBox(height: 4),
+                              // Selectable and wrapping rather than
+                              // truncated: this is the only record of where
+                              // a file the user may have taken real risks
+                              // for actually went, and they may need to
+                              // copy it.
+                              SelectableText(
+                                'Saved to: ${displayPath(state.savedPath!)}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                            if (state.savedToVault) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Saved to vault',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            // Stacked, not side by side. Three labelled
+                            // buttons sharing a phone's width left each one
+                            // too narrow to read, and the labels had been
+                            // cut to single words ("Device", "New") to make
+                            // them fit at all. Full width each costs a
+                            // little vertical space on a screen that has it
+                            // — the file has arrived, nothing else is
+                            // competing for room — and buys labels that say
+                            // what they do.
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: state.savedPath == null
+                                    ? notifier.saveFile
+                                    : null,
+                                icon: const Icon(Icons.save),
+                                label: const Text('Save to this device'),
+                              ),
+                            ),
+                            // The vault destination is offered only once a
+                            // vault exists in this session — never shown
+                            // disabled. A greyed-out option would itself
+                            // tell an attacker the feature exists and the
+                            // user set it up, which is exactly the kind of
+                            // tell the vault's coercion-resistance is built
+                            // to avoid (see home_page.dart's identical
+                            // treatment of its Vault entry).
+                            if (vaultExists) ...[
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: state.savedToVault
+                                      ? null
+                                      : () => _saveToVault(context, ref),
+                                  icon: const Icon(Icons.lock_outline),
+                                  label: const Text('Save to the vault'),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  notifier.reset();
+                                  _stopScanner();
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('New transfer'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ];
+
           List<Widget> spaced(List<Widget> items) => [
-                for (final w in items) ...[w, const SizedBox(height: 16)],
-              ];
+            for (final w in items) ...[w, const SizedBox(height: 16)],
+          ];
 
           if (wide) {
             // Camera on the left, everything that reports on the right.
             // The sender block no longer displaces the progress bar,
             // because the two are not in the same column any more.
+            // Only the finished file. The trust prompt and the error
+            // moved inside step 2; leaving them here meant the column
+            // appeared the moment something went wrong, which turned
+            // the single centred column into two and shifted every
+            // card on screen — including the handshake QR a sender
+            // may be pointing a camera at — by about 400 px.
+            final reporting = [...progressBlock];
+
+            // Before a scan starts there is nothing to report, and a
+            // second column holding nothing is not a column — it is an
+            // empty half of the window with the two cards shoved against
+            // the left edge. With one column of content, centre it and
+            // hold it to a readable width instead.
+            if (reporting.isEmpty) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: spaced([...keyStep, ...scanStep]),
+                    ),
+                  ),
+                ),
+              );
+            }
+
             return SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Row(
@@ -1030,11 +1196,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: spaced([
-                        ...senderBlock,
-                        ...progressBlock,
-                        ...errorBlock,
-                      ]),
+                      children: spaced(reporting),
                     ),
                   ),
                 ],
@@ -1048,10 +1210,13 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: spaced([
                 if (showKeyStep) ...keyStep,
+                // Plain source order. The progress was briefly hoisted
+                // above the camera so it would not fall below the fold
+                // on a phone, which left a card numbered 3 above the one
+                // numbered 2. It now lives inside step 2, so there is
+                // nothing to hoist.
                 ...scanStep,
-                ...senderBlock,
                 ...progressBlock,
-                ...errorBlock,
               ]),
             ),
           );
@@ -1105,8 +1270,7 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
         // confirmation went unnoticed — which for an action whose whole
         // point is that the file is now somewhere invisible is the one
         // message that must land.
-        backgroundColor:
-            saved ? DeadDropColors.success : DeadDropColors.error,
+        backgroundColor: saved ? DeadDropColors.success : DeadDropColors.error,
         behavior: SnackBarBehavior.floating,
         duration: Duration(seconds: saved ? 3 : 6),
       ),
@@ -1124,41 +1288,15 @@ class _ReceivePageState extends ConsumerState<ReceivePage> {
     return result ?? false;
   }
 
-  void _startScanner() {
-    // Each scan is measured on its own. Carrying the previous one forward
-    // would average a reading taken in a different room, at a different
-    // distance, and the result decides what the next sender is told.
-    _mobileMeasure.reset();
-    // On desktop, use the default camera (no "back" facing concept).
-    final isDesktop =
-        Platform.isLinux || Platform.isMacOS || Platform.isWindows;
-    _scannerController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      facing: isDesktop ? CameraFacing.front : CameraFacing.back,
-    );
-  }
+  /// Scanning lifecycle hooks.
+  ///
+  /// [DesktopScannerView] owns the camera: it opens one on mount and
+  /// releases it on dispose, and measures it while it reads. These remain
+  /// as the page's own start/stop points so the call sites stay readable
+  /// and a future need for per-scan state has somewhere to live.
+  void _startScanner() {}
 
-  void _stopScanner() {
-    _scannerController?.dispose();
-    _scannerController = null;
-  }
-
-  static String _mapScannerError(MobileScannerException error) {
-    return switch (error.errorCode) {
-      MobileScannerErrorCode.controllerUninitialized =>
-        'Camera is not ready yet. Please wait.',
-      MobileScannerErrorCode.permissionDenied =>
-        'Camera permission denied. Check your system settings and allow '
-            'camera access for DeadDrop.',
-      MobileScannerErrorCode.unsupported =>
-        'No camera detected on this device.',
-      MobileScannerErrorCode.controllerAlreadyInitialized =>
-        'Camera is already in use by another application. '
-            'Close it and try again.',
-      _ => 'Camera error: ${error.errorDetails?.message ?? 'unknown error'}. '
-          'Try closing other apps that use the camera.',
-    };
-  }
+  void _stopScanner() {}
 }
 
 class _StepCard extends StatelessWidget {
@@ -1182,10 +1320,7 @@ class _StepCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                CircleAvatar(
-                  radius: 14,
-                  child: Text('$step'),
-                ),
+                CircleAvatar(radius: 14, child: Text('$step')),
                 const SizedBox(width: 12),
                 // Expanded, not a bare Text: a title at its natural size
                 // overflows the row on a narrow phone.
@@ -1249,9 +1384,11 @@ class _PublicKeyTextView extends ConsumerWidget {
           SelectableText(
             grouped,
             textAlign: TextAlign.center,
-            style: technicalTextStyle(ref, relativeTo: 1.08,
-                    letterSpacing: 0.5)
-                .copyWith(height: 1.6),
+            style: technicalTextStyle(
+              ref,
+              relativeTo: 1.08,
+              letterSpacing: 0.5,
+            ).copyWith(height: 1.6),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1346,8 +1483,11 @@ class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
             Center(
               child: SelectableText(
                 widget.fingerprint,
-                style: technicalTextStyle(ref, relativeTo: 1.4,
-                    letterSpacing: 2),
+                style: technicalTextStyle(
+                  ref,
+                  relativeTo: 1.4,
+                  letterSpacing: 2,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -1372,24 +1512,28 @@ class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
               onSubmitted: (_) => _accept(),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: widget.onReject,
-                    icon: const Icon(Icons.close),
-                    label: const Text("Codes don't match"),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _accept,
-                    icon: const Icon(Icons.check),
-                    label: const Text('Codes match'),
-                  ),
-                ),
-              ],
+            // Stacked, not side by side. Half a phone's width is not
+            // enough for "Codes don't match" to stay on one line, and a
+            // decision about trust is the wrong place to make someone
+            // read a wrapped label. The affirmative one goes first,
+            // where the thumb is.
+            FilledButton.icon(
+              onPressed: _accept,
+              icon: const Icon(Icons.check),
+              label: const Text('Codes match'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: widget.onReject,
+              icon: const Icon(Icons.close),
+              label: const Text("Codes don't match"),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+                foregroundColor: DeadDropColors.error,
+              ),
             ),
           ],
         ),
@@ -1426,81 +1570,25 @@ class _SenderIdentityCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // A known sender collapses to one line.
+    // Always one line, whether or not this sender is new.
     //
-    // This card used to sit between the camera preview and the progress
-    // bar at full height, so on a phone the user had to choose between
-    // aiming the camera and watching progress — scrolling between the two
-    // during a transfer, which is the one moment attention is scarce.
+    // It used to be a full-height card between the camera and the
+    // progress bar, so on a phone the user had to choose between aiming
+    // and watching progress — scrolling between the two during a
+    // transfer, which is the one moment attention is scarce.
     //
-    // For a sender they have already checked and named there is nothing to
-    // act on, so it says who it is and gets out of the way; the full
-    // fingerprint is still one tap away. A NEW sender keeps the full
-    // warning, because there the user is being asked to do something.
-    if (!isNewSender) {
-      return _KnownSenderLine(fingerprint: fingerprint, name: name);
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.warning_amber,
-                    color: DeadDropColors.warning),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    name == null ? 'Sender identity' : 'From $name',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: SelectableText(
-                fingerprint,
-                style: technicalTextStyle(ref, relativeTo: 1.4,
-                    letterSpacing: 2),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: DeadDropColors.warning.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: DeadDropColors.warning.withValues(alpha: 0.4),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline,
-                      color: DeadDropColors.warning, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'New sender — verify this fingerprint through '
-                      'another channel (in person, phone call) to '
-                      'confirm the sender\'s identity.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: DeadDropColors.warning),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    // A new sender used to keep a warning card telling them to verify
+    // the fingerprint through another channel. By the time it appears
+    // they have already done exactly that: read the code out loud,
+    // compared it, pressed "Codes match" in the unknown-sender prompt.
+    // Repeating the instruction afterwards teaches people that these
+    // warnings can be ignored, which is the opposite of what a warning
+    // is for.
+    //
+    // isNewSender means new to the address book — acceptPendingSender
+    // sets it true at the moment of acceptance — which is not the same
+    // thing as unverified.
+    return _KnownSenderLine(fingerprint: fingerprint, name: name);
   }
 }
 
@@ -1527,8 +1615,11 @@ class _KnownSenderLine extends ConsumerWidget {
             children: [
               SelectableText(
                 fingerprint,
-                style: technicalTextStyle(ref, relativeTo: 1.4,
-                    letterSpacing: 2),
+                style: technicalTextStyle(
+                  ref,
+                  relativeTo: 1.4,
+                  letterSpacing: 2,
+                ),
               ),
               const SizedBox(height: 12),
               Text(
@@ -1552,20 +1643,25 @@ class _KnownSenderLine extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         child: Row(
           children: [
-            const Icon(Icons.verified_user,
-                color: DeadDropColors.success, size: 18),
+            const Icon(
+              Icons.verified_user,
+              color: DeadDropColors.success,
+              size: 18,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'From $label',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: DeadDropColors.success,
-                    ),
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: DeadDropColors.success),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Icon(Icons.info_outline,
-                size: 16, color: Theme.of(context).hintColor),
+            Icon(
+              Icons.info_outline,
+              size: 16,
+              color: Theme.of(context).hintColor,
+            ),
           ],
         ),
       ),
@@ -1642,17 +1738,15 @@ class _VaultUnlockDialogState extends ConsumerState<_VaultUnlockDialog> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(
-              _error!,
-              style: const TextStyle(color: DeadDropColors.error),
-            ),
+            Text(_error!, style: const TextStyle(color: DeadDropColors.error)),
           ],
         ],
       ),
       actions: [
         TextButton(
-          onPressed:
-              _submitting ? null : () => Navigator.of(context).pop(false),
+          onPressed: _submitting
+              ? null
+              : () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
         FilledButton(

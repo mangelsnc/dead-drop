@@ -61,6 +61,49 @@ int sampleDegree(DeterministicRandom rng, List<double> cdf) {
 }
 
 // ---------------------------------------------------------------------------
+// Chunk id derivation — shared by both sides
+// ---------------------------------------------------------------------------
+
+/// The chunk ids frame [seq] of a transfer with [k] chunks encodes, under
+/// PRNG [seed].
+///
+/// This is the single definition of that mapping, used by the emitter to
+/// build a frame and by the receiver to recover what the frame means. The
+/// ids are not transmitted, so the two sides agreeing is not something
+/// the wire can check for us: if this function ever behaves differently
+/// on the two of them, transfers corrupt silently. Hence one
+/// implementation, and `fountain_vectors_test.dart` pinning its output
+/// against fixed expected values so a refactor cannot move it.
+///
+/// Deterministic for a given (seq, seed, k) on every platform: the
+/// generator is the specified xorshift32 in prng.dart, NOT
+/// `dart:math.Random` (which truncated `(seed << 32) ^ seq` to 32 bits —
+/// silently discarding `seed` — and guarantees no stable sequence across
+/// platforms or SDK versions).
+///
+/// [cdf] is [robustSolitonCdf] for [k]; it is a parameter only so the
+/// encoder can reuse the one it already built.
+List<int> chunkIdsFor({
+  required int seq,
+  required int seed,
+  required int k,
+  List<double>? cdf,
+}) {
+  final rng = DeterministicRandom(mixSeed(seed, seq));
+  final degree = min(sampleDegree(rng, cdf ?? robustSolitonCdf(k)), k);
+  // Fisher-Yates on the identity permutation, driven by the deterministic
+  // generator. `List.shuffle` is not usable here: it takes `dart:math.Random`.
+  final indices = List<int>.generate(k, (i) => i);
+  for (var i = k - 1; i > 0; i--) {
+    final j = rng.nextInt(i + 1);
+    final tmp = indices[i];
+    indices[i] = indices[j];
+    indices[j] = tmp;
+  }
+  return indices.sublist(0, degree)..sort();
+}
+
+// ---------------------------------------------------------------------------
 // Encoder
 // ---------------------------------------------------------------------------
 
@@ -85,23 +128,13 @@ class LTEncoder {
   /// Produce encoded frame #(seq) under PRNG seed.
   /// Returns (chunk_ids, payload) where payload = XOR of the chosen chunks.
   ///
-  /// Deterministic for a given (seq, seed) on every platform: the generator
-  /// is the specified xorshift32 in prng.dart, NOT `dart:math.Random` (which
-  /// truncated `(seed << 32) ^ seq` to 32 bits — silently discarding `seed` —
-  /// and guarantees no stable sequence across platforms or SDK versions).
+  /// The ids are not transmitted: the receiver recomputes them with
+  /// [chunkIdsFor] from the same (seq, seed, k). See
+  /// docs/decisions/0001-derive-chunk-ids-from-the-seed.md. They are
+  /// returned here because the emitter still needs them to build the
+  /// payload, and because the degree goes on the wire.
   (List<int>, Uint8List) makeFrame(int seq, int seed) {
-    final rng = DeterministicRandom(mixSeed(seed, seq));
-    final degree = min(sampleDegree(rng, cdf), k);
-    // Fisher-Yates on the identity permutation, driven by the deterministic
-    // generator. `List.shuffle` is not usable here: it takes `dart:math.Random`.
-    final indices = List<int>.generate(k, (i) => i);
-    for (var i = k - 1; i > 0; i--) {
-      final j = rng.nextInt(i + 1);
-      final tmp = indices[i];
-      indices[i] = indices[j];
-      indices[j] = tmp;
-    }
-    final chunkIds = indices.sublist(0, degree)..sort();
+    final chunkIds = chunkIdsFor(seq: seq, seed: seed, k: k, cdf: cdf);
 
     final payload = Uint8List(chunkSize);
     for (final cid in chunkIds) {
@@ -126,12 +159,58 @@ class LTDecoder {
   int framesReceived = 0;
   int framesUseful = 0;
 
+  /// Frames that carried information this decoder did not already have.
+  ///
+  /// Distinct from [framesUseful], which counts only the frames that
+  /// resolved a chunk there and then. A frame that goes into [pending]
+  /// has advanced the transfer even though it revealed nothing yet, and
+  /// a fully redundant one has not. This is the quantity that rises
+  /// steadily through a transfer, so it is what [progress] measures.
+  int framesInformative = 0;
+
   LTDecoder({required this.k, required this.chunkSize});
 
   bool get done => decoded.length == k;
 
   double get efficiency =>
       framesReceived > 0 ? framesUseful / framesReceived : 0.0;
+
+  /// Frames a transfer of [k] chunks typically needs, as a multiple of
+  /// k.
+  ///
+  /// A fountain code needs more frames than there are chunks. Measured
+  /// on this implementation: 1.22x at k=200, 1.13x at k=2048. The higher
+  /// figure is used so the estimate does not habitually overshoot on
+  /// small transfers.
+  static const double expectedOverhead = 1.22;
+
+  /// How far along the transfer is, from 0 to 1.
+  ///
+  /// Measured by useful frames received against the number such a
+  /// transfer takes, because neither of the obvious alternatives works:
+  ///
+  /// `decoded.length / k` badly understates it. Belief propagation
+  /// resolves almost nothing until it cascades, so a 1 MB transfer at
+  /// 512-byte chunks showed 12 chunks of 2048 after 1024 frames and
+  /// finished at 2308 -- it read as 1% when it was nearly half done, and
+  /// was reported from a device as a stall.
+  ///
+  /// Counting pending frames overstates it instead. Frames cover nearly
+  /// every chunk long before they can be resolved, so the bar reached
+  /// its cap and sat there for roughly half the run -- reported as
+  /// minutes stuck on the final 1%.
+  ///
+  /// Frames received is the one quantity that rises steadily throughout,
+  /// which is what a progress bar is for. It is an estimate: a transfer
+  /// may finish a little before or after the bar fills, so the value is
+  /// capped just below 1 and only [done] puts it at 1.
+  double get progress {
+    if (k == 0) return 0;
+    if (done) return 1;
+    final expected = k * expectedOverhead;
+    final ratio = framesInformative / expected;
+    return ratio > 0.99 ? 0.99 : ratio;
+  }
 
   /// Feed one encoded frame. Returns true if it made progress.
   bool addFrame(List<int> chunkIds, Uint8List payload) {
@@ -151,6 +230,8 @@ class LTDecoder {
     }
 
     if (ids.isEmpty) return false; // fully redundant frame
+
+    framesInformative++;
 
     if (ids.length == 1) {
       _resolve(ids.first, buf);

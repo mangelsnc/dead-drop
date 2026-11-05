@@ -13,6 +13,7 @@ DeadDrop is in **active development** (MVP target: February 2027). To avoid any 
 **✅ Works today:**
 
 - Air-gapped file transfer via animated QR codes (screen → camera, no network).
+- Camera scanning on **all five platforms** — Windows, macOS, GNU/Linux, Android and iOS.
 - End-to-end encryption of the transfer: only the receiving device can read the file.
 - File integrity check: the app verifies the file arrived identical to the original.
 - Resume after interruption: the codes repeat in a loop and the transfer continues where it left off.
@@ -22,7 +23,6 @@ DeadDrop is in **active development** (MVP target: February 2027). To avoid any 
 
 **📋 Not yet:**
 
-- **Scanning with the camera on Linux and Windows.** The desktop builds have no scanner, so there you type or paste the other device's key instead. Android, iOS and macOS scan normally.
 - **An external audit.** Nobody independent has reviewed this code.
 
 > ⚠️ **Three things to understand before you rely on the vault.** It is **opt-in**: a file you save outside it has no protection from DeadDrop. The decoy holds **whatever you put in it** — the app invents nothing, and an empty decoy is not convincing. And self-destruct **discards keys, it does not erase files**; on the flash storage phones use, nobody can promise the bytes are physically gone. The limits are spelled out in [docs/security.md](security.md).
@@ -77,7 +77,8 @@ The codes on the screen travel through the camera, so reading quality depends on
 
 - **Distance:** between 15 and 30 centimetres between screen and camera is usually ideal. Neither touching nor far away.
 - **Light:** avoid reflections on the sender's screen. If there is a light source right behind the receiver, the camera may struggle. Change the angle slightly.
-- **Screen brightness:** turn it up to maximum on the sending device. The app raises it automatically during the transfer.
+- **Screen brightness:** the app raises the sending screen to full automatically during the transfer, which is what a phone camera wants. If the receiving device is a **webcam**, try lowering it with the "Screen brightness" control in Options: a webcam measures the whole bright screen, adjusts to it, and the dark squares of the code come out grey. If the other device sees the code but never reads it, this is the first thing to try.
+- **Screen size:** a big screen sending makes a large difference, because each square of the code gets more pixels for the camera to resolve. The same file that struggles phone-to-phone can go through in under a minute from a desktop monitor. On a computer, **maximise the window** before you start: the code is drawn to fit the window, so a half-sized window sends a half-sized code.
 - **Stay still:** both devices should be as still as possible. Resting them on a table helps a lot.
 - **Speed:** after the receiving device has read one transfer, it measures its own camera and puts a suggestion into the QR code it shows next time. The sender applies that suggestion automatically — the Options panel says "Set from the receiver's camera" when it has — and you can still change any of it by hand with the "Sending speed" control. On a first-ever transfer there is nothing measured yet, so the sender uses its defaults.
 
@@ -133,17 +134,22 @@ somewhere it is safe to read the screen. The app cannot see the room; you can.
 
 ### Deleting a vault
 
-**Vault → Delete vault**, with any passphrase. It asks for one so that a phone
-left unlocked on a table is not enough for someone else to destroy your files.
+**Settings → Security → Delete vault**, or the same option on the unlock
+screen. It asks you to type `DELETE` rather than your passphrase, so that a
+stray tap cannot wipe your files — but it does not need the passphrase,
+because deleting is also what you do when you have forgotten it.
 
-**It deletes everything.** Both the real environment and the decoy, whichever
-passphrase you use. There is no "delete just the decoy", on purpose: an option
+**It deletes everything.** Both the real environment and the decoy. There is
+no "delete just the decoy", on purpose: an option
 like that could only exist on a device that has one, so its presence on the
 screen would be the very thing the decoy is meant to hide. Assume that
 deleting under someone else's pressure destroys all of it.
 
-If you have forgotten every passphrase, the app cannot delete it for you —
-remove the application's data through your operating system instead.
+**If you have forgotten your passphrase, this is your way out.** There is no
+recovery — no PIN, no hint, no reset link. That is what makes the vault worth
+having: nobody can be made to hand over something that does not exist. What
+you can always do is delete the vault and start again. The files are gone,
+but they were encrypted and stay encrypted; better deleted than read.
 
 ---
 
