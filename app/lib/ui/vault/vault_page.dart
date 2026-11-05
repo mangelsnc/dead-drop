@@ -16,6 +16,7 @@
 /// unwilling person without their choice the way a typed secret cannot.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -90,10 +91,39 @@ class _LockedViewState extends ConsumerState<_LockedView> {
   bool _submitting = false;
   String? _error;
 
+  /// Seconds left of a rate-limiting wait, or null when not waiting.
+  ///
+  /// Counted down in the UI rather than taken from the controller,
+  /// which serves the whole delay in one go. The number is cosmetic:
+  /// the wait itself is the controller's, and this only shows it.
+  int? _waitSeconds;
+  Timer? _waitTicker;
+
   @override
   void dispose() {
+    _waitTicker?.cancel();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Shows the wait the controller is about to serve, ticking down.
+  void _startWaitCountdown(Duration wait) {
+    _waitTicker?.cancel();
+    if (!mounted) return;
+    setState(() => _waitSeconds = (wait.inMilliseconds / 1000).ceil());
+    _waitTicker = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final left = (_waitSeconds ?? 1) - 1;
+      if (left <= 0) {
+        timer.cancel();
+        setState(() => _waitSeconds = null);
+        return;
+      }
+      setState(() => _waitSeconds = left);
+    });
   }
 
   Future<void> _unlock() async {
@@ -103,11 +133,13 @@ class _LockedViewState extends ConsumerState<_LockedView> {
     });
     final ok = await ref
         .read(vaultControllerProvider.notifier)
-        .unlock(_controller.text);
+        .unlock(_controller.text, onWaiting: _startWaitCountdown);
+    _waitTicker?.cancel();
     if (!mounted) return;
     if (!ok) {
       setState(() {
         _submitting = false;
+        _waitSeconds = null;
         _error = ref.read(vaultControllerProvider).error ?? 'Could not unlock';
       });
     }
@@ -181,7 +213,19 @@ class _LockedViewState extends ConsumerState<_LockedView> {
               textStyle: technicalTextStyle(ref),
               onSubmitted: () => _submitting ? null : _unlock(),
             ),
-            if (_error != null) ...[
+            // The wait comes first: while one is running there is no
+            // error to show, and an empty pause under a spinner is what
+            // reads as a hung app.
+            if (_waitSeconds != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                unlockWaitMessage(Duration(seconds: _waitSeconds!))!,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: DeadDropColors.textSecondary,
+                ),
+              ),
+            ] else if (_error != null) ...[
               const SizedBox(height: 12),
               Text(
                 _error!,

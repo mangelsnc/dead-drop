@@ -92,6 +92,35 @@ class VaultState {
 /// [vaultControllerProvider]. It registers itself as a
 /// [WidgetsBindingObserver] so it can lock the vault the moment the app is
 /// backgrounded, independent of whatever screen happens to be on top.
+/// What to tell someone who must wait before their next unlock attempt,
+/// or null when there is no wait.
+///
+/// The rate-limiting penalty is served inside [VaultController.unlock],
+/// before the attempt. Unannounced, that is a spinner and several
+/// seconds of nothing: reported as the app having hung, which is the
+/// moment a person force-quits — the one reaction the pause exists to
+/// discourage.
+///
+/// It names the wait and nothing else. It must never say that a
+/// self-destruct is approaching, however near the threshold: the threat
+/// model includes coercion, and a countdown to erasure tells whoever is
+/// standing over the owner exactly when to stop. Pinned by
+/// vault/unlock_wait_message_test.dart.
+///
+/// Announcing the wait leaks nothing a clock does not already give
+/// away. The penalty is deliberately served *before* the attempt rather
+/// than after a failure, so its length never reveals whether the last
+/// passphrase was recognised, and saying out loud how long it is does
+/// not change that.
+String? unlockWaitMessage(Duration wait) {
+  if (wait <= Duration.zero) return null;
+  // Rounded up: a countdown reading "0 seconds" beside a field that is
+  // still disabled is the same confusion in miniature.
+  final seconds = (wait.inMilliseconds / 1000).ceil();
+  return 'Too many failed attempts. Wait $seconds '
+      '${seconds == 1 ? 'second' : 'seconds'} before trying again.';
+}
+
 class VaultController extends StateNotifier<VaultState>
     with WidgetsBindingObserver {
   /// [attemptGuard] is injectable so tests can supply one over an
@@ -199,7 +228,10 @@ class VaultController extends StateNotifier<VaultState>
   /// entries. On failure, leaves any previously-open environment untouched
   /// (an unlock attempt while already unlocked does not implicitly lock
   /// first) and sets [VaultState.error].
-  Future<bool> unlock(String passphrase) async {
+  Future<bool> unlock(
+    String passphrase, {
+    void Function(Duration wait)? onWaiting,
+  }) async {
     final sodium = _sodium;
     final store = _store;
     if (sodium == null || store == null) {
@@ -220,6 +252,11 @@ class VaultController extends StateNotifier<VaultState>
 
     final penalty = await _attemptGuard.penaltyBeforeNextAttempt();
     if (penalty > Duration.zero) {
+      // Told before the wait, not after: a message that arrives when the
+      // wait is over has already let the user conclude the app is stuck.
+      // It carries the length only — see [unlockWaitMessage] for why it
+      // must not mention self-destruct.
+      onWaiting?.call(penalty);
       await Future<void>.delayed(penalty);
     }
 
