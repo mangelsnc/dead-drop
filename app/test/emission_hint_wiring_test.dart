@@ -228,8 +228,12 @@ void main() {
 
       test('a hint too dense for this screen is cut down, not accepted', () {
         final notifier = build();
-        // A phone-sized code. 512 bytes needs more room than this.
-        notifier.predictQrDisplaySize(320);
+        // Small enough that 512 bytes still does not fit at EC-L: at
+        // 200 px the largest this screen can draw is 256. The figure
+        // moved when the density floor was recalibrated against
+        // hardware; what this test checks is the mechanism, not the
+        // threshold.
+        notifier.predictQrDisplaySize(200);
 
         notifier.setReceiverPk(
           _key(10),

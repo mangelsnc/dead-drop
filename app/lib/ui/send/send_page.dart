@@ -2504,21 +2504,31 @@ bool _hintDiffers(SendState state) {
 /// another device will read.
 ///
 /// Three pixels per module is what a decoder needs from the image it
-/// finally sees. This is the sender's screen, which is only the first
-/// of two reductions, so the bar here has to be higher — the camera
-/// takes its own share of what is left.
+/// finally sees, and two is the hard limit. This is the sender's
+/// screen, only the first of two reductions, so some headroom belongs
+/// here — the camera takes its own share of what is left.
 ///
-/// Calibrated against two measured outcomes rather than derived:
+/// Calibrated against measured outcomes rather than derived. Redmi
+/// Note 14 emitting at EC-L on 2026-11-05, every row watched:
 ///
-///  * Mac sending at 6.67 px/module: read, though slowly.
-///  * A Redmi Note 14 sending at 3.29: nothing decoded in three
-///    minutes.
+///  *  256 B at 4.73 px/module: transfers.
+///  *  512 B at 3.71: one minute eleven.
+///  * 1024 B at 2.76: twenty-eight seconds, the best result on record.
+///  * 2048 B at 1.95: does not read.
 ///
-/// 4.0 sits between them, which puts 256-byte chunks on that phone
-/// (4.26) just inside and 512 (3.29) outside. Two points are not a
-/// curve: this is a warning, not a prohibition, and the user can still
-/// choose whatever they like.
-const double kMinUsablePixelsPerModule = 4.0;
+/// So the floor is between 1.95 and 2.76, and 2.5 sits between them
+/// with daylight on either side.
+///
+/// It was 4.0, fitted on 2026-11-04 to the same phone before the
+/// emitted code had its quiet zone — so it was calibrated against a
+/// different defect, and it refused every configuration above 256 B
+/// including the fastest one there is. A full-screen window warned
+/// that it was "too small to show 1024-byte chunks" while transferring
+/// them in under half a minute.
+///
+/// Still a warning rather than a prohibition: the user can choose
+/// whatever they like, and four points on one phone are not a curve.
+const double kMinUsablePixelsPerModule = 2.5;
 
 /// How the sending screen names its frame rate.
 ///
