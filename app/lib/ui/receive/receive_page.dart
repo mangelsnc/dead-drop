@@ -191,6 +191,27 @@ class PendingSender {
   final String fingerprint;
 }
 
+/// Turns a rejection from the crypto layer into something to act on.
+///
+/// The parser names the field it tripped over, which is the right thing
+/// for a log and the wrong thing for a screen: "Unsupported version"
+/// reached a user whose phone was running an older build, and said
+/// nothing about updating it. An unrecognised reason is passed through
+/// rather than swallowed — a technical message beats a blank one.
+@visibleForTesting
+String sessionRejectionMessage(String reason) {
+  if (reason.contains('Unsupported version')) {
+    return 'The sending device is running a different version of '
+        'DeadDrop. Update both devices to the same version and try '
+        'again.';
+  }
+  if (reason.contains('not addressed to this receiver')) {
+    return 'This transfer was addressed to a different device. Ask the '
+        'sender to scan the key QR above again.';
+  }
+  return 'Session rejected: $reason';
+}
+
 class ReceiveNotifier extends StateNotifier<ReceiveState> {
   ReceiveNotifier(this._sodium, this._tofuStore) : super(ReceiveState());
 
@@ -297,7 +318,7 @@ class ReceiveNotifier extends StateNotifier<ReceiveState> {
         isNewSender: false,
       );
     } on DeadDropCryptoError catch (e) {
-      state = state.copyWith(error: 'Session rejected: ${e.message}');
+      state = state.copyWith(error: sessionRejectionMessage(e.message));
     }
   }
 
