@@ -111,20 +111,22 @@ The transfer is not lost: the codes repeat in a loop and the app resumes from wh
 
 With an unsigned build, yes, and it is nothing to worry about.
 
-DeadDrop stores this device's identity in the macOS keychain rather than
-in a file of its own, because that is the part of the system designed to
-hold secrets. macOS grants access to a keychain item to the exact
-application that created it, identified by its signature. An unsigned
-build has no stable identity, so every new build looks like a different
-application reaching for another one's item, and macOS asks you to
-confirm. Allow it and it stops asking for that item.
+DeadDrop stores this device's identity, and the senders you have
+trusted, in the macOS keychain rather than in files of its own, because
+that is the part of the system designed to hold secrets. Those are
+several separate entries, and macOS asks for permission the first time
+anything reaches an entry that does not exist yet. So the prompts
+arrive spread through your first session — a couple when you open Send,
+a couple more when you start scanning — rather than all at once.
 
-A build signed with an Apple Developer certificate does not ask at all.
-Signing needs a paid Apple certificate, the same obstacle that keeps
-iPhone builds out of the App Store, so builds published here are
-unsigned for now. The prompts are a consequence of that, not of anything
-DeadDrop does with your data: nothing is sent anywhere, on macOS or
-elsewhere.
+Allowing a prompt settles that one entry for good. A new build of
+DeadDrop can ask again, because an unsigned build is a different
+application as far as macOS is concerned, and builds published here are
+unsigned: signing needs a paid Apple certificate, the same obstacle
+that keeps iPhone builds out of the App Store.
+
+None of it means data is leaving your machine. DeadDrop has no network
+access at all — you can check by running it with the network off.
 
 ### Can I pause a transfer and continue later?
 
