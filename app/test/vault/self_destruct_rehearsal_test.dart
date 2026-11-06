@@ -119,6 +119,33 @@ void main() {
     }
   });
 
+  test('a rehearsal still serves a wait before the attempt that fires',
+      () async {
+    // The point of rehearsing is to watch the real sequence. In
+    // production a delay always precedes the threshold, so a rehearsal
+    // with no delays would rehearse something that cannot happen —
+    // and the wait message, which is the other thing worth seeing,
+    // would never appear.
+    //
+    // Written against freeAttempts rather than a literal, so it holds
+    // in both builds: the attempt that fires must be a penalised one.
+    expect(selfDestructThreshold, greaterThan(freeAttempts),
+        reason: 'the threshold has to sit beyond the free attempts, or '
+            'the vault is destroyed before any delay is served');
+
+    final backend = _FakeSecureStorage();
+    FlutterSecureStoragePlatform.instance = backend;
+    final guard = AttemptGuard(storage: const FlutterSecureStorage());
+
+    // Spend the free attempts; the next one must cost a wait.
+    for (var i = 0; i < freeAttempts; i++) {
+      await guard.recordFailure();
+    }
+    expect(await guard.penaltyBeforeNextAttempt(), greaterThan(Duration.zero),
+        reason: 'the attempt after the free ones must be penalised, so '
+            'the wait message has something to show');
+  });
+
   test('the production curve really is slow enough to need a rehearsal',
       () {
     // The reason this build exists, as arithmetic: reaching the

@@ -111,11 +111,23 @@ const int selfDestructThreshold =
     selfDestructRehearsal ? 3 : kSelfDestructThreshold;
 
 /// Attempts allowed before any delay in this build.
-const int freeAttempts = selfDestructRehearsal ? 0 : kFreeAttempts;
+///
+/// One in a rehearsal, not zero. With no free attempt the penalty is
+/// always zero, the wait message never appears, and the rehearsal
+/// exercises a sequence that cannot happen in production — where the
+/// delays always precede the threshold. One free attempt puts a real
+/// wait between the second failure and the third, which is the one
+/// that fires.
+const int freeAttempts = selfDestructRehearsal ? 1 : kFreeAttempts;
 
 /// The delay added per failed attempt in this build.
-const Duration penaltyStep =
-    selfDestructRehearsal ? Duration.zero : kPenaltyStep;
+///
+/// Kept, shortened. The wait is part of what an owner is rehearsing:
+/// a pause arriving before the attempt that destroys the vault is
+/// exactly the moment they need to recognise.
+const Duration penaltyStep = selfDestructRehearsal
+    ? Duration(seconds: 3)
+    : kPenaltyStep;
 
 /// [penaltyStep] under another name, so the constructor's parameter of
 /// that name does not shadow it in the initialiser list.
