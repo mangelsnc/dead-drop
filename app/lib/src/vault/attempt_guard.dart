@@ -78,6 +78,49 @@ const String kAttemptCounterStorageKey = 'deaddrop_unlock_failures';
 /// and the enforcement drift apart.
 const String kSelfDestructStorageKey = 'deaddrop_self_destruct_enabled';
 
+/// Whether this binary reaches self-destruct in three attempts with no
+/// delays, so its owner can watch it fire.
+///
+/// Off unless built with `--dart-define=DEADDROP_SELF_DESTRUCT_REHEARSAL=true`,
+/// and `const`, so an ordinary build resolves it to a compile-time
+/// `false` and the production constants below are the only ones left in
+/// the tree. Nothing to remember to take out before a release, which
+/// matters more here than for the other diagnostic flags: a release that
+/// erased a vault on the third mistyped passphrase would destroy the
+/// files of exactly the person the feature exists to protect.
+/// vault/self_destruct_rehearsal_test.dart fails if a build is about to
+/// ship with it on.
+///
+/// ## Why it exists
+///
+/// Self-destruct cannot be checked by hand in a sitting. Ten failures,
+/// and the penalties before them add up to two minutes and twenty
+/// seconds of real waiting — so an owner asked to trust it with
+/// something irreplaceable has never seen it work. A build that reaches
+/// it in three attempts is the only honest way to answer "does this
+/// actually fire?".
+///
+/// It changes when the wipe happens, never what it does: the counting,
+/// the preference check and the destruction of every slot are the
+/// production paths, unchanged.
+const bool selfDestructRehearsal =
+    bool.fromEnvironment('DEADDROP_SELF_DESTRUCT_REHEARSAL');
+
+/// Failures after which self-destruct fires in this build.
+const int selfDestructThreshold =
+    selfDestructRehearsal ? 3 : kSelfDestructThreshold;
+
+/// Attempts allowed before any delay in this build.
+const int freeAttempts = selfDestructRehearsal ? 0 : kFreeAttempts;
+
+/// The delay added per failed attempt in this build.
+const Duration penaltyStep =
+    selfDestructRehearsal ? Duration.zero : kPenaltyStep;
+
+/// [penaltyStep] under another name, so the constructor's parameter of
+/// that name does not shadow it in the initialiser list.
+const Duration _buildPenaltyStep = penaltyStep;
+
 const FlutterSecureStorage _defaultStorage = kSecureStorage;
 
 /// Tracks consecutive failed unlock attempts and, if the user opted in,
@@ -96,7 +139,7 @@ class AttemptGuard {
     FlutterSecureStorage? storage,
     Duration? penaltyStep,
   })  : _storage = storage ?? _defaultStorage,
-        _penaltyStep = penaltyStep ?? kPenaltyStep;
+        _penaltyStep = penaltyStep ?? _buildPenaltyStep;
 
   final FlutterSecureStorage _storage;
   final Duration _penaltyStep;
@@ -107,9 +150,9 @@ class AttemptGuard {
   /// duration. Returns [Duration.zero] for the first [kFreeAttempts].
   Future<Duration> penaltyBeforeNextAttempt() async {
     final failures = await failureCount();
-    if (failures < kFreeAttempts) return Duration.zero;
+    if (failures < freeAttempts) return Duration.zero;
 
-    final steps = failures - kFreeAttempts + 1;
+    final steps = failures - freeAttempts + 1;
     final penalty = _penaltyStep * steps;
     return penalty > kMaxPenalty ? kMaxPenalty : penalty;
   }
@@ -148,7 +191,7 @@ class AttemptGuard {
     } catch (_) {
       // Unreachable keychain: see [failureCount].
     }
-    if (failures < kSelfDestructThreshold) return false;
+    if (failures < selfDestructThreshold) return false;
     return _selfDestructEnabled();
   }
 
