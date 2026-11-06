@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../src/file_metadata.dart';
+import '../../src/vault/attempt_guard.dart';
 import '../../src/vault/vault_store.dart';
 import '../theme.dart';
 import '../passphrase_field.dart';
@@ -206,6 +207,29 @@ class _LockedViewState extends ConsumerState<_LockedView> {
               textAlign: TextAlign.center,
               style: theme.textTheme.headlineSmall,
             ),
+            // A build that erases on the third wrong passphrase must say
+            // so where the passphrase is typed. Compile-time constant, so
+            // an ordinary build drops this branch entirely.
+            if (selfDestructRehearsal) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: DeadDropColors.error.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: DeadDropColors.error),
+                ),
+                child: Text(
+                  'Rehearsal build: $selfDestructThreshold wrong '
+                  'passphrases erase every environment, with no delays '
+                  'in between. Do not keep anything here you want.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: DeadDropColors.error,
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             PassphraseField(
               controller: _controller,
