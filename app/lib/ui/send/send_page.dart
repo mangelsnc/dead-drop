@@ -358,21 +358,28 @@ class SendNotifier extends StateNotifier<SendState> {
     // phone accepted 512 bytes at level Q and transferred nothing.
     //
     // The size here is a prediction until the sending view has drawn a
-    // code, because the handshake happens before it exists. This used
-    // to be guarded with `> 0` and so skipped the negotiation entirely
-    // at exactly the moment it was needed: a phone accepted 512 bytes
-    // from a Mac Studio, then warned that it could not draw them once
-    // the code appeared. An unnegotiated setting is the failure this
-    // whole function exists to prevent, so a prediction is used rather
-    // than nothing.
-    if (state.qrDisplaySizePx > 0) {
-      final agreed = negotiateSettings(
-        requestedChunkSize: chunkSize,
-        requestedEcLevel: ec,
-        displaySize: state.qrDisplaySizePx,
-      );
+    // code, because the handshake happens before it exists. Called
+    // unconditionally: this was once guarded with `> 0`, which skipped
+    // the negotiation at exactly the moment it was needed — a phone
+    // accepted 512 bytes from a Mac Studio, then warned it could not
+    // draw them once the code appeared. The comment claimed the guard
+    // was gone while it was still here, which is how it survived.
+    //
+    // negotiateSettings handles a size of zero itself, by coming back
+    // with the smallest chunk rather than the request untouched.
+    final agreed = negotiateSettings(
+      requestedChunkSize: chunkSize,
+      requestedEcLevel: ec,
+      displaySize: state.qrDisplaySizePx,
+    );
+    ec = agreed.ecLevel;
+    // The file's floor outranks the screen's, and is checked again
+    // because the negotiation above does not know about the file: a
+    // chunk too small overflows the uint16 chunk count, which makes
+    // the transfer impossible rather than merely slow.
+    if (bytes == null ||
+        fileSizeError(bytes.length, agreed.chunkSize) == null) {
       chunkSize = agreed.chunkSize;
-      ec = agreed.ecLevel;
     }
 
     state = state.copyWith(
@@ -2380,6 +2387,24 @@ int negotiateChunkSize({
   final from = weakening.indexOf(requestedEcLevel);
   if (from < 0) {
     return (chunkSize: requestedChunkSize, ecLevel: requestedEcLevel);
+  }
+
+  // An unknown screen is not a permissive one. A handshake is scanned
+  // before any code has been drawn, so a caller can reach here with no
+  // size — and agreeing to whatever the receiver asked for is exactly
+  // the failure this function exists to prevent: the sender accepts,
+  // starts emitting, and only then reports it cannot draw the code.
+  //
+  // The safe reading of "nothing is known" is the smallest chunk
+  // offered, which every screen can draw. Never raises what was asked
+  // for, for the same reason as below.
+  if (displaySize <= 0) {
+    final smallest = kChunkSizeOptions.first;
+    return (
+      chunkSize:
+          requestedChunkSize < smallest ? requestedChunkSize : smallest,
+      ecLevel: requestedEcLevel,
+    );
   }
 
   for (var i = from; i < weakening.length; i++) {
