@@ -101,14 +101,16 @@ tells them apart no better than the screen does.
 
 ### Setting it up
 
-1. Go to **Settings → Set up vault** and choose a passphrase.
+1. Go to **Settings → Set up vault**.
 2. The app offers you six random words. **Use them.** Six words are about 62
    bits of entropy; the app will not accept anything under 60. A six-digit PIN
    falls in under a minute to someone holding a copy of your storage, which is
-   why this asks for words rather than digits.
-3. Go to **Settings → Set up decoy** and choose a *different* passphrase.
+   why this asks for words rather than digits. Write them down.
+3. It then offers a **second** passphrase, for the decoy. Write that one down
+   too: it is no more recoverable than the first, and you cannot add it later.
 4. **Put real-looking files in the decoy.** The app invents nothing. An empty
-   decoy is not a decoy — spend five minutes on this.
+   decoy is not a decoy — spend five minutes on this, and keep it believable
+   as the real space fills up.
 5. From then on, each passphrase opens its own space.
 
 When you receive a file, the result screen offers **Device** and **Vault**. The

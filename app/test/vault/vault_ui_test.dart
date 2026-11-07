@@ -312,12 +312,36 @@ void main() {
             find.textContaining('Weak').evaluate().isNotEmpty,
         isTrue);
 
-    // The create/continue action must not proceed with a weak passphrase.
-    final createButtonFinder =
-        find.widgetWithText(FilledButton, 'Create vault');
-    expect(createButtonFinder, findsOneWidget);
-    final button = tester.widget<FilledButton>(createButtonFinder);
-    expect(button.onPressed, isNull);
+    // The action must not proceed with a weak passphrase. On the first
+    // step it reads "Continue" — setup provisions both environments
+    // now (ADR 0002), so the first step leads to the second rather
+    // than straight to a vault.
+    final continueButton =
+        find.widgetWithText(FilledButton, 'Continue');
+    expect(continueButton, findsOneWidget);
+    expect(tester.widget<FilledButton>(continueButton).onPressed, isNull);
+  });
+
+  testWidgets('the decoy step refuses a weak passphrase too', (tester) async {
+    // The second passphrase is no less load-bearing than the first: a
+    // decoy anyone can guess is a decoy that opens under pressure.
+    await tester.pumpWidget(wrap(const VaultSetupPage()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Type my own instead'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'password123');
+    await tester.pumpAndSettle();
+
+    final createButton = find.widgetWithText(FilledButton, 'Create vault');
+    expect(createButton, findsOneWidget);
+    expect(tester.widget<FilledButton>(createButton).onPressed, isNull,
+        reason: 'a weak decoy passphrase must not create the vault');
   });
 
   testWidgets('setup offers a generated passphrase', (tester) async {
