@@ -60,6 +60,18 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
   bool _submitting = false;
   String? _error;
 
+  /// The real environment's passphrase, once chosen; null while the
+  /// first step is still open.
+  ///
+  /// Both environments are provisioned together (ADR 0002), so the
+  /// first passphrase is held until the second is chosen and the pair
+  /// is written in one call. Nothing reaches disk before that: a vault
+  /// created halfway would be a vault with no decoy, which is the
+  /// state this change exists to make unreachable.
+  String? _realPassphrase;
+
+  bool get _choosingDecoy => _realPassphrase != null;
+
   @override
   void initState() {
     super.initState();
@@ -100,6 +112,20 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
 
   Future<void> _submit() async {
     final passphrase = _typingOwn ? _ownController.text : _generatedPassphrase;
+
+    // First step: hold the passphrase and offer a second one. Nothing
+    // is written yet.
+    if (!widget.isDecoy && !_choosingDecoy) {
+      setState(() {
+        _realPassphrase = passphrase;
+        _error = null;
+        _typingOwn = false;
+        _ownController.clear();
+      });
+      _generateNew();
+      return;
+    }
+
     setState(() {
       _submitting = true;
       _error = null;
@@ -109,7 +135,10 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
     if (widget.isDecoy) {
       await controller.addDecoy(passphrase);
     } else {
-      await controller.createVault(passphrase);
+      await controller.createVault(
+        _realPassphrase!,
+        decoyPassphrase: passphrase,
+      );
     }
 
     if (!mounted) return;
@@ -143,6 +172,9 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isDecoy ? 'Set up decoy' : 'Set up your vault'),
+        // Back would strand the first passphrase: the user would have
+        // written down a phrase for a vault that was never created.
+        automaticallyImplyLeading: !_choosingDecoy,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -150,21 +182,26 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (widget.isDecoy) ...[
+              if (widget.isDecoy || _choosingDecoy) ...[
                 const _DecoyWarningBanner(),
                 const SizedBox(height: 24),
               ],
               Text(
-                widget.isDecoy
-                    ? 'Choose a decoy passphrase'
+                widget.isDecoy || _choosingDecoy
+                    ? 'Now a second passphrase'
                     : 'Choose your passphrase',
                 style: theme.textTheme.headlineSmall,
               ),
               const SizedBox(height: 8),
               Text(
-                'A generated passphrase is the safest choice: every word is '
-                'drawn at random, so it carries no pattern an attacker could '
-                'guess from knowing you.',
+                widget.isDecoy || _choosingDecoy
+                    ? 'This one opens a different, separate environment. If '
+                        'you are ever made to unlock the vault, it is the '
+                        'one you can hand over. Write it down too — it is '
+                        'no more recoverable than the first.'
+                    : 'A generated passphrase is the safest choice: every '
+                        'word is drawn at random, so it carries no pattern '
+                        'an attacker could guess from knowing you.',
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(color: DeadDropColors.textSecondary),
               ),
@@ -201,7 +238,11 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Text(widget.isDecoy ? 'Create decoy' : 'Create vault'),
+                    : Text(widget.isDecoy
+                        ? 'Create decoy'
+                        : _choosingDecoy
+                            ? 'Create vault'
+                            : 'Continue'),
               ),
             ],
           ),
