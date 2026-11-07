@@ -175,5 +175,48 @@ void main() {
           reason: 'coming back to a locked vault must not inherit a '
               'reveal made in whatever room the user was in before');
     });
+
+    testWidgets('a failed unlock hides the passphrase again', (tester) async {
+      // Revealing is a decision about the room the user is in at that
+      // moment. A wrong passphrase is the moment someone looks over to
+      // see what went wrong, and the phrase has to be retyped anyway, so
+      // re-masking costs nothing and stops a reveal outliving the
+      // circumstances it was granted for.
+      const phrase = 'correct horse battery staple six';
+      final container = ProviderContainer(overrides: [
+        sodiumSumoProvider.overrideWithValue(sodium),
+        vaultDirectoryProvider.overrideWithValue(tempDir),
+      ]);
+      addTearDown(container.dispose);
+
+      final controller = container.read(vaultControllerProvider.notifier);
+      await tester.runAsync(() => controller.createVault(phrase));
+      controller.lock();
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(theme: deadDropTheme(), home: const VaultPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Show passphrase'));
+      await tester.pump();
+      expect(masked(tester), isFalse);
+
+      await tester.enterText(find.byType(TextField).first, 'wrong');
+      final button = tester.widget<FilledButton>(find.byType(FilledButton));
+      // Through runAsync and awaited: the unlock derives a key with
+      // Argon2id, which the pump guard will not run. pumpAndSettle
+      // afterwards never settles — the submit spinner animates until
+      // the attempt returns.
+      await tester.runAsync(() async => button.onPressed!());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(masked(tester), isTrue,
+          reason: 'a wrong passphrase is exactly when someone leans over');
+    });
   });
 }

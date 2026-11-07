@@ -11,6 +11,11 @@
 /// case is unlocking with someone nearby; a tap shows it when the user
 /// decides that is safe. That choice belongs to them — they can see the
 /// room, the app cannot.
+///
+/// The choice is about the room they are in *now*, so it does not
+/// outlive the attempt: [remask] lets the caller hide the text again
+/// after a failure, which is the moment someone leans over to see what
+/// went wrong.
 library;
 
 import 'package:flutter/material.dart';
@@ -23,6 +28,7 @@ class PassphraseField extends StatefulWidget {
     this.helperText,
     this.autofocus = false,
     this.startVisible = false,
+    this.remask,
     this.onSubmitted,
     this.onChanged,
     this.textStyle,
@@ -37,6 +43,17 @@ class PassphraseField extends StatefulWidget {
   /// a phrase and has to read it; false where they are typing a known
   /// one back in, which is usually with someone nearby.
   final bool startVisible;
+
+  /// Ticked by the caller to hide the text again.
+  ///
+  /// Revealing is a decision about the room the user is in at that
+  /// moment. A wrong passphrase is the moment someone leans over to see
+  /// what went wrong, and the phrase has to be retyped anyway, so
+  /// re-masking costs nothing and stops a reveal outliving the
+  /// circumstances it was granted under. The caller holds the counter
+  /// because only it knows an attempt failed.
+  final int? remask;
+
   final VoidCallback? onSubmitted;
   final ValueChanged<String>? onChanged;
 
@@ -50,6 +67,14 @@ class PassphraseField extends StatefulWidget {
 
 class _PassphraseFieldState extends State<PassphraseField> {
   late bool _visible = widget.startVisible;
+
+  @override
+  void didUpdateWidget(PassphraseField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.remask != oldWidget.remask) {
+      setState(() => _visible = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

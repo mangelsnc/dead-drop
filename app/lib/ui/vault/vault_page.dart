@@ -100,6 +100,9 @@ class _LockedViewState extends ConsumerState<_LockedView> {
   int? _waitSeconds;
   Timer? _waitTicker;
 
+  /// Bumped on each failed attempt, which re-masks the passphrase field.
+  int _failures = 0;
+
   @override
   void dispose() {
     _waitTicker?.cancel();
@@ -141,6 +144,7 @@ class _LockedViewState extends ConsumerState<_LockedView> {
       setState(() {
         _submitting = false;
         _waitSeconds = null;
+        _failures++;
         _error = ref.read(vaultControllerProvider).error ?? 'Could not unlock';
       });
     }
@@ -233,6 +237,7 @@ class _LockedViewState extends ConsumerState<_LockedView> {
             const SizedBox(height: 24),
             PassphraseField(
               controller: _controller,
+              remask: _failures,
               autofocus: true,
               textStyle: technicalTextStyle(ref),
               onSubmitted: () => _submitting ? null : _unlock(),
