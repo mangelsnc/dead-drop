@@ -466,6 +466,19 @@ class VaultController extends StateNotifier<VaultState>
 
   /// Provisions the decoy environment (slot 1) with [passphrase].
   ///
+  /// **No longer reachable from the interface, and must not become so.**
+  /// Both environments are created together (ADR 0002) because the app
+  /// cannot know whether a decoy already exists — an empty slot is
+  /// indistinguishable from a full one, which is what makes the vault
+  /// coercion-resistant. A caller that offers to "add" a decoy is
+  /// therefore offering to overwrite one it cannot see, stranding its
+  /// files behind a data key that no longer exists anywhere.
+  ///
+  /// Kept because tests use it to build a vault with a decoy, and
+  /// because replacing a decoy's passphrase is a feature worth having
+  /// one day — but that one has to confirm first, and say what it is
+  /// about to destroy.
+  ///
   /// Requires the real environment (slot 0) to already exist, since this
   /// reads and rewrites both slots together — [VaultStore.writeSlots]
   /// overwrites the whole pair, so slot 0's current [WrappedKey] must be

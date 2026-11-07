@@ -178,4 +178,33 @@ void main() {
     expect(controller.state.slot, 1,
         reason: 'the second passphrase must open the decoy');
   });
+
+  test('nothing in the interface offers to add a decoy', () {
+    // addDecoy survives for tests and for a future "change the decoy's
+    // passphrase" that confirms first. What must not come back is a
+    // control that offers to add one: the app cannot see whether a
+    // decoy is there, so such an offer silently overwrites it and
+    // strands its files behind a data key that no longer exists.
+    //
+    // Checked against the source because the defect is the existence
+    // of a call site, not the behaviour of any one screen.
+    final uiFiles = Directory('lib/ui')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'));
+
+    for (final file in uiFiles) {
+      final source = file.readAsStringSync();
+      // The declaration itself lives in vault_controller.dart, and
+      // vault_setup_page.dart keeps the isDecoy branch it documents.
+      if (file.path.endsWith('vault_controller.dart')) continue;
+      if (file.path.endsWith('vault_setup_page.dart')) continue;
+
+      expect(source, isNot(contains('addDecoy')),
+          reason: '${file.path} calls addDecoy; see ADR 0002');
+      expect(source, isNot(contains('isDecoy: true')),
+          reason: '${file.path} opens the decoy-only setup screen; '
+              'see ADR 0002');
+    }
+  });
 }
