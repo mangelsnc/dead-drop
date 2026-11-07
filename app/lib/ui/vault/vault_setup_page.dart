@@ -33,8 +33,12 @@ import '../technical_text.dart';
 import 'vault_controller.dart';
 import 'vault_page.dart';
 
-/// Setup screen for creating the real vault (slot 0) or provisioning the
-/// decoy (slot 1), depending on [isDecoy].
+/// Setup screen for creating a vault: both of its environments, in two
+/// steps.
+///
+/// [isDecoy] provisions slot 1 alone. Nothing in the interface reaches
+/// it since ADR 0002 — see [VaultController.addDecoy] for why offering
+/// that is a defect rather than a feature.
 class VaultSetupPage extends ConsumerStatefulWidget {
   const VaultSetupPage({super.key, this.isDecoy = false});
 
