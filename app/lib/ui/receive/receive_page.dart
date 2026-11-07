@@ -8,6 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sodium/sodium.dart';
 
 import '../../src/crypto.dart';
+import '../../src/fingerprint_words.dart';
 import '../../src/handshake.dart';
 import '../../src/receiver.dart';
 import '../../src/screen_wake.dart';
@@ -1475,19 +1476,32 @@ class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
             const SizedBox(height: 12),
             Text(
               'You have not received from this device before. Ask the person '
-              'sending the file to read out the code shown on their screen '
-              'and check that it matches:',
+              'sending the file to read out the words shown on their screen '
+              'and check that they match:',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
+            // The words first, because they are the thing being read
+            // aloud. The hex stays underneath: it is what they are
+            // derived from, and anyone who wants to compare every
+            // character can.
+            if (fingerprintWords(widget.fingerprint) != null) ...[
+              Center(
+                child: SelectableText(
+                  fingerprintWords(widget.fingerprint)!,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Center(
               child: SelectableText(
                 widget.fingerprint,
                 style: technicalTextStyle(
                   ref,
-                  relativeTo: 1.4,
+                  relativeTo: 1.0,
                   letterSpacing: 2,
-                ),
+                ).copyWith(color: DeadDropColors.textSecondary),
               ),
             ),
             const SizedBox(height: 16),
@@ -1505,6 +1519,8 @@ class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
               decoration: const InputDecoration(
                 labelText: 'Name this sender (optional)',
                 hintText: 'e.g. Ana',
+                helperText: 'Left blank, they are remembered by the words '
+                    'above.',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
@@ -1541,7 +1557,16 @@ class _UnknownSenderPromptState extends ConsumerState<_UnknownSenderPrompt> {
     );
   }
 
-  void _accept() => widget.onAccept(_nameController.text);
+  void _accept() {
+    // The words stand in for a name nobody typed: they are what the two
+    // people just read to each other, so the sender is remembered as
+    // the thing that was actually agreed rather than as sixteen hex
+    // characters.
+    final typed = _nameController.text.trim();
+    widget.onAccept(
+      typed.isNotEmpty ? typed : suggestedSenderName(widget.fingerprint),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
