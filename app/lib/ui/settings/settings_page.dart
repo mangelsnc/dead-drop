@@ -2,17 +2,25 @@
 /// real environment.
 ///
 /// Settings itself is always reachable, whichever environment (or none) is
-/// open. The **Security** section inside it — add a decoy, self-destruct —
-/// renders only when the open environment is slot 0 (the real one). Inside
-/// the decoy it is absent, not disabled or greyed out: a greyed-out control
-/// still tells an attacker the feature exists and is merely locked away,
-/// which is exactly the tell this feature exists to deny them. This is the
-/// single behavioural property the whole coercion-resistance design rests
-/// on, so this file renders the section by building a different widget
-/// subtree per state — not by wrapping the same subtree in an `IgnorePointer`
-/// or disabling its controls — there must be nothing in the widget tree at
-/// all for a decoy session to accidentally expose (e.g. via an inspector,
-/// an accessibility tree walk, or a future bug in a disabled-state check).
+/// open. The **Security** section inside it renders for whichever
+/// environment is open, and renders identically in both.
+///
+/// It used to render only for slot 0, on the reasoning that a greyed-out
+/// control would tell an attacker the decoy feature exists. That
+/// reasoning held, and missed that the asymmetry runs both ways: a decoy
+/// with no Security section is a decoy an attacker can recognise, because
+/// the real environment has one. Someone made to unlock under duress who
+/// opens Settings and finds nothing there learns they are not where the
+/// owner keeps things.
+///
+/// Both environments now exist from the moment the vault is created
+/// (ADR 0002), so there is nothing for the real one to offer that the
+/// decoy cannot: no "set up decoy", because there is one. What remains
+/// applies to whichever environment is open.
+///
+/// vault_ui_test.dart captures every string this page renders in each
+/// environment and fails if they differ — anything that differs is a
+/// tell, whether or not anyone thought about it.
 library;
 
 import 'dart:async';
@@ -37,7 +45,11 @@ class SettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(vaultControllerProvider);
-    final isRealEnvironment = state.unlocked && state.slot == 0;
+    // Deliberately not "is this slot 0": see this file's doc comment and
+    // ADR 0002. What Settings shows must not depend on which environment
+    // is open, because a section the real one has and the decoy does not
+    // tells an attacker which they are looking at.
+    final isVaultOpen = state.unlocked;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -97,24 +109,11 @@ class SettingsPage extends ConsumerWidget {
                   MaterialPageRoute(builder: (_) => const VaultSetupPage()),
                 ),
               ),
-            // Security renders only for the real, unlocked environment. No
-            // placeholder, no disabled tile, nothing — see this file's doc
-            // comment for why that absence is load-bearing.
-            if (isRealEnvironment) ...[
+            // Security renders for whichever environment is open, and
+            // renders the same — see this file's doc comment. It used to
+            // render only for slot 0, which made its absence a tell.
+            if (isVaultOpen) ...[
               const _SectionHeader('Security'),
-              ListTile(
-                leading: const Icon(Icons.visibility_off_outlined),
-                title: const Text('Set up decoy'),
-                subtitle: const Text(
-                  'A second passphrase that opens a separate, convincing '
-                  'environment instead of this one.',
-                ),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const VaultSetupPage(isDecoy: true),
-                  ),
-                ),
-              ),
               const _SelfDestructTile(),
               // Moved here from the vault's app bar, where it sat one
               // icon away from Settings: an irreversible action in the

@@ -416,7 +416,10 @@ class VaultController extends StateNotifier<VaultState>
   /// independent [VaultController] instance (e.g. a future caller that
   /// built its own) calling [createVault] on the same store without ever
   /// unlocking first.
-  Future<void> createVault(String passphrase) async {
+  Future<void> createVault(
+    String passphrase, {
+    String? decoyPassphrase,
+  }) async {
     if (state.exists) {
       state = state.copyWith(error: 'A vault already exists');
       return;
@@ -429,10 +432,27 @@ class VaultController extends StateNotifier<VaultState>
       return;
     }
 
+    // Two environments that open with one passphrase are one
+    // environment: tryUnlock returns the first slot that matches, so
+    // slot 0 always wins and the decoy could never be reached. Refused
+    // rather than written, as addDecoy refused it, because a user left
+    // believing they have coercion resistance they do not have is worse
+    // off than one told to pick again.
+    if (decoyPassphrase != null && decoyPassphrase == passphrase) {
+      state = state.copyWith(
+        error: 'The two passphrases must be different, or only one of '
+            'the environments could ever be opened.',
+      );
+      return;
+    }
+
     await store.init();
     final dataKey = newDataKey(sodium);
     final wrapped = wrapDataKey(sodium, passphrase, dataKey);
-    await store.writeSlots([wrapped, null]);
+    final decoy = decoyPassphrase == null
+        ? null
+        : wrapDataKey(sodium, decoyPassphrase, newDataKey(sodium));
+    await store.writeSlots([wrapped, decoy]);
 
     _dataKey = dataKey;
     state = state.copyWith(
