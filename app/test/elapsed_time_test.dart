@@ -26,19 +26,51 @@ void main() {
   });
 
   group('ElapsedTime', () {
-    testWidgets('shows the time since it started', (tester) async {
+    testWidgets('shows the time between its two instants', (tester) async {
+      // Both instants supplied, so nothing here reads the wall clock.
+      // This used to pass `since` alone and accept 0:05 or 0:06,
+      // which made it a race: under load the frame could land a second
+      // later still and the test failed for no reason anyone could act
+      // on. Observed on 2026-11-05, passing on its own and failing in
+      // a full run.
+      final start = DateTime(2026, 1, 1, 12, 0, 0);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ElapsedTime(
+              since: start,
+              frozenAt: start.add(const Duration(seconds: 5)),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('0:05'), findsOneWidget);
+    });
+
+    testWidgets('a running readout starts from the right figure',
+        (tester) async {
+      // The counterpart, since the test above freezes the clock: a
+      // readout that is still ticking must also show the elapsed time
+      // and not, say, zero. Kept tolerant by design — this one does
+      // read the real clock — but it asserts a range rather than a
+      // pair of exact strings, so a slow frame cannot fail it.
       final start = DateTime.now().subtract(const Duration(seconds: 5));
       await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: ElapsedTime(since: start))),
       );
-      // Read off the real clock, so allow the second either side rather
-      // than pinning a figure a slow frame would break.
-      expect(
-        find.byWidgetPredicate(
-          (w) => w is Text && (w.data == '0:05' || w.data == '0:06'),
-        ),
-        findsOneWidget,
-      );
+
+      final shown = tester
+          .widgetList<Text>(find.byType(Text))
+          .map((t) => t.data)
+          .whereType<String>()
+          .firstWhere((t) => t.contains(':'));
+      final seconds = int.parse(shown.split(':').last);
+      expect(seconds, greaterThanOrEqualTo(5),
+          reason: 'a running readout must show the time that has passed');
+      expect(seconds, lessThan(60),
+          reason: 'and not something absurd: it showed $shown');
+
       // Leave no periodic timer running into the next test.
       await tester.pumpWidget(const MaterialApp(home: Scaffold()));
     });
