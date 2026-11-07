@@ -5,6 +5,22 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-11-07
+
+### Added
+
+- *(receive)* Give a fingerprint words a person can say
+
+### Fixed
+
+- *(macos)* Stop a debug build asking for network access
+- *(vault)* Hide the passphrase again after a failed attempt
+- *(send)* An unmeasured screen is not a permissive one
+
+### Tests
+
+- *(elapsed)* Stop the readout test racing the clock
+
 ## [1.1.0] — 2026-11-07
 
 ### Added
