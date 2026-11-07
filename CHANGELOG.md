@@ -5,6 +5,21 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-11-07
+
+### Added
+
+- *(vault)* Ask for both passphrases when creating a vault
+
+### Documentation
+
+- *(adr)* Provision the decoy when the vault is created
+
+### Fixed
+
+- *(vault)* Stop Settings telling an attacker which environment is open
+- *(vault)* Close the path that could overwrite a decoy unseen
+
 ## [1.0.3] — 2026-11-06
 
 ### Other
