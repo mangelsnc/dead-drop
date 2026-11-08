@@ -182,36 +182,39 @@ All frames are binary, big-endian. Two frame types exist: **session header** (on
 #### 2.2.1 Session header (static QR, sent once)
 
 ```
-+----------+---------+----------------+----------------+----------+
-|  MAGIC   | VERSION | SENDER_EPH_PK  |  RECEIVER_PK | FILE_ID  |
-|  2 bytes | 1 byte  |    32 bytes    |    32 bytes  | 8 bytes  |
-|  "DD"    |   0x01  |  X25519 public | X25519 public|  random  |
-+----------+---------+----------------+--------------+----------+
-+------------+-------------+------------+---------------------------+
-| TOTAL_SIZE | CHUNK_COUNT | CHUNK_SIZE |     MANIFEST_HASH         |
-|  4 bytes   |   2 bytes   |   2 bytes  |       32 bytes            |
-|  uint32    |   uint16    |   uint16   |  BLAKE2b of plaintext     |
-+------------+-------------+------------+---------------------------+
-+--------------------------------------------------------------------+
-|                          SIGNATURE                                 |
-|                          64 bytes                                  |
-|              Ed25519 signature over all previous fields            |
-+--------------------------------------------------------------------+
++----------+---------+----------------+----------------+
+|  MAGIC   | VERSION | SENDER_EPH_PK  |  RECEIVER_PK   |
+|  2 bytes | 1 byte  |    32 bytes    |    32 bytes    |
+|  "DD"    |   0x03  |  X25519 public | X25519 public  |
++----------+---------+----------------+----------------+
++-------------------+----------+------------+-------------+------------+
+| SENDER_VERIFY_KEY | FILE_ID  | TOTAL_SIZE | CHUNK_COUNT | CHUNK_SIZE |
+|     32 bytes      | 8 bytes  |  4 bytes   |   2 bytes   |  2 bytes   |
+|  Ed25519 public   |  random  |   uint32   |   uint16    |   uint16   |
++-------------------+----------+------------+-------------+------------+
++---------------------------+----------------------------------------+
+|       MANIFEST_HASH       |              SIGNATURE                 |
+|         32 bytes          |              64 bytes                  |
+|  BLAKE2b of plaintext     |  Ed25519 over all 147 preceding bytes  |
++---------------------------+----------------------------------------+
 ```
 
-**Total size:** 179 bytes (fits comfortably in a QR v10-M, capacity 274 bytes)
+**Total size:** 211 bytes (fits in a QR v10-M, capacity 274 bytes)
+
+The exact bytes are pinned in `app/test/protocol_vectors_test.dart`.
 
 **Field descriptions:**
 - `MAGIC`: protocol identifier, always `0x4444` ("DD" in ASCII)
-- `VERSION`: protocol version, currently `0x01`
+- `VERSION`: protocol version, currently `0x03`. The same byte in both frame types; a receiver tells them apart by length and context, not by a type field
 - `SENDER_EPH_PK`: sender's ephemeral X25519 public key (generated fresh per transfer)
 - `RECEIVER_PK`: receiver's X25519 public key (shared out-of-band before transfer)
+- `SENDER_VERIFY_KEY`: sender's long-term Ed25519 public key, the one `SIGNATURE` is verified against and the one TOFU pins
 - `FILE_ID`: random 8-byte transfer identifier (prevents cross-session confusion)
 - `TOTAL_SIZE`: plaintext file size in bytes (before encryption)
 - `CHUNK_COUNT`: number of source chunks (K in fountain code terminology)
 - `CHUNK_SIZE`: plaintext bytes per chunk (default: 512)
 - `MANIFEST_HASH`: BLAKE2b-256 of the plaintext file (end-to-end integrity check)
-- `SIGNATURE`: Ed25519 signature over all previous fields (sender authenticity)
+- `SIGNATURE`: Ed25519 signature over the 147 bytes preceding it — every field above, and nothing else (sender authenticity)
 
 #### 2.2.2 Data frame (animated QR sequence)
 
@@ -230,7 +233,9 @@ All frames are binary, big-endian. Two frame types exist: **session header** (on
 
 **Size:** 573 bytes for a 512-byte chunk, and constant — every data frame
 of a transfer is the same length, because the chunk ids are derived
-rather than transmitted. Fits in QR v25-M (capacity 1003 bytes).
+rather than transmitted. Fits in QR v25-M (capacity 1003 bytes). The
+fixed part is 21 bytes, plus a 24-byte nonce; the exact bytes are pinned
+in `app/test/protocol_vectors_test.dart`.
 
 **Field descriptions:**
 - `MAGIC`, `VERSION`, `FILE_ID`: same as session header
@@ -1079,9 +1084,30 @@ nothing about it.
 
 ### Protocol encoding
 
-**TODO:** canonical vectors for the session header and the data frame.
-The LT fountain's chunk derivation is pinned in
-`app/test/fountain_vectors_test.dart`.
+The wire is the one interface this project cannot negotiate. A sender and
+a receiver are two separately installed binaries, often on different
+platforms and different release dates, with no back-channel: a field that
+moves by one byte produces a failure on somebody else's device, and
+nothing on either side can say which one is wrong.
+
+So both formats are pinned to canonical bytes, in
+`app/test/protocol_vectors_test.dart`:
+
+| Format | Size | What the vector fixes |
+|---|---|---|
+| Session header | 211 bytes | Field order, field widths, big-endian integers, and the 147 bytes the signature covers |
+| Data frame | 21-byte fixed part + 24-byte nonce + payload | Field order, field widths, big-endian integers, and degree 0 as the metadata marker |
+
+The vectors were produced by this implementation, so they do not prove
+the encoding is correct — they prove it has not changed. Every byte was
+checked by hand against §2.2 before being committed. A refactor that
+alters them is a wire format change and needs a version bump, not a
+regenerated constant.
+
+The LT fountain's chunk derivation is pinned separately in
+`app/test/fountain_vectors_test.dart`, for the same reason: the chunk ids
+are derived rather than transmitted, so the wire cannot detect an emitter
+and a receiver disagreeing about them.
 
 ---
 
@@ -1094,6 +1120,7 @@ The LT fountain's chunk derivation is pinned in
 - [x] BLAKE2b file integrity check
 - [x] Argon2id for passphrase derivation (memory-hard)
 - [x] Primitives checked against published vectors (RFC 7748, 8032, 7693; libsodium's own for Argon2id)
+- [x] Wire formats pinned to canonical bytes (session header and data frame)
 - [x] Identical timing for real vs. decoy passphrase
 - [x] No network code in the app
 - [x] No telemetry, no analytics, no crash reporting
