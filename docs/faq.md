@@ -141,6 +141,26 @@ app, and that has to stay true even when a convenience is the cost.
 Android's own file picker reaches the same photos, audio and downloads. It
 looks less like the gallery and gets to the same files.
 
+### Why can't I open a PDF, a video or an audio file inside the vault?
+
+The vault shows images and text in place, and for anything else it asks you
+to save the file outside first. That is two limits at once, and only one of
+them is a choice.
+
+A preview inside the vault is drawn from the file as it sits decrypted in
+memory, and nothing is written to the disk. That is the point: a file handed
+to a system viewer has to exist somewhere readable first, which undoes the
+vault for as long as that copy lasts. So only the formats DeadDrop can draw
+by itself are offered at all.
+
+For video and audio there is no way to do that today without either dropping
+GNU/Linux and Windows, or adding a library that brings a network client with
+it. Neither is acceptable, so those formats are not previewed anywhere rather
+than on some platforms only.
+
+Saving outside the vault still works for every format. It warns you first,
+because that copy is unencrypted and deleting it later does not undo it.
+
 ### Can I pause a transfer and continue later?
 
 Yes. If the transfer is interrupted (you move, the camera locks up, you answer a call), when you resume, the receiver continues from where it left off. You don't start from scratch.

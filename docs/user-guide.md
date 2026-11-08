@@ -130,6 +130,23 @@ Whatever is open is where the file goes. There is no way to put something into
 the other space without opening it first, which is also why an attacker
 watching you add a file to the decoy sees nothing unusual.
 
+### Looking at what is inside
+
+Tap a file and DeadDrop shows it without writing anything to the disk. That
+works for **images** and for **text** — including `.txt`, `.md`, `.json` and
+`.xml`. Long text is cut off after a point: the preview is for recognising a
+file, not for reading it end to end.
+
+Anything else — a PDF, a video, an audio file, a spreadsheet — says so and
+points you at **Save outside the vault**. That writes an unencrypted copy
+where you choose, and DeadDrop warns you before it does, because deleting that
+copy afterwards does not undo it having existed. Open it with your usual
+application, and delete it when you are done.
+
+DeadDrop decides what it can show by looking inside the file, not at its name.
+A file that arrived without its name, or one someone renamed, still previews
+correctly if it is something the app can draw.
+
 ### Rules worth following
 
 - **Never write the two passphrases down together**, or near each other.
