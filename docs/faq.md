@@ -125,6 +125,9 @@ application as far as macOS is concerned, and builds published here are
 unsigned: signing needs a paid Apple certificate, the same obstacle
 that keeps iPhone builds out of the App Store.
 
+If you choose **Always Allow** rather than **Allow**, macOS stops asking
+for that entry even across new builds.
+
 None of it means data is leaving your machine. DeadDrop has no network
 access at all — you can check by running it with the network off.
 
