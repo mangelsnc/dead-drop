@@ -116,6 +116,12 @@ void main() {
 
     await tester.tap(find.byType(Checkbox));
     await tester.pumpAndSettle();
+    // Scrolled into view first: the form column is capped at
+    // kMaxFormWidth, so in the 800x600 test window the content is
+    // taller than the viewport and a tap on an off-screen button
+    // silently does nothing.
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
@@ -129,6 +135,12 @@ void main() {
     final first = shown(tester);
 
     await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    // Scrolled into view first: the form column is capped at
+    // kMaxFormWidth, so in the 800x600 test window the content is
+    // taller than the viewport and a tap on an off-screen button
+    // silently does nothing.
+    await tester.ensureVisible(find.text('Continue'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
@@ -144,6 +156,12 @@ void main() {
     final real = shown(tester);
 
     await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    // Scrolled into view first: the form column is capped at
+    // kMaxFormWidth, so in the 800x600 test window the content is
+    // taller than the viewport and a tap on an off-screen button
+    // silently does nothing.
+    await tester.ensureVisible(find.text('Continue'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();

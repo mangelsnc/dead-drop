@@ -32,6 +32,19 @@ const double kWideLayoutBreakpoint = 900;
 /// well before the window runs out of room.
 const double kMaxContentWidth = 1100;
 
+/// The widest a single column of *form* is allowed to be.
+///
+/// Narrower than [kMaxContentWidth], which sizes a page that fills its
+/// window with two columns of content. A form is one column of fields
+/// and buttons, and the two want different widths: at 1100 the vault's
+/// unlock button was about 1940 logical pixels wide and 48 tall in a
+/// maximised window, which is a shape nobody aims at, and a text field
+/// that wide puts the caret a screen away from the label.
+///
+/// 480 is about the width of a phone laid out comfortably, which is the
+/// shape these screens were designed in.
+const double kMaxFormWidth = 480;
+
 /// Whether [context]'s window should use the desktop layout.
 bool isWideLayout(BuildContext context) =>
     MediaQuery.sizeOf(context).width >= kWideLayoutBreakpoint;
@@ -47,6 +60,26 @@ class ContentWidthLimit extends StatelessWidget {
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: kMaxContentWidth),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Centres [child] and stops it growing past [kMaxFormWidth].
+///
+/// For a screen that is a single column of fields and buttons — the
+/// vault's unlock and setup screens — rather than a page of content.
+class FormWidthLimit extends StatelessWidget {
+  const FormWidthLimit({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: kMaxFormWidth),
         child: child,
       ),
     );

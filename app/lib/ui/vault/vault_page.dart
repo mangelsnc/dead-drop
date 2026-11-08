@@ -27,6 +27,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../src/file_metadata.dart';
 import '../../src/vault/attempt_guard.dart';
 import '../../src/vault/vault_store.dart';
+import '../responsive.dart';
 import '../theme.dart';
 import '../passphrase_field.dart';
 import '../technical_text.dart';
@@ -196,114 +197,116 @@ class _LockedViewState extends ConsumerState<_LockedView> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Icon(
-              Icons.lock_outline,
-              size: 64,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Enter your passphrase',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.headlineSmall,
-            ),
-            // A build that erases on the third wrong passphrase must say
-            // so where the passphrase is typed. Compile-time constant, so
-            // an ordinary build drops this branch entirely.
-            if (selfDestructRehearsal) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: DeadDropColors.error.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: DeadDropColors.error),
+        child: FormWidthLimit(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Icon(
+                Icons.lock_outline,
+                size: 64,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Enter your passphrase',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineSmall,
+              ),
+              // A build that erases on the third wrong passphrase must say
+              // so where the passphrase is typed. Compile-time constant, so
+              // an ordinary build drops this branch entirely.
+              if (selfDestructRehearsal) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: DeadDropColors.error.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: DeadDropColors.error),
+                  ),
+                  child: Text(
+                    'Rehearsal build: $selfDestructThreshold wrong '
+                    'passphrases erase every environment, with no delays '
+                    'in between. Do not keep anything here you want.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: DeadDropColors.error,
+                    ),
+                  ),
                 ),
-                child: Text(
-                  'Rehearsal build: $selfDestructThreshold wrong '
-                  'passphrases erase every environment, with no delays '
-                  'in between. Do not keep anything here you want.',
+              ],
+              const SizedBox(height: 24),
+              PassphraseField(
+                controller: _controller,
+                remask: _failures,
+                autofocus: true,
+                textStyle: technicalTextStyle(ref),
+                onSubmitted: () => _submitting ? null : _unlock(),
+              ),
+              // The wait comes first: while one is running there is no
+              // error to show, and an empty pause under a spinner is what
+              // reads as a hung app.
+              if (_waitSeconds != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  unlockWaitMessage(Duration(seconds: _waitSeconds!))!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: DeadDropColors.textSecondary,
+                  ),
+                ),
+              ] else if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: DeadDropColors.error,
                   ),
                 ),
+              ],
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: _submitting ? null : _unlock,
+                child: _submitting
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Unlock'),
               ),
-            ],
-            const SizedBox(height: 24),
-            PassphraseField(
-              controller: _controller,
-              remask: _failures,
-              autofocus: true,
-              textStyle: technicalTextStyle(ref),
-              onSubmitted: () => _submitting ? null : _unlock(),
-            ),
-            // The wait comes first: while one is running there is no
-            // error to show, and an empty pause under a spinner is what
-            // reads as a hung app.
-            if (_waitSeconds != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                unlockWaitMessage(Duration(seconds: _waitSeconds!))!,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: DeadDropColors.textSecondary,
+              const SizedBox(height: 8),
+              // Reachable while locked on purpose, and the one place it
+              // has to be: someone who has forgotten the passphrase has no
+              // other way out, and this screen is where they are standing
+              // when they find that out.
+              //
+              // It used to ask for the passphrase here, which made the
+              // button a promise it could not keep — the one person who
+              // needs it is the one person who cannot use it. It no longer
+              // does; see delete_vault_dialog.dart for why that costs
+              // nothing, and why typing a word is the right guard instead.
+              //
+              // It leaks nothing the screen behind it does not already
+              // show: that a vault exists here.
+              TextButton(
+                onPressed: _submitting
+                    ? null
+                    : () async {
+                        final erased = await showDeleteVaultDialog(context);
+                        if (erased && context.mounted) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                child: const Text(
+                  'Delete vault',
+                  style: TextStyle(color: DeadDropColors.textSecondary),
                 ),
               ),
-            ] else if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: DeadDropColors.error,
-                ),
-              ),
             ],
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _submitting ? null : _unlock,
-              child: _submitting
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Unlock'),
-            ),
-            const SizedBox(height: 8),
-            // Reachable while locked on purpose, and the one place it
-            // has to be: someone who has forgotten the passphrase has no
-            // other way out, and this screen is where they are standing
-            // when they find that out.
-            //
-            // It used to ask for the passphrase here, which made the
-            // button a promise it could not keep — the one person who
-            // needs it is the one person who cannot use it. It no longer
-            // does; see delete_vault_dialog.dart for why that costs
-            // nothing, and why typing a word is the right guard instead.
-            //
-            // It leaks nothing the screen behind it does not already
-            // show: that a vault exists here.
-            TextButton(
-              onPressed: _submitting
-                  ? null
-                  : () async {
-                      final erased = await showDeleteVaultDialog(context);
-                      if (erased && context.mounted) {
-                        Navigator.of(context).pop();
-                      }
-                    },
-              child: const Text(
-                'Delete vault',
-                style: TextStyle(color: DeadDropColors.textSecondary),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

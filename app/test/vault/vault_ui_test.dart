@@ -330,15 +330,24 @@ void main() {
 
     await tester.tap(find.byType(Checkbox));
     await tester.pumpAndSettle();
+    // The form column is capped at kMaxFormWidth, so in the 800x600
+    // test window the content is taller than the viewport and these
+    // controls have to be scrolled to before they can be used.
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('Type my own instead'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Type my own instead'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, 'password123');
     await tester.pumpAndSettle();
 
     final createButton = find.widgetWithText(FilledButton, 'Create vault');
+    await tester.ensureVisible(createButton);
+    await tester.pumpAndSettle();
     expect(createButton, findsOneWidget);
     expect(tester.widget<FilledButton>(createButton).onPressed, isNull,
         reason: 'a weak decoy passphrase must not create the vault');
