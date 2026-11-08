@@ -205,6 +205,13 @@ class SendNotifier extends StateNotifier<SendState> {
   /// Frames emitted since the screen request was last re-sent.
   int _sinceReassert = 0;
 
+  /// What the window last reported holding, for the diagnostic build.
+  ///
+  /// Null in any ordinary build: [wakeDiagnostics] is a compile-time
+  /// false there, so nothing ever writes to it.
+  String? _windowState;
+  String? get windowState => _windowState;
+
   /// What the screen is really managing, as opposed to what was asked
   /// for. Drawing a QR is not free, and a slow compositor cannot do it
   /// ten times a second however short the timer's interval is.
@@ -628,6 +635,7 @@ class SendNotifier extends StateNotifier<SendState> {
     if (_sinceReassert >= kReassertWakeEvery) {
       _sinceReassert = 0;
       unawaited(reassertScreenWake());
+      if (wakeDiagnostics) unawaited(_readWindowState());
     }
 
     // Slip the session header back into the stream every so often.
@@ -674,6 +682,24 @@ class SendNotifier extends StateNotifier<SendState> {
       measuredFps: _rate.measuredFps,
     );
     _markPublished();
+  }
+
+  /// Asks the platform what the window really holds.
+  ///
+  /// Diagnostic only: [wakeDiagnostics] is a compile-time false in an
+  /// ordinary build, so this and its caller are removed. The result is
+  /// kept off [SendState] deliberately — it is read on the next rebuild,
+  /// which the emission loop causes anyway twelve times a second, so
+  /// threading a diagnostic through copyWith would buy nothing and
+  /// would put it in the production state class.
+  Future<void> _readWindowState() async {
+    final window = await readWindowState();
+    if (window == null) return;
+    final level = window.brightness < 0
+        ? 'system'
+        : '${(window.brightness * 100).round()}%';
+    _windowState = 'awake ${window.keepScreenOn ? 'yes' : 'NO'} · '
+        'brightness $level';
   }
 
   /// Closes the prepare timer and opens the draw one.
@@ -1941,6 +1967,21 @@ class _SendingScreen extends StatelessWidget {
                     Text(
                       '${profileWithoutQr ? 'NO QR · ' : ''}'
                       '${notifier.profile.summary ?? 'no frames yet'}',
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: DeadDropColors.accent),
+                    ),
+                  ],
+
+                  // What the window really holds, as opposed to what we
+                  // asked it for. Compile-time absent without
+                  // DEADDROP_WAKE_DIAGNOSTICS. "awake NO" means the
+                  // system dropped the keep-awake flag; a brightness
+                  // reading of "system" means it took back the pinned
+                  // level. The two have different fixes.
+                  if (wakeDiagnostics) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      notifier.windowState ?? 'window: not read yet',
                       style: Theme.of(context).textTheme.bodySmall
                           ?.copyWith(color: DeadDropColors.accent),
                     ),

@@ -50,6 +50,11 @@ on:
         required: false
         default: false
         type: boolean
+      wake_diagnostics:
+        description: 'Diagnostic: report what the window really holds (keep-awake flag and brightness) while sending.'
+        required: false
+        default: false
+        type: boolean
 
 env:
   # Must match .fvmrc, as in build.yml.
@@ -134,6 +139,7 @@ jobs:
           PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
           DUMP_FRAMES: ${{ inputs.dump_frames }}
           SELF_DESTRUCT_REHEARSAL: ${{ inputs.self_destruct_rehearsal }}
+          WAKE_DIAGNOSTICS: ${{ inputs.wake_diagnostics }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -161,6 +167,9 @@ jobs:
           fi
           if [ "$SELF_DESTRUCT_REHEARSAL" = "true" ]; then
             args="${args} --dart-define=DEADDROP_SELF_DESTRUCT_REHEARSAL=true"
+          fi
+          if [ "$WAKE_DIAGNOSTICS" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_WAKE_DIAGNOSTICS=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
@@ -264,6 +273,7 @@ jobs:
           PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
           DUMP_FRAMES: ${{ inputs.dump_frames }}
           SELF_DESTRUCT_REHEARSAL: ${{ inputs.self_destruct_rehearsal }}
+          WAKE_DIAGNOSTICS: ${{ inputs.wake_diagnostics }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -291,6 +301,9 @@ jobs:
           fi
           if [ "$SELF_DESTRUCT_REHEARSAL" = "true" ]; then
             args="${args} --dart-define=DEADDROP_SELF_DESTRUCT_REHEARSAL=true"
+          fi
+          if [ "$WAKE_DIAGNOSTICS" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_WAKE_DIAGNOSTICS=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
           echo "Version defines: ${args}"
@@ -375,6 +388,7 @@ jobs:
           PROFILE_WITHOUT_QR: ${{ inputs.profile_without_qr }}
           DUMP_FRAMES: ${{ inputs.dump_frames }}
           SELF_DESTRUCT_REHEARSAL: ${{ inputs.self_destruct_rehearsal }}
+          WAKE_DIAGNOSTICS: ${{ inputs.wake_diagnostics }}
         run: |
           line=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
           ver=${line%%+*}
@@ -402,6 +416,9 @@ jobs:
           fi
           if [ "$SELF_DESTRUCT_REHEARSAL" = "true" ]; then
             args="${args} --dart-define=DEADDROP_SELF_DESTRUCT_REHEARSAL=true"
+          fi
+          if [ "$WAKE_DIAGNOSTICS" = "true" ]; then
+            args="${args} --dart-define=DEADDROP_WAKE_DIAGNOSTICS=true"
           fi
           echo "args=${args}" >> "$GITHUB_OUTPUT"
 
