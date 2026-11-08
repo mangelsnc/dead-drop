@@ -128,6 +128,16 @@ that keeps iPhone builds out of the App Store.
 None of it means data is leaving your machine. DeadDrop has no network
 access at all — you can check by running it with the network off.
 
+### Why does picking a photo open the file browser instead of my gallery?
+
+Because the gallery sheet most apps use comes from a library that brings a
+network client with it, and DeadDrop's whole claim is that it has no network
+code at all. A reviewer who unzips the app must find the opposite of a network
+app, and that has to stay true even when a convenience is the cost.
+
+Android's own file picker reaches the same photos, audio and downloads. It
+looks less like the gallery and gets to the same files.
+
 ### Can I pause a transfer and continue later?
 
 Yes. If the transfer is interrupted (you move, the camera locks up, you answer a call), when you resume, the receiver continues from where it left off. You don't start from scratch.
