@@ -387,7 +387,7 @@ SENDER                                    RECEIVER
 ```
 
 **Key properties:**
-- **Forward secrecy:** ephemeral X25519 keys are generated per transfer and never stored. Compromising the device later reveals nothing about past transfers.
+- **Forward secrecy:** ephemeral X25519 keys are generated per transfer and never stored. Compromising the device later reveals nothing about past transfers. This is why a receiver that closes the app has to scan the key QR again: the key it was using is gone, which is the property working rather than a lapse. Held by `app/test/ephemeral_keys_not_stored_test.dart`.
 - **Sender authenticity:** the Ed25519 signature on the session header proves the file comes from the person holding the sender device (not a MITM).
 - **Receiver binding:** the session header includes the receiver's public key, so only that receiver can decrypt.
 

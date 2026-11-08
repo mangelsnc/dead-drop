@@ -132,6 +132,21 @@ access at all — you can check by running it with the network off.
 
 Yes. If the transfer is interrupted (you move, the camera locks up, you answer a call), when you resume, the receiver continues from where it left off. You don't start from scratch.
 
+### Why do I have to scan the key code again after closing the app?
+
+Because the key the receiver was using no longer exists, and that is
+deliberate.
+
+DeadDrop generates a fresh key for every transfer and never saves it
+anywhere. The benefit is that a device seized or examined later gives up
+nothing about transfers already completed: there is no stored key to
+find, so there is nothing to decrypt old recordings with, even for
+someone who had been filming the screen. Keeping the key around to save
+you a scan would quietly remove that protection.
+
+So the extra scan is the cost of the guarantee, not a step that was
+forgotten.
+
 ### Can I send to more than one device at a time?
 
 In the initial version, no: the transfer is between two devices. If you need to deliver the same file to three people, you do three sends (each one independently protected for that recipient).
