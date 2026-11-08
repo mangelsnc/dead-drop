@@ -148,6 +148,71 @@ Future<void> allowScreenSleep() async {
   }
 }
 
+/// Whether this build reports what the window really holds.
+///
+/// Off unless built with `--dart-define=DEADDROP_WAKE_DIAGNOSTICS=true`,
+/// and `const`, so an ordinary build resolves it to `false` and the tree
+/// shaker removes [readWindowState] and its callers — the same treatment
+/// the frame dumper gets, for the same reason: a diagnostic nobody has
+/// to remember to take out.
+///
+/// It exists because `keepAwake` reports success whether or not the
+/// system honours it. A Redmi Note 14 on HyperOS kept dimming
+/// mid-transfer with battery restrictions already lifted, and the app
+/// could not tell whether the keep-awake flag had been dropped or the
+/// pinned brightness reverted. Those have different fixes, and guessing
+/// between them is how the wrong one gets built.
+const bool wakeDiagnostics =
+    bool.fromEnvironment('DEADDROP_WAKE_DIAGNOSTICS');
+
+/// What the platform's window actually holds right now.
+///
+/// Null off Android, in a build without [wakeDiagnostics], or when the
+/// platform does not answer. The brightness is the window's own
+/// override: -1 means the window sets none and the system decides, which
+/// is the reading that would show a pinned level being reverted.
+Future<({bool keepScreenOn, double brightness})?> readWindowState() async {
+  if (!wakeDiagnostics || !_supported) return null;
+  try {
+    final state = await _channel
+        .invokeMapMethod<String, Object?>('readWindowState');
+    if (state == null) return null;
+    return (
+      keepScreenOn: state['keepScreenOn'] as bool? ?? false,
+      brightness: (state['brightness'] as num?)?.toDouble() ?? -1,
+    );
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
+}
+
+/// Re-sends the current request to the platform.
+///
+/// The window brightness is set once when a transfer starts, so anything
+/// that resets it afterwards — an adaptive-brightness pass, a vendor
+/// power manager — wins for the rest of the transfer. Re-asserting costs
+/// one platform call and restores the level the user chose.
+///
+/// Does nothing when no caller holds the lock, so it cannot turn the
+/// screen on behind a transfer that has already finished.
+Future<void> reassertScreenWake() async {
+  if (!_supported) return;
+  // A released lock clears the level as well as the count, so this one
+  // check covers both: there is nothing to re-assert, and no transfer
+  // to re-assert it for.
+  final level = _level;
+  if (level == null) return;
+  try {
+    await _channel.invokeMethod<void>('keepAwake', {'level': level});
+  } on PlatformException {
+    // As with the initial request: an annoyance, never a crash.
+  } on MissingPluginException {
+    // As above.
+  }
+}
+
 /// Resets the tracked state. Tests only — the platform side is untouched.
 @visibleForTesting
 void debugResetScreenWake() {

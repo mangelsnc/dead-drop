@@ -68,6 +68,24 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(null)
                     }
+                    // Diagnostics: what the window ACTUALLY holds right
+                    // now, which is not always what we last asked for.
+                    // A Redmi running HyperOS kept dimming mid-transfer
+                    // with battery restrictions already lifted, and
+                    // nothing in the app could tell whether the flag had
+                    // been dropped or the brightness reverted, because
+                    // "keepAwake" reports success either way.
+                    "readWindowState" -> {
+                        val flagHeld = (window.attributes.flags and
+                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
+                        result.success(
+                            mapOf(
+                                "keepScreenOn" to flagHeld,
+                                "brightness" to
+                                    window.attributes.screenBrightness.toDouble(),
+                            )
+                        )
+                    }
                     else -> result.notImplemented()
                 }
             }

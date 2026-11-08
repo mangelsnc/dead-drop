@@ -132,4 +132,46 @@ void main() {
     await keepScreenAwake();
     expect(isScreenAwakeHeld, isTrue);
   });
+
+  group('re-asserting mid-transfer', () {
+    test('re-sends the level the transfer is running at', () async {
+      // The window brightness is an override the system can take back.
+      // Setting it once at the start cannot survive that, so a long
+      // transfer has to ask again.
+      await keepScreenAwake(brightness: 0.6);
+      calls.clear();
+
+      await reassertScreenWake();
+
+      expect(calls.single.method, 'keepAwake');
+      expect((calls.single.arguments as Map)['level'], closeTo(0.6, 0.001),
+          reason: 'it must re-pin the chosen level, not full brightness');
+    });
+
+    test('does nothing when no transfer holds the screen', () async {
+      // Otherwise it would turn the screen back on behind a transfer
+      // that has already finished.
+      //
+      await keepScreenAwake(brightness: 0.4);
+      await allowScreenSleep();
+      calls.clear();
+
+      await reassertScreenWake();
+
+      expect(calls, isEmpty,
+          reason: 're-asserting must check that someone still holds it');
+    });
+
+    test('a re-assert does not count as another holder', () async {
+      // It is not a caller, so one release must still free the lock.
+      await keepScreenAwake();
+      await reassertScreenWake();
+      await reassertScreenWake();
+
+      await allowScreenSleep();
+
+      expect(isScreenAwakeHeld, isFalse,
+          reason: 're-asserting must not leave the screen pinned on');
+    });
+  });
 }
