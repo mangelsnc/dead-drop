@@ -156,6 +156,25 @@ class AttemptGuard {
   final FlutterSecureStorage _storage;
   final Duration _penaltyStep;
 
+  /// The counter as last read or written, or null before the first read.
+  ///
+  /// The value still lives in the keychain — it has to, or closing the
+  /// app would reset the count and self-destruct would never fire. This
+  /// only avoids re-reading what this process already knows.
+  ///
+  /// It matters on macOS, where an unsigned build is asked to authorise
+  /// each keychain item and one unlock attempt touched the counter three
+  /// times: a read to work out the penalty, another read inside
+  /// recordFailure, and the write. Two of those were the same question,
+  /// and the owner answered a password prompt for each.
+  ///
+  /// Safe because this process is the only writer: every path that
+  /// changes the counter goes through this class, and each updates the
+  /// cache as it writes. A second process editing the keychain behind us
+  /// would be an attacker with the ability to edit the keychain, who has
+  /// no need to bother with the counter.
+  int? _cachedFailures;
+
   /// How long the caller must wait before the next attempt is allowed.
   ///
   /// Call this *before* attempting an unlock and wait for the returned
@@ -178,11 +197,17 @@ class AttemptGuard {
   /// closed here would lock a user out of their own files to enforce a
   /// limit that never bound a serious attacker in the first place.
   Future<int> failureCount() async {
+    final cached = _cachedFailures;
+    if (cached != null) return cached;
     try {
       final raw = await _storage.read(key: kAttemptCounterStorageKey);
-      if (raw == null) return 0;
-      return int.tryParse(raw) ?? 0;
+      final value = raw == null ? 0 : (int.tryParse(raw) ?? 0);
+      _cachedFailures = value;
+      return value;
     } catch (_) {
+      // Deliberately not cached: an unreachable keychain may come back,
+      // and remembering a zero we never actually read would turn a
+      // transient failure into a permanently disarmed counter.
       return 0;
     }
   }
@@ -195,13 +220,16 @@ class AttemptGuard {
   /// is reached with self-destruct off, which by design does nothing.
   Future<bool> recordFailure() async {
     final failures = await failureCount() + 1;
+    _cachedFailures = failures;
     try {
       await _storage.write(
         key: kAttemptCounterStorageKey,
         value: failures.toString(),
       );
     } catch (_) {
-      // Unreachable keychain: see [failureCount].
+      // Unreachable keychain: see [failureCount]. The cache still
+      // advances, so the count holds for this run of the app even when
+      // it cannot be persisted.
     }
     if (failures < selfDestructThreshold) return false;
     return _selfDestructEnabled();
@@ -213,6 +241,7 @@ class AttemptGuard {
   /// success and reappears on failure would itself signal unlock activity
   /// to anyone inspecting the keychain.
   Future<void> recordSuccess() async {
+    _cachedFailures = 0;
     try {
       await _storage.write(key: kAttemptCounterStorageKey, value: '0');
     } catch (_) {
@@ -228,6 +257,7 @@ class AttemptGuard {
   /// one its owner deleted — a destructive setting nobody turned on for it.
   /// Writes rather than deletes, for the reason [recordSuccess] gives.
   Future<void> reset() async {
+    _cachedFailures = 0;
     try {
       await _storage.write(key: kAttemptCounterStorageKey, value: '0');
       await _storage.write(key: kSelfDestructStorageKey, value: 'false');
