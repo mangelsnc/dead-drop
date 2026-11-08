@@ -1058,13 +1058,30 @@ Offset  Size  Field
 
 ## Appendix B: Test vectors
 
-**TODO (phase 2):** generate canonical test vectors for:
-- Session header encoding/decoding
-- Data frame encoding/decoding
-- LT fountain encoding/decoding (fixed seed)
-- Crypto roundtrip (known plaintext -> known ciphertext)
+### Primitives, against published vectors
 
-These will be in `/tests/vectors/` and must pass on all platforms.
+DeadDrop implements no cryptography of its own, so what matters is that
+the primitives it calls are the published ones. `app/test/primitive_vectors_test.dart`
+checks each against a vector produced outside this project:
+
+| Primitive | Used for | Source of the vector |
+|---|---|---|
+| X25519 | Per-transfer key agreement | RFC 7748 §5.2 and §6.1 |
+| Ed25519 | Sender signature | RFC 8032 §7.1, tests 1-3 |
+| BLAKE2b | File integrity | RFC 7693 appendix A |
+| Argon2id | Vault passphrase derivation | libsodium `test/default/pwhash_argon2id.c` |
+
+Argon2id is pinned against libsodium's vector rather than RFC 9106's: the
+RFC's vector specifies a secret key, associated data and four lanes, and
+`crypto_pwhash` — the function the vault calls — accepts none of the
+three. A vector that cannot be run through the real API would prove
+nothing about it.
+
+### Protocol encoding
+
+**TODO:** canonical vectors for the session header and the data frame.
+The LT fountain's chunk derivation is pinned in
+`app/test/fountain_vectors_test.dart`.
 
 ---
 
@@ -1076,6 +1093,7 @@ These will be in `/tests/vectors/` and must pass on all platforms.
 - [x] Receiver binding (only intended receiver can decrypt)
 - [x] BLAKE2b file integrity check
 - [x] Argon2id for passphrase derivation (memory-hard)
+- [x] Primitives checked against published vectors (RFC 7748, 8032, 7693; libsodium's own for Argon2id)
 - [x] Identical timing for real vs. decoy passphrase
 - [x] No network code in the app
 - [x] No telemetry, no analytics, no crash reporting

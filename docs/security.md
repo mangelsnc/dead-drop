@@ -101,6 +101,16 @@ Out of scope (explicitly declared):
 
 Project rule: **libsodium with default parameters. Zero home-grown cryptography.**
 
+Calling an audited primitive is not the same as calling it correctly, so
+each one is checked against a vector published outside this project:
+X25519 against RFC 7748, Ed25519 against RFC 8032, BLAKE2b against
+RFC 7693, and Argon2id against libsodium's own test suite
+(`app/test/primitive_vectors_test.dart`). Argon2id is pinned against
+libsodium rather than RFC 9106 because the RFC's vector uses a secret
+key, associated data and four lanes, none of which `crypto_pwhash`
+accepts — a vector that cannot be run through the function the vault
+actually calls would prove nothing about it.
+
 | Use | Primitive (libsodium) | Status |
 |---|---|---|
 | Session key agreement | X25519, ephemeral per-session keys → forward secrecy | ✅ Implemented |
