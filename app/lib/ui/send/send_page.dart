@@ -202,6 +202,9 @@ class SendNotifier extends StateNotifier<SendState> {
   /// Data codes shown since the session header was last displayed.
   int _sinceBootstrap = 0;
 
+  /// Frames emitted since the screen request was last re-sent.
+  int _sinceReassert = 0;
+
   /// What the screen is really managing, as opposed to what was asked
   /// for. Drawing a QR is not free, and a slow compositor cannot do it
   /// ten times a second however short the timer's interval is.
@@ -536,6 +539,7 @@ class SendNotifier extends StateNotifier<SendState> {
     // how bright it is changes how the receiving camera exposes.
     unawaited(keepScreenAwake(brightness: state.brightness));
     _sinceBootstrap = 0;
+    _sinceReassert = 0;
     _rate.reset();
     // Hold the static bootstrap QR long enough for the receiver to lock on,
     // then switch to the animated data stream.
@@ -610,6 +614,21 @@ class SendNotifier extends StateNotifier<SendState> {
   void _emitNextFrame() {
     final emitter = state.emitter;
     if (emitter == null || !state.isEmitting) return;
+
+    // Re-pin the screen periodically rather than only at the start.
+    //
+    // The window's brightness is an override the system can take back:
+    // an adaptive-brightness pass or a vendor power manager resets it
+    // and then owns the screen for the rest of the transfer, which on
+    // a sending phone means the transmission medium fades out. Setting
+    // it once could not survive that. Reported on a Redmi Note 14
+    // running HyperOS, still dimming after its battery restrictions
+    // were lifted.
+    _sinceReassert++;
+    if (_sinceReassert >= kReassertWakeEvery) {
+      _sinceReassert = 0;
+      unawaited(reassertScreenWake());
+    }
 
     // Slip the session header back into the stream every so often.
     //
@@ -2642,6 +2661,17 @@ const double kTransferControlsMaxWidth = 460;
 /// absorbs -- there is no particular code it needs, only enough of
 /// them.
 const int kBootstrapRepeatEvery = 50;
+
+/// How many data codes play between re-pinning the screen.
+///
+/// The window brightness is an override the system can take back, so
+/// asking once at the start is not enough on a device whose vendor
+/// disagrees. Re-sending costs one platform call, which is why this is
+/// in codes rather than seconds — it scales with the transfer instead
+/// of running against a stopped one — and why it is not every frame.
+/// At 10 fps this is about every ten seconds, well inside the minute
+/// or so after which the reported dimming set in.
+const int kReassertWakeEvery = 100;
 
 /// The ceiling for [qrDisplaySize].
 ///
