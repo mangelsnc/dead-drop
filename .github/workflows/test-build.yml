@@ -86,6 +86,30 @@ jobs:
 
       # Same retry as build.yml: sdkmanager has handed back a truncated
       # archive before and taken a whole build down with it.
+      # The wrapper downloads Gradle from services.gradle.org, which
+      # redirects to a GitHub release asset. That asset returned 504 to
+      # Actions runners for a stretch on 2026-11-08 while serving fine
+      # elsewhere, so four builds died before reaching a line of code.
+      # The wrapper itself does not retry. Fetching the distribution
+      # here, with retries, means a transient failure costs a retry
+      # rather than the build; a real outage still fails, and says so.
+      - name: Pre-fetch the Gradle distribution
+        working-directory: app/android
+        run: |
+          url=$(sed -n 's|^distributionUrl=||p' \
+            gradle/wrapper/gradle-wrapper.properties | sed 's|\\||g')
+          echo "Gradle distribution: $url"
+          for attempt in 1 2 3 4 5; do
+            if ./gradlew --version >/dev/null 2>&1; then
+              echo "Gradle distribution ready on attempt $attempt"
+              exit 0
+            fi
+            echo "::warning::Gradle download failed (attempt $attempt), retrying"
+            sleep $((attempt * 20))
+          done
+          echo "::error::Could not download Gradle after 5 attempts: $url"
+          exit 1
+
       - name: Pre-fetch the Android NDK
         run: |
           NDK="28.2.13676358"
