@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../responsive.dart';
 import '../../src/vault/passphrase_strength.dart';
 import '../theme.dart';
 import '../passphrase_field.dart';
@@ -160,13 +161,12 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
       // so the next thing they see is "this has nothing in it", not a
       // "setup complete" screen that invites them to consider it finished.
       Navigator.of(context).pop();
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const VaultPage()),
-      );
+      Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const VaultPage()));
     } else {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const VaultPage()),
-      );
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const VaultPage()));
     }
   }
 
@@ -183,72 +183,78 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (widget.isDecoy || _choosingDecoy) ...[
-                const _DecoyWarningBanner(),
-                const SizedBox(height: 24),
-              ],
-              Text(
-                widget.isDecoy || _choosingDecoy
-                    ? 'Now a second passphrase'
-                    : 'Choose your passphrase',
-                style: theme.textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                widget.isDecoy || _choosingDecoy
-                    ? 'This one opens a different, separate environment. If '
-                        'you are ever made to unlock the vault, it is the '
-                        'one you can hand over. Write it down too — it is '
-                        'no more recoverable than the first.'
-                    : 'A generated passphrase is the safest choice: every '
-                        'word is drawn at random, so it carries no pattern '
-                        'an attacker could guess from knowing you.',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: DeadDropColors.textSecondary),
-              ),
-              const SizedBox(height: 24),
-              if (!_typingOwn) _buildGeneratedSection(theme),
-              if (_typingOwn) _buildOwnSection(theme),
-              const SizedBox(height: 16),
-              Center(
-                child: TextButton(
-                  onPressed: _submitting
-                      ? null
-                      : () => setState(() => _typingOwn = !_typingOwn),
-                  child: Text(
-                    _typingOwn
-                        ? 'Use a generated passphrase instead'
-                        : 'Type my own instead',
+          child: FormWidthLimit(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (widget.isDecoy || _choosingDecoy) ...[
+                  const _DecoyWarningBanner(),
+                  const SizedBox(height: 24),
+                ],
+                Text(
+                  widget.isDecoy || _choosingDecoy
+                      ? 'Now a second passphrase'
+                      : 'Choose your passphrase',
+                  style: theme.textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  widget.isDecoy || _choosingDecoy
+                      ? 'This one opens a different, separate environment. If '
+                            'you are ever made to unlock the vault, it is the '
+                            'one you can hand over. Write it down too — it is '
+                            'no more recoverable than the first.'
+                      : 'A generated passphrase is the safest choice: every '
+                            'word is drawn at random, so it carries no pattern '
+                            'an attacker could guess from knowing you.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: DeadDropColors.textSecondary,
                   ),
                 ),
-              ),
-              if (_error != null) ...[
+                const SizedBox(height: 24),
+                if (!_typingOwn) _buildGeneratedSection(theme),
+                if (_typingOwn) _buildOwnSection(theme),
                 const SizedBox(height: 16),
-                Text(
-                  _error!,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: DeadDropColors.error),
+                Center(
+                  child: TextButton(
+                    onPressed: _submitting
+                        ? null
+                        : () => setState(() => _typingOwn = !_typingOwn),
+                    child: Text(
+                      _typingOwn
+                          ? 'Use a generated passphrase instead'
+                          : 'Type my own instead',
+                    ),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _error!,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: DeadDropColors.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: _canSubmit ? _submit : null,
+                  child: _submitting
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          widget.isDecoy
+                              ? 'Create decoy'
+                              : _choosingDecoy
+                              ? 'Create vault'
+                              : 'Continue',
+                        ),
                 ),
               ],
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _canSubmit ? _submit : null,
-                child: _submitting
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(widget.isDecoy
-                        ? 'Create decoy'
-                        : _choosingDecoy
-                            ? 'Create vault'
-                            : 'Continue'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -273,8 +279,10 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
                 key: const Key('generatedPassphrase'),
                 _generatedPassphrase,
                 textAlign: TextAlign.center,
-                style: technicalTextStyle(ref, relativeTo: 1.23)
-                    .copyWith(height: 1.6),
+                style: technicalTextStyle(
+                  ref,
+                  relativeTo: 1.23,
+                ).copyWith(height: 1.6),
               ),
               const SizedBox(height: 12),
               Row(
@@ -282,9 +290,11 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
                 children: [
                   TextButton.icon(
                     onPressed: () {
-                      unawaited(Clipboard.setData(
-                        ClipboardData(text: _generatedPassphrase),
-                      ));
+                      unawaited(
+                        Clipboard.setData(
+                          ClipboardData(text: _generatedPassphrase),
+                        ),
+                      );
                     },
                     icon: const Icon(Icons.copy, size: 18),
                     label: const Text('Copy'),
@@ -332,8 +342,11 @@ class _VaultSetupPageState extends ConsumerState<VaultSetupPage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.info_outline,
-                  color: DeadDropColors.warning, size: 20),
+              const Icon(
+                Icons.info_outline,
+                color: DeadDropColors.warning,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -387,8 +400,11 @@ class _DecoyWarningBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.warning_amber_outlined,
-              color: DeadDropColors.warning, size: 20),
+          const Icon(
+            Icons.warning_amber_outlined,
+            color: DeadDropColors.warning,
+            size: 20,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
