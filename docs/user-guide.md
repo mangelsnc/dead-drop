@@ -117,11 +117,25 @@ When you receive a file, the result screen offers **Device** and **Vault**. The
 Vault button only appears once a vault exists: a greyed-out button would itself
 tell someone the feature is set up.
 
+### Putting files in
+
+Two ways, and both work the same in the real space and the decoy:
+
+- **Add files**, at the bottom of the vault screen, on every platform. On
+  Android this opens the system picker, which reaches your photos, audio and
+  downloads as well as documents.
+- **Drag a file onto the window**, on Windows, macOS and Linux.
+
+Whatever is open is where the file goes. There is no way to put something into
+the other space without opening it first, which is also why an attacker
+watching you add a file to the decoy sees nothing unusual.
+
 ### Rules worth following
 
 - **Never write the two passphrases down together**, or near each other.
 - **Keep the decoy alive.** If its newest file is three years old, it looks
-  staged. Add something now and then.
+  staged. Open it now and then and add something with **Add files**, the same
+  way you would in the real space.
 - **Rehearse.** Open the decoy occasionally and look at exactly what a stranger
   would see. It has to look like your whole app.
 - **The vault is opt-in.** A file saved to the device instead of the vault has
