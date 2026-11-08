@@ -49,6 +49,19 @@ dependencies:
   sodium: ^4.1.2
   # File picking
   file_picker: ^13.3.0
+  # Drag-and-drop onto the vault, desktop only.
+  #
+  # Audited before adding, because this project's whole claim is that it
+  # has no network code: desktop_drop brings one transitive package
+  # (universal_platform), opens no socket and has no HTTP client. The
+  # only https:// in its source is a spec URL in a comment.
+  #
+  # image_picker was considered for the "pick from gallery" half of this
+  # and rejected for the same reason flutter_zxing was, above: it pulls
+  # file_selector, which pulls `http`. Android's own document picker
+  # already reaches photos, audio and downloads, so the gallery is
+  # covered without it.
+  desktop_drop: ^0.8.0
   # Path utilities
   path_provider: ^2.1.6
   # State management

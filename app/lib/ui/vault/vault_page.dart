@@ -24,6 +24,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../src/file_drop.dart';
 import '../../src/file_metadata.dart';
 import '../../src/vault/attempt_guard.dart';
 import '../../src/vault/vault_store.dart';
@@ -33,6 +34,7 @@ import '../passphrase_field.dart';
 import '../technical_text.dart';
 import '../send/send_page.dart';
 import '../settings/settings_page.dart';
+import 'add_files.dart';
 import 'delete_vault_dialog.dart';
 import 'vault_controller.dart';
 import 'vault_setup_page.dart';
@@ -375,108 +377,128 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
     final theme = Theme.of(context);
     final visible = _visible(state.entries);
 
-    return Column(
-      children: [
-        // Search and sort. Shown whenever there is more than one file —
-        // below that they are clutter — and identical in both
-        // environments.
-        if (state.entries.length > 1)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _search,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      hintText: 'Search files',
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      isDense: true,
-                      suffixIcon: _search.text.isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Icons.clear, size: 18),
-                              tooltip: 'Clear',
-                              onPressed: () => setState(_search.clear),
-                            ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                PopupMenuButton<_VaultSort>(
-                  initialValue: _sort,
-                  tooltip: 'Sort',
-                  icon: const Icon(Icons.sort),
-                  onSelected: (value) => setState(() => _sort = value),
-                  itemBuilder: (context) => [
-                    for (final option in _VaultSort.values)
-                      PopupMenuItem(value: option, child: Text(option.label)),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        Expanded(
-          child: state.entries.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.folder_open,
-                          size: 56,
-                          color: DeadDropColors.textSecondary,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No files yet',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Files you save to the vault will appear here.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: DeadDropColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : visible.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'Nothing matches "${_search.text.trim()}".',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: DeadDropColors.textSecondary,
+    // The drop target is inside the unlocked view on purpose: a file
+    // dropped on a locked vault has nowhere to go, and a window that
+    // accepts the drag and then refuses it is worse than one that
+    // never offered.
+    return VaultDropTarget(
+      onResult: (message) => _EntryTile._say(context, message, ok: true),
+      child: Column(
+        children: [
+          // Search and sort. Shown whenever there is more than one file —
+          // below that they are clutter — and identical in both
+          // environments.
+          if (state.entries.length > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _search,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Search files',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        isDense: true,
+                        suffixIcon: _search.text.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                tooltip: 'Clear',
+                                onPressed: () => setState(_search.clear),
+                              ),
                       ),
                     ),
                   ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: visible.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) =>
-                      _EntryTile(entry: visible[index]),
-                ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: OutlinedButton.icon(
-            onPressed: () => ref.read(vaultControllerProvider.notifier).lock(),
-            icon: const Icon(Icons.lock_outline),
-            label: const Text('Lock vault'),
+                  const SizedBox(width: 8),
+                  PopupMenuButton<_VaultSort>(
+                    initialValue: _sort,
+                    tooltip: 'Sort',
+                    icon: const Icon(Icons.sort),
+                    onSelected: (value) => setState(() => _sort = value),
+                    itemBuilder: (context) => [
+                      for (final option in _VaultSort.values)
+                        PopupMenuItem(value: option, child: Text(option.label)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: state.entries.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.folder_open,
+                            size: 56,
+                            color: DeadDropColors.textSecondary,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No files yet',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            canDropFiles
+                                ? 'Drag files here, or use Add files below.'
+                                : 'Use Add files below to put something here.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: DeadDropColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : visible.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Nothing matches "${_search.text.trim()}".',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: DeadDropColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: visible.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) =>
+                        _EntryTile(entry: visible[index]),
+                  ),
           ),
-        ),
-      ],
+          // Add and lock, in that order: adding is the frequent action
+          // and lock is the way out. Both environments get both, like
+          // every other control on this screen.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: AddFilesButton(
+              onResult: (message) =>
+                  _EntryTile._say(context, message, ok: true),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  ref.read(vaultControllerProvider.notifier).lock(),
+              icon: const Icon(Icons.lock_outline),
+              label: const Text('Lock vault'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
