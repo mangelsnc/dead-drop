@@ -339,6 +339,9 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
   final TextEditingController _search = TextEditingController();
   _VaultSort _sort = _VaultSort.newestFirst;
 
+  /// Which page of entries is showing, from zero.
+  int _page = 0;
+
   @override
   void dispose() {
     _search.dispose();
@@ -376,6 +379,18 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
     final state = ref.watch(vaultControllerProvider);
     final theme = Theme.of(context);
     final visible = _visible(state.entries);
+    final pageCount = visible.isEmpty
+        ? 1
+        : ((visible.length - 1) ~/ kVaultPageSize) + 1;
+    // Deleting the last file on the final page, or typing into the
+    // search box, can leave _page past the end. Clamped on read rather
+    // than reset from every callback that could cause it.
+    final page = _page.clamp(0, pageCount - 1);
+    final start = page * kVaultPageSize;
+    final pageEntries = visible
+        .skip(start)
+        .take(kVaultPageSize)
+        .toList(growable: false);
 
     // The drop target is inside the unlocked view on purpose: a file
     // dropped on a locked vault has nowhere to go, and a window that
@@ -396,7 +411,7 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                   Expanded(
                     child: TextField(
                       controller: _search,
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => setState(() => _page = 0),
                       decoration: InputDecoration(
                         hintText: 'Search files',
                         prefixIcon: const Icon(Icons.search, size: 20),
@@ -416,7 +431,10 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                     initialValue: _sort,
                     tooltip: 'Sort',
                     icon: const Icon(Icons.sort),
-                    onSelected: (value) => setState(() => _sort = value),
+                    onSelected: (value) => setState(() {
+                      _sort = value;
+                      _page = 0;
+                    }),
                     itemBuilder: (context) => [
                       for (final option in _VaultSort.values)
                         PopupMenuItem(value: option, child: Text(option.label)),
@@ -472,12 +490,27 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.all(16),
-                    itemCount: visible.length,
+                    itemCount: pageEntries.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, index) =>
-                        _EntryTile(entry: visible[index]),
+                        _EntryTile(entry: pageEntries[index]),
                   ),
           ),
+          // How many files there are, and which page of them this is.
+          //
+          // Both environments get this, like every other control here: a
+          // count shown in one and hidden in the other would say which
+          // one is open. It counts only what this environment holds,
+          // which is all it can see.
+          if (state.entries.isNotEmpty)
+            _VaultListFooter(
+              total: state.entries.length,
+              filtered: visible.length,
+              searching: _search.text.trim().isNotEmpty,
+              page: page,
+              pageCount: pageCount,
+              onPage: (next) => setState(() => _page = next),
+            ),
           // Add and lock, in that order: adding is the frequent action
           // and lock is the way out. Both environments get both, like
           // every other control on this screen.
@@ -497,6 +530,87 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
               label: const Text('Lock vault'),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// How many entries one page of the vault list shows.
+///
+/// A vault is not a filesystem browser: the common case is a handful of
+/// files, and the search box handles the rest. 25 is enough that most
+/// vaults never see a second page, and small enough that the one that
+/// does stays scrollable by thumb.
+const int kVaultPageSize = 25;
+
+/// The count, and the pager when there is more than one page.
+///
+/// Identical in both environments. A footer that appeared only in the
+/// real vault would answer the question the decoy exists to leave open.
+class _VaultListFooter extends StatelessWidget {
+  const _VaultListFooter({
+    required this.total,
+    required this.filtered,
+    required this.searching,
+    required this.page,
+    required this.pageCount,
+    required this.onPage,
+  });
+
+  final int total;
+  final int filtered;
+  final bool searching;
+  final int page;
+  final int pageCount;
+  final ValueChanged<int> onPage;
+
+  String get _countLabel {
+    final files = '$total file${total == 1 ? '' : 's'}';
+    // While searching, say what the search found as well as the whole,
+    // so the number never silently contradicts the list on screen.
+    if (searching) return '$filtered of $files';
+    return files;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            _countLabel,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: DeadDropColors.textSecondary,
+            ),
+          ),
+          if (pageCount > 1)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  tooltip: 'Previous page',
+                  onPressed: page == 0 ? null : () => onPage(page - 1),
+                ),
+                Text(
+                  '${page + 1} / $pageCount',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: DeadDropColors.textSecondary,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  tooltip: 'Next page',
+                  onPressed: page >= pageCount - 1
+                      ? null
+                      : () => onPage(page + 1),
+                ),
+              ],
+            ),
         ],
       ),
     );
