@@ -4,7 +4,10 @@ This document covers how to build DeadDrop from source on every supported platfo
 
 ## Prerequisites
 
-- [Flutter SDK](https://docs.flutter.dev/get-started/install) 3.24.5 (the version CI uses; any 3.4.0+ should work)
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) — the exact version
+  is pinned in [`.fvmrc`](../.fvmrc), and CI checks that `.fvmrc`, the Docker
+  image and the workflows all agree. Reproducing a published binary needs that
+  version; building to develop is more forgiving.
 - Git
 - Platform-specific toolchain (see below)
 

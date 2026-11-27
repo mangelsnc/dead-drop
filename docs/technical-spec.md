@@ -1,9 +1,7 @@
 # DeadDrop — Technical Specification v1
 
-**Version:** 1.0
-**Date:** 2026-10-17
-**Author:** Marco Delgado (CTO)
-**Status:** Governing document — contract between design, development, and documentation
+**Status:** Governing document — the contract between the design, the code and the
+documentation. Where this document and the code disagree, one of them is a bug.
 
 ---
 
@@ -14,10 +12,11 @@ This document is the **single source of truth** for what DeadDrop v1 is and how 
 **Scope:** DeadDrop v1 MVP (deadline: 2027-02-10). Features marked as "v2" or "future work" are explicitly out of scope for the MVP.
 
 **References:**
-- Spike validation: `spike/` (throughput, crypto, fountain code) and `spike/DECISIONES.md`
-- Duress mode design: `design/duress-flow.md`
-- UX flows: `design/send-flow.md`, `design/receive-flow.md`
-- Legal review: `docs/legal-review.md`
+- Spike validation: `spike/` (throughput, crypto, fountain code) and
+  [`spike/DECISIONS.md`](../spike/DECISIONS.md)
+- What the app protects and what it does not: [`docs/security.md`](security.md)
+- Why the legal question is settled the way it is:
+  [`docs/faq.md`](faq.md#is-it-legal)
 
 ---
 
@@ -1027,7 +1026,7 @@ class StorageError extends DeadDropError {
 
 ## Appendix A: Wire format reference
 
-### Session header (179 bytes)
+### Session header (211 bytes)
 
 ```
 Offset  Size  Field
@@ -1036,12 +1035,13 @@ Offset  Size  Field
 2       1     VERSION (0x03)
 3       32    SENDER_EPH_PK
 35      32    RECEIVER_PK
-67      8     FILE_ID
-75      4     TOTAL_SIZE (uint32 BE)
-79      2     CHUNK_COUNT (uint16 BE)
-81      2     CHUNK_SIZE (uint16 BE)
-83      32    MANIFEST_HASH (BLAKE2b-256)
-115     64    SIGNATURE (Ed25519)
+67      32    SENDER_VERIFY_KEY (Ed25519)
+99      8     FILE_ID
+107     4     TOTAL_SIZE (uint32 BE)
+111     2     CHUNK_COUNT (uint16 BE)
+113     2     CHUNK_SIZE (uint16 BE)
+115     32    MANIFEST_HASH (BLAKE2b-256)
+147     64    SIGNATURE (Ed25519, covers offsets 0–146)
 ```
 
 ### Data frame (constant size, 573 bytes for a 512 B chunk)

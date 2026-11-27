@@ -2,6 +2,8 @@
 
 This document records the experimental verification that DeadDrop's Linux build is **bit-for-bit reproducible**, the root cause of non-reproducibility across different machines, and the pipeline changes that enforce reproducibility going forward.
 
+It is a record of one experiment, so its commit hash, toolchain version and measured hashes are the ones that run used. They are not the current pins: those live in [`.fvmrc`](../.fvmrc) and the workflows, and the `reproducibility-check` job re-proves the property on every push.
+
 This is the evidence cited in the #cryptograFREE submission under "build verifiability".
 
 ---
@@ -13,7 +15,7 @@ Two builds of the same commit, compiled in the **same absolute path** with the *
 | Property | Value |
 |----------|-------|
 | Commit | `e3d64dc` (tip of `main` at time of verification) |
-| Flutter SDK | `3.24.5` (pinned in `.github/workflows/build.yml`) |
+| Flutter SDK | `3.24.5` (the version pinned when this experiment was run) |
 | Dart SDK | `3.5.4` (bundled with Flutter 3.24.5) |
 | Host OS | Debian 12 (sandbox), Ubuntu 22.04 (CI) |
 | Build command | `flutter build linux --release` |
