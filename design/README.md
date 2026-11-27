@@ -1,14 +1,10 @@
 # Design
 
-This directory contains design assets, wireframes, mockups, and UX research for DeadDrop.
+Source artwork for DeadDrop.
 
-## Structure
+- `assets/icon-1024.png` — the master app icon. Every platform's icon is
+  derived from this file, so a change here is the one that propagates.
 
-- `wireframes/` — Low-fidelity wireframes
-- `mockups/` — High-fidelity mockups
-- `assets/` — Icons, illustrations, brand assets
-- `research/` — UX research notes and usability findings
-
-## Status
-
-🚧 Design work starts in Phase 2 (after the technical spike validates the approach).
+The interface itself is not mocked up here. It lives in
+[`app/lib/ui/`](../app/lib/ui/), and the widget tests under
+[`app/test/`](../app/test/) are what pin how it behaves.
