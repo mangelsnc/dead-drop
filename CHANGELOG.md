@@ -539,7 +539,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- Plan de proyecto y registro de riesgos (COO)
+- Plan de proyecto y registro de riesgos
 - Propuesta de valor y narrativa para el jurado
 - README público v1 — qué es, instalación en 3 pasos, primer uso
 - Guía de uso paso a paso para personas no técnicas
