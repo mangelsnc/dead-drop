@@ -157,13 +157,17 @@ Deleting a vault is a different act from self-destruct, with a different promise
 ## Build verifiability
 
 - **Reproducible builds:** the binary published in Releases can be regenerated from the source code and the pinned toolchain (pinned versions), obtaining a byte-for-byte identical result. Instructions in each release.
-- **SHA-256 checksums** published with each binary, signed with the project key.
+- **SHA-256 checksums** published with each binary, as a `.sha256` file per
+  artefact and a combined `SHA256SUMS.txt`. They are produced by the public
+  CI run that built the artefact, not signed with a maintainer key: what
+  vouches for them is the build log, which anyone can read.
 - **Public CI** on GitHub Actions: anyone can inspect how each artefact was built.
 - **MIT licence**, public repo from the MVP's first commit: permanent open audit.
 
 ## Vulnerability reporting
 
-If you find a security issue, **do not open a public issue**. Contact us through the channel listed in `SECURITY.md` (to be published with the first release) and we will follow a coordinated disclosure process.
+If you find a security issue, **do not open a public issue**. The reporting
+channels and what to expect are in [SECURITY.md](../SECURITY.md).
 
 ---
 
