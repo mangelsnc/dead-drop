@@ -107,6 +107,17 @@ More answers in [docs/faq.md](docs/faq.md).
 
 ---
 
+## Challenge categories
+
+DeadDrop is entered in the **#cryptograFREE** challenge (RootedCON + Criptored) under these categories:
+
+| Category | What DeadDrop does in it |
+|---|---|
+| **Encryption** | Ephemeral X25519 key agreement per transfer, XSalsa20-Poly1305 AEAD per chunk, Ed25519-signed session header, BLAKE2b file integrity, Argon2id for the vault. No cryptography of our own: audited primitives, pinned against published vectors (RFC 7748, RFC 8032, RFC 7693, and libsodium's own for Argon2id) |
+| **Identity** | A long-lived Ed25519 device identity in the OS keychain. The sender signs the session, the receiver verifies it, and seen keys are pinned TOFU so a later change is detected. The fingerprint is shown as readable words so it can be compared aloud |
+| **Local machine** | The vault is an encrypted file tree on the device: one AEAD-sealed file per entry, with file names encrypted rather than stored in the clear |
+| **Evasion and concealment** | Concealment against direct coercion rather than against network censorship: the decoy passphrase opens a second, independently-keyed environment, and unlocking always costs the same two Argon2id derivations whether the passphrase is the real one, the decoy, or wrong — a stopwatch cannot tell them apart ([the test that measures it](app/test/vault/timing_test.dart)) |
+
 ## Project status
 
 DeadDrop is in active development for the **#cryptograFREE** challenge (RootedCON + Criptored). This repository has been public since day one and will remain so forever.
