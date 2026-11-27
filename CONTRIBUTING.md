@@ -11,7 +11,7 @@ Thanks for wanting to help. DeadDrop is a free software project (MIT) built for 
 - **Translation:** the base documentation is in English and Spanish. More languages are welcome.
 - **Design and UX:** mockups, icons, clearer flows.
 - **Code:** Dart/Flutter in the app, GitHub Actions in the CI.
-- **Security review:** auditing the code is one of the best ways to help. For vulnerabilities, **do not use public issues** — see `SECURITY.md` when available.
+- **Security review:** auditing the code is one of the best ways to help. For vulnerabilities, **do not use public issues** — see [SECURITY.md](SECURITY.md).
 
 ## Project principles (read them before proposing)
 
