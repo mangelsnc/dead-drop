@@ -5,6 +5,14 @@ All notable changes to DeadDrop are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] — 2026-11-27
+
+### Documentation
+
+- Publish the security policy three documents already pointed at
+- Make the repository say what is actually true of the code
+- Link the security policy from the README documentation table
+
 ## [1.5.4] — 2026-11-27
 
 ### Documentation
